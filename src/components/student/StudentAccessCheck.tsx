@@ -20,7 +20,7 @@ export const StudentAccessCheck: React.FC = () => {
   }, [currentStudent, setActiveStudentStep]);
 
   return (
-    <div className="min-h-[70vh] flex flex-col items-center justify-center text-center p-6">
+    <div className="relative flex flex-col items-center justify-start overflow-visible px-4 pt-3 pb-6 text-center sm:px-6 sm:pt-4">
       <div className="w-16 h-16 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 mb-6 shadow-sm">
         <Loader2 className="w-8 h-8 animate-spin" />
       </div>

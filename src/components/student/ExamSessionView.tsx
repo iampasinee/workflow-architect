@@ -20,9 +20,13 @@ import {
   Eye,
   RefreshCw,
   Sparkles,
+  CalendarDays,
+  Timer,
+  MapPin,
 } from 'lucide-react';
 import { Badge } from '../common/Badge';
 import { Modal } from '../common/Modal';
+import { StudentExamProgressStepper } from './StudentExamProgressStepper';
 import { formatFileSize } from '../../utils/fileSize';
 import { StagedUploadRecord, StagedUploadStatus } from '../../types/stagedUpload';
 import {
@@ -31,6 +35,32 @@ import {
   reserveUploadSequences,
   saveStagedUpload,
 } from '../../services/stagedUploadStorage';
+
+const thaiExamCopy: Record<string, { instructions: string; rules: Record<string, string> }> = {
+  exam_0001: {
+    instructions: 'ส่งไฟล์ .zip หนึ่งไฟล์ที่รวมไฟล์คำตอบและกรณีทดสอบทั้งหมด หรือส่งไฟล์ซอร์สโค้ด .py แยกสำหรับส่วน A โดยจำเป็นต้องบีบอัดเป็น .zip เฉพาะกรณีที่ต้องส่งหลายไฟล์',
+    rules: {
+      r1: 'ห้ามเข้าถึงเว็บไซต์อื่นนอกเหนือจากที่อาจารย์ผู้สอนอนุญาตไว้อย่างชัดเจน',
+      r2: 'ห้ามใช้บัญชีหรือเครื่องคอมพิวเตอร์ของผู้อื่นเพื่อเข้าสู่ระบบหรือส่งข้อสอบ',
+      r3: 'ห้ามสื่อสารกับผู้อื่นทั้งภายในและภายนอกห้องปฏิบัติการระหว่างการสอบ',
+      r4: 'ตรวจสอบว่าไฟล์ไม่ว่างเปล่าและสามารถเปิดอ่านได้ก่อนส่งขั้นสุดท้าย',
+      r5: 'อนุญาตให้ใช้เฉพาะอุปกรณ์ต่อพ่วงมาตรฐานของห้องปฏิบัติการ',
+    },
+  },
+  exam_0002: {
+    instructions: 'อัปโหลดแพตช์ Kernel Module และสคริปต์สำหรับ Build โดยรวมเป็นไฟล์ .zip',
+    rules: {
+      r1: 'เป็นการสอบแบบปิดหนังสืออย่างเคร่งครัด และห้ามใช้อุปกรณ์จัดเก็บข้อมูลภายนอก',
+      r2: 'การเข้าสู่ระบบซ้ำหรือการตรวจจับข้อมูลบนเครือข่ายจะทำให้ผลสอบเป็นโมฆะทันที',
+    },
+  },
+  exam_0003: {
+    instructions: 'ส่งไฟล์โค้ดภาษา Assembly นามสกุล .asm หรือส่งโครงการที่บีบอัดเป็นไฟล์ .zip',
+    rules: {
+      r1: 'ปฏิบัติตามคำแนะนำของอาจารย์ผู้คุมสอบทุกประการ',
+    },
+  },
+};
 
 export const ExamSessionView: React.FC = () => {
   const {
@@ -87,6 +117,7 @@ export const ExamSessionView: React.FC = () => {
     return 'upload';
   });
   const isThai = language === 'th';
+  const localizedThaiExamCopy = activeExam ? thaiExamCopy[activeExam.id] : undefined;
 
   // Countdown timer simulation
   // Default: calculate remaining seconds from 120 mins + adjustedMinutes
@@ -593,10 +624,10 @@ export const ExamSessionView: React.FC = () => {
   };
 
   const getStagedStatusClass = (status: StagedUploadStatus) => {
-    if (status === 'ready' || status === 'submitted') {
-      return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    if (status === 'submitted') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    if (status === 'ready' || status === 'uploading') {
+      return 'bg-blue-50 text-blue-700 border-blue-200';
     }
-    if (status === 'uploading') return 'bg-blue-50 text-blue-700 border-blue-200';
     return 'bg-red-50 text-red-700 border-red-200';
   };
 
@@ -694,10 +725,64 @@ export const ExamSessionView: React.FC = () => {
     if (graceTimerRef.current) window.clearTimeout(graceTimerRef.current);
   }, []);
 
+  const examStartHour = Number(activeExam?.startTime.split(':')[0] || 0);
+  const sessionPeriodLabel = examStartHour < 12
+    ? (isThai ? 'รอบเช้า' : 'Morning Session')
+    : examStartHour < 17
+    ? (isThai ? 'รอบบ่าย' : 'Afternoon Session')
+    : (isThai ? 'รอบเย็น' : 'Evening Session');
+  const examSessionTitle = isThai
+    ? `การสอบภาคปฏิบัติ ${course?.courseCode || ''}`.trim()
+    : `${course?.courseCode || ''} Practical Examination`.trim();
+  const exampleNameParts = (currentStudent?.fullName || '').trim().split(/\s+/);
+  const exampleFirstName = normalizeFilenamePart(
+    currentStudent?.firstName || exampleNameParts[0] || ''
+  );
+  const exampleLastName = normalizeFilenamePart(
+    currentStudent?.lastName || exampleNameParts.slice(1).join(' ') || ''
+  );
+  const exampleExtension = (
+    activeExam?.fileRequirements.acceptedExtensions.find((extension) => extension !== '.zip') ||
+    activeExam?.fileRequirements.acceptedExtensions[0] ||
+    '.py'
+  ).replace(/^\./, '');
+  const exampleSubmissionName = (
+    activeExam?.fileRequirements.automaticFilenamePattern ||
+    '{studentId}_{firstName}_{lastName}_{uploadSequence}.{extension}'
+  ).replace(
+    /\{(studentId|firstName|lastName|uploadSequence|extension)\}/g,
+    (_, token: string) => ({
+      studentId: currentStudent?.studentCode || 'student',
+      firstName: exampleFirstName,
+      lastName: exampleLastName,
+      uploadSequence: '1',
+      extension: exampleExtension,
+    })[token]
+  );
+  const progressAllCompleted = sessionStep === 'success';
+  const progressErrorStep = timeoutStatus === 'no_files' ? 4 : undefined;
+  const progressCurrentStep = progressAllCompleted
+    ? 4
+    : progressErrorStep || showConfirmModal || sessionStep === 'checking' || timeoutStatus === 'processing'
+    ? 4
+    : 3;
+  const progressStatusMessage = timeoutStatus === 'processing'
+    ? (isThai
+      ? 'กำลังส่งไฟล์ที่เตรียมไว้โดยอัตโนมัติ'
+      : 'Automatically submitting your prepared files')
+    : timeoutStatus === 'no_files'
+    ? (isThai
+      ? 'ไม่พบไฟล์ที่พร้อมส่ง กรุณาติดต่ออาจารย์ผู้คุมสอบ'
+      : 'No files are ready for submission. Please contact the exam proctor.')
+    : sessionStep === 'checking'
+    ? (isThai ? 'กำลังตรวจสอบความสมบูรณ์ของไฟล์' : 'Verifying file integrity')
+    : undefined;
+
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 flex flex-col justify-between">
-      {/* ST4 / FOCUS MODE HEADER BAR */}
-      <header className="bg-white border-b border-gray-200 px-6 py-3.5 sticky top-0 z-30 shadow-xs">
+    <div className="flex min-h-screen flex-col justify-between overflow-visible bg-gray-50 text-gray-900">
+      <div className="sticky top-0 z-50 w-full bg-white shadow-sm">
+        {/* ST4 / FOCUS MODE HEADER BAR */}
+        <header className="relative z-10 bg-white border-b border-gray-200 px-6 py-3.5">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
           {/* Left: Station & Student */}
           <div className="flex items-center gap-3">
@@ -774,13 +859,21 @@ export const ExamSessionView: React.FC = () => {
             </button>
           </div>
         </div>
-      </header>
+        </header>
+
+        <StudentExamProgressStepper
+          currentStep={progressCurrentStep}
+          allCompleted={progressAllCompleted}
+          errorStep={progressErrorStep}
+          statusMessage={progressStatusMessage}
+        />
+      </div>
 
       {/* MAIN EXAM WORKSPACE */}
-      <main className="max-w-5xl mx-auto w-full px-4 py-8 flex-1">
+      <main className="relative z-[1] mx-auto w-full max-w-7xl flex-1 overflow-visible px-4 pt-3 pb-8 sm:pt-4">
         {/* Expired warning banner */}
         {isTimeExpired && sessionStep !== 'success' && (
-          <div className="mb-6 p-4 rounded-2xl bg-red-50 border border-red-200 text-red-800 flex items-start gap-3 animate-in fade-in">
+          <div className="mb-6 flex scroll-mt-[176px] items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-red-800 animate-in fade-in">
             <AlertCircle className="w-6 h-6 text-red-500 shrink-0 mt-0.5" />
             <div>
               <h3 className="text-sm font-bold text-red-900">
@@ -803,9 +896,9 @@ export const ExamSessionView: React.FC = () => {
 
         {/* STEP 1: Upload Workspace (ST4 & ST5) */}
         {sessionStep === 'upload' && (
-          <div className="space-y-6">
+          <div className="scroll-mt-[176px] space-y-6">
             {!canUpload && (
-              <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 flex items-start gap-3">
+              <div className="flex scroll-mt-[176px] items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-800">
                 <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
                 <div>
                   <h3 className="text-sm font-bold text-amber-900">
@@ -816,259 +909,363 @@ export const ExamSessionView: React.FC = () => {
               </div>
             )}
 
-            {/* File Preparation Guide Card */}
-            <section className="bg-white border border-gray-200 rounded-2xl p-6 shadow-xs text-left">
-              <div className="flex items-center justify-between pb-3 border-b border-gray-100">
-                <div className="flex items-center gap-2">
-                  <HardDrive className="w-5 h-5 text-blue-600" />
-                  <h2 className="text-base font-bold text-gray-900">
-                    {isThai ? 'คู่มือการเตรียมและส่งไฟล์ข้อสอบ (ขั้นตอน ST5)' : 'Exam Answer File Submission Guide (ST5)'}
-                  </h2>
+            {/* Desktop: rules at left, complete upload workflow at right */}
+            <div className="grid grid-cols-1 lg:grid-cols-[minmax(340px,38%)_minmax(0,1fr)] gap-4 items-start">
+              {/* File Preparation Guide Card */}
+              <section className="scroll-mt-[176px] bg-white border border-gray-200 rounded-2xl p-6 shadow-xs text-left">
+                <header className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-gray-100">
+                  <div className="flex items-center gap-2">
+                    <HardDrive className="w-5 h-5 text-blue-600" />
+                    <h2 className="text-base font-bold text-gray-900">
+                      {isThai ? 'ข้อกำหนดและกติกาการส่งไฟล์ข้อสอบ' : 'Exam File Submission Requirements & Rules'}
+                    </h2>
+                  </div>
+                  <Badge variant="neutral" size="sm">
+                    {isThai ? `เครื่องสอบที่นั่ง ${seatNo}` : `Workstation ${seatNo}`}
+                  </Badge>
+                </header>
+
+                {/* Course header */}
+                <div className="py-4 border-b border-gray-100">
+                  <div className="mb-2.5 flex flex-wrap items-center gap-2">
+                    <Badge variant="default" size="sm">{course?.courseCode || '-'}</Badge>
+                    <Badge variant="warning" size="sm">{sessionPeriodLabel}</Badge>
+                  </div>
+                  <h3 className="text-lg font-bold text-gray-900 leading-snug">{examSessionTitle}</h3>
+                  <p className="mt-1 text-xs text-gray-500">{course?.courseName || '-'}</p>
                 </div>
-                <Badge variant="neutral" size="sm">
-                  {isThai ? `เครื่องสอบที่นั่ง ${seatNo}` : `Workstation ${seatNo}`}
-                </Badge>
-              </div>
 
-              <div className="mt-3 text-xs text-gray-600 leading-relaxed space-y-2">
-                <p>
-                  <strong className="text-gray-900">{isThai ? 'ประเภทไฟล์ที่รองรับ:' : 'Accepted File Types:'}</strong>{' '}
-                  <span className="font-mono text-blue-600 font-semibold">
-                    {activeExam?.fileRequirements.acceptedExtensions.join(', ')}
-                  </span>
-                  {isThai ? (
-                    <>
-                      . ไฟล์ <code className="bg-gray-100 px-1.5 py-0.5 rounded text-amber-700 font-semibold">.zip</code> เป็นไฟล์บีบอัดสำหรับการส่งหลายไฟล์หรือโฟลเดอร์โครงการ ส่วนไฟล์{' '}
-                      <code className="bg-gray-100 px-1.5 py-0.5 rounded text-emerald-700 font-semibold">.py</code> สามารถส่งได้โดยตรงโดยไม่ต้องบีบอัด
-                    </>
-                  ) : (
-                    <>
-                      . A <code className="bg-gray-100 px-1.5 py-0.5 rounded text-amber-700 font-semibold">.zip</code> file is a compressed archive required for multiple files or asset directories. Standalone{' '}
-                      <code className="bg-gray-100 px-1.5 py-0.5 rounded text-emerald-700 font-semibold">.py</code> source files are accepted directly and do not require compression.
-                    </>
-                  )}
-                </p>
-                <p className="text-gray-500">
-                  {isThai ? 'รูปแบบชื่อไฟล์ที่แนะนำ: ' : 'Naming recommendation: '}
-                  <code className="text-gray-700 font-medium">{currentStudent?.studentCode}_final.zip</code>{' '}
-                  {isThai ? 'หรือ' : 'or'}{' '}
-                  <code className="text-gray-700 font-medium">{currentStudent?.studentCode}_task1.py</code>.
-                  {isThai ? ' ขนาดไฟล์สูงสุดที่อนุญาตคือ ' : ' Maximum allowed file size is '}
-                  <strong className="text-gray-900">{activeExam?.fileRequirements.maxSizeMb} MB</strong>.
-                </p>
-              </div>
-
-              {/* Quick simulation helper buttons */}
-              <div className="mt-4 pt-3 border-t border-gray-100 flex flex-wrap items-center gap-2">
-                <span className="text-[11px] text-gray-500">
-                  {isThai ? 'ปุ่มทดสอบจำลอง:' : 'Quick Test Generators:'}
-                </span>
-                <button
-                  type="button"
-                  onClick={addSimulatedPyFile}
-                  disabled={!canUpload}
-                  className="px-2.5 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-[11px] text-gray-700 border border-gray-200 flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <FileCode className="w-3 h-3 text-emerald-600" />
-                  <span>{isThai ? 'จำลองส่งไฟล์ .py' : 'Stage .py Solution File'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={addSimulatedCorruptFile}
-                  disabled={!canUpload}
-                  className="px-2.5 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-[11px] text-gray-700 border border-gray-200 flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <AlertTriangle className="w-3 h-3 text-amber-600" />
-                  <span>{isThai ? 'จำลองไฟล์ 0KB ว่างเปล่า (ทดสอบ Error)' : 'Stage 0KB Empty File (Test Error State)'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={addSimulatedFailedUpload}
-                  disabled={!canUpload}
-                  className="px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-[11px] text-red-700 border border-red-200 flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <AlertCircle className="w-3 h-3" />
-                  <span>{isThai ? 'จำลองอัปโหลดล้มเหลว' : 'Simulate Upload Failure'}</span>
-                </button>
-              </div>
-            </section>
-
-            {/* Drag & Drop Zone */}
-            <div
-              onDragOver={(e) => {
-                e.preventDefault();
-                if (canUpload) setDragActive(true);
-              }}
-              onDragLeave={() => setDragActive(false)}
-              onDrop={handleDrop}
-              onClick={() => canUpload ? fileInputRef.current?.click() : notifyUploadLocked()}
-              className={`p-8 rounded-2xl border-2 border-dashed transition-all text-center cursor-pointer ${
-                !canUpload
-                  ? 'border-gray-200 bg-gray-100/60 opacity-60 cursor-not-allowed'
-                  : dragActive
-                  ? 'border-blue-500 bg-blue-50/60 scale-101 shadow-md'
-                  : 'border-gray-300 bg-white hover:bg-gray-50/80 hover:border-gray-400 shadow-xs'
-              }`}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept={(activeExam?.fileRequirements.acceptedExtensions || ['.zip', '.py']).join(',')}
-                onClick={(event) => event.stopPropagation()}
-                onChange={handleManualFileSelect}
-                className="hidden"
-                disabled={!canUpload}
-              />
-              <UploadCloud className="w-12 h-12 mx-auto text-blue-500 mb-3" />
-              <div className="text-sm font-semibold text-gray-900">
-                {isThai ? 'ลากไฟล์คำตอบมาวางที่นี่ หรือคลิกเพื่อเลือกไฟล์' : 'Drag & drop answer files here, or click to browse'}
-              </div>
-              <div className="text-xs text-gray-500 mt-1">
-                {isThai ? 'นามสกุลที่ยอมรับ: ' : 'Accepted extensions: '}
-                <span className="font-mono text-gray-700 font-medium">
-                  {(activeExam?.fileRequirements.acceptedExtensions || ['.zip', '.py']).join(', ')}
-                </span> • {isThai ? 'ไม่เกิน ' : 'Max '}
-                {activeExam?.fileRequirements.maxSizeMb} MB
-              </div>
-            </div>
-
-            {/* Staged File List Table */}
-            <section className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-xs text-left">
-              <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
-                <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-                  <FileCheck className="w-4 h-4 text-emerald-600" />
-                  <span>
-                    {isThai ? `ไฟล์ที่เตรียมส่ง (${stagedFiles.length})` : `Files Prepared for Submission (${stagedFiles.length})`}
-                  </span>
-                </h3>
-                <span className="text-xs text-gray-500">
-                  {isThai ? 'ยังไม่ส่งจนกว่าจะกดเสร็จสิ้นการสอบ' : 'Not submitted until you finish the exam'}
-                </span>
-              </div>
-
-              {!stagingLoaded ? (
-                <div className="p-8 text-center text-gray-400 text-xs">
-                  {isThai ? 'กำลังโหลดไฟล์ชั่วคราว...' : 'Loading staged files...'}
+                {/* Exam information grid */}
+                <div className="grid grid-cols-2 gap-2 py-4">
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                    <div className="flex items-center gap-1.5 text-[10px] font-medium text-gray-500">
+                      <CalendarDays className="h-3.5 w-3.5 text-blue-600" />
+                      <span>{isThai ? 'วันที่สอบ' : 'Exam Date'}</span>
+                    </div>
+                    <div className="mt-1 text-xs font-bold text-gray-900">{activeExam?.examDate || '-'}</div>
+                  </div>
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                    <div className="flex items-center gap-1.5 text-[10px] font-medium text-gray-500">
+                      <Clock className="h-3.5 w-3.5 text-blue-600" />
+                      <span>{isThai ? 'เวลาสอบ' : 'Exam Time'}</span>
+                    </div>
+                    <div className="mt-1 text-xs font-bold text-gray-900">
+                      {activeExam ? `${activeExam.startTime}–${activeExam.endTime}${isThai ? ' น.' : ''}` : '-'}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                    <div className="flex items-center gap-1.5 text-[10px] font-medium text-gray-500">
+                      <Timer className="h-3.5 w-3.5 text-blue-600" />
+                      <span>{isThai ? 'ระยะเวลา' : 'Duration'}</span>
+                    </div>
+                    <div className="mt-1 text-xs font-bold text-gray-900">
+                      {activeExam ? `${activeExam.durationMinutes}${isThai ? ' นาที' : ' minutes'}` : '-'}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                    <div className="flex items-center gap-1.5 text-[10px] font-medium text-gray-500">
+                      <MapPin className="h-3.5 w-3.5 text-blue-600" />
+                      <span>{isThai ? 'ห้องสอบ' : 'Exam Room'}</span>
+                    </div>
+                    <div className="mt-1 text-xs font-bold text-gray-900">{room?.labName || '-'}</div>
+                  </div>
                 </div>
-              ) : stagedFiles.length === 0 ? (
-                <div className="p-8 text-center text-gray-400 text-xs">
-                  {isThai ? 'ยังไม่มีไฟล์ฉบับร่าง กรุณาอัปโหลดไฟล์คำตอบของคุณ' : 'No draft files yet. Upload your answers above.'}
-                </div>
-              ) : (
-                <div className="divide-y divide-gray-100">
-                  {stagedFiles.map((file) => (
-                    <div
-                      key={file.uploadId}
-                      className="px-6 py-3.5 flex items-center justify-between gap-4 hover:bg-gray-50/80 transition-colors"
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div
-                          className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-                            file.extension === '.zip'
-                              ? 'bg-amber-50 text-amber-600 border border-amber-200'
-                              : 'bg-emerald-50 text-emerald-600 border border-emerald-200'
-                          }`}
-                        >
-                          {file.extension === '.zip' ? (
-                            <FileArchive className="w-5 h-5" />
-                          ) : (
-                            <FileCode className="w-5 h-5" />
-                          )}
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-xs font-semibold text-gray-900 truncate font-mono">
-                            {file.submissionName}
-                          </div>
-                          <div className="text-[11px] text-gray-500 flex items-center gap-2">
-                            <span>{formatFileSize(file.sizeBytes)}</span>
-                            <span>•</span>
-                            <span className="uppercase">{file.extension.replace('.', '')}</span>
-                            <span>•</span>
-                            <span>
-                              {isThai ? 'อัปเดต ' : 'Updated '}
-                              {new Date(file.lastUpdated).toLocaleTimeString()}
-                            </span>
-                          </div>
-                          <div className="mt-2 h-1.5 w-full max-w-sm overflow-hidden rounded-full bg-gray-100">
-                            <div
-                              className={`h-full transition-all duration-300 ${file.status === 'failed' || file.status === 'invalid' ? 'bg-red-500' : 'bg-blue-600'}`}
-                              style={{ width: `${file.progress}%` }}
-                            />
-                          </div>
-                          {file.errorReason && (
-                            <div className="text-[11px] text-red-600 mt-0.5 flex items-center gap-1">
-                              <AlertCircle className="w-3 h-3 shrink-0" />
-                              <span>{file.errorReason}</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
 
-                      <div className="flex items-center gap-3 shrink-0">
-                        <span className={`text-xs font-medium border px-2.5 py-1 rounded-full flex items-center gap-1 ${getStagedStatusClass(file.status)}`}>
-                          {file.status === 'ready' || file.status === 'submitted' ? (
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                          ) : file.status === 'uploading' ? (
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            <AlertCircle className="w-3.5 h-3.5" />
-                          )}
-                          <span>{getStagedStatusLabel(file.status)}</span>
-                        </span>
-
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => openRenameDialog(file)}
-                            disabled={!canUpload || file.status === 'submitted'}
-                            className="px-2.5 py-1.5 rounded-lg text-xs text-blue-700 hover:bg-blue-50 border border-blue-200 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
-                            title={isThai ? 'เปลี่ยนชื่อ' : 'Rename'}
+                {/* File requirements */}
+                <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-4">
+                  <h4 className="flex items-center gap-2 text-sm font-bold text-blue-950">
+                    <FileCheck className="h-4 w-4 text-blue-600" />
+                    {isThai ? 'ข้อกำหนดไฟล์ข้อสอบ' : 'Exam File Requirements'}
+                  </h4>
+                  <div className="mt-3 space-y-2.5 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-blue-800/70">{isThai ? 'ประเภทไฟล์ที่รองรับ' : 'Allowed file types'}</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(activeExam?.fileRequirements.acceptedExtensions || []).map((extension) => (
+                          <span
+                            key={extension}
+                            className="rounded-md border border-blue-200 bg-white px-2 py-0.5 font-mono font-bold text-blue-700"
                           >
-                            <Pencil className="w-3.5 h-3.5" />
-                            <span>{isThai ? 'เปลี่ยนชื่อ' : 'Rename'}</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveFile(file.uploadId)}
-                            disabled={!canUpload || file.status === 'submitted'}
-                            className="px-2.5 py-1.5 rounded-lg text-xs text-red-700 hover:bg-red-50 border border-red-200 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            <span>{isThai ? 'ลบ' : 'Remove'}</span>
-                          </button>
-                        </div>
+                            {extension}
+                          </span>
+                        ))}
                       </div>
                     </div>
-                  ))}
+                    <div className="flex items-center justify-between gap-3 border-t border-blue-200/70 pt-2.5">
+                      <span className="text-blue-800/70">{isThai ? 'ขนาดไฟล์สูงสุด' : 'Maximum file size'}</span>
+                      <strong className="text-blue-950">
+                        {activeExam?.fileRequirements.maxSizeMb} MB{isThai ? ' ต่อไฟล์' : ' per file'}
+                      </strong>
+                    </div>
+                    <div className="border-t border-blue-200/70 pt-2.5">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <span className="text-blue-800/70">{isThai ? 'รูปแบบชื่อไฟล์' : 'Filename format'}</span>
+                        <strong className="text-blue-950">
+                          {isThai ? 'ระบบตั้งชื่อให้อัตโนมัติ' : 'Generated automatically'}
+                        </strong>
+                      </div>
+                      <code className="mt-2 block break-all rounded-lg border border-blue-100 bg-white/80 px-2.5 py-2 text-[11px] font-semibold text-blue-800">
+                        {exampleSubmissionName}
+                      </code>
+                      <p className="mt-2 text-[11px] text-blue-700">
+                        {isThai
+                          ? 'สามารถเปลี่ยนชื่อไฟล์ได้ก่อนยืนยันการส่งขั้นสุดท้าย'
+                          : 'You can rename the file before confirming final submission.'}
+                      </p>
+                    </div>
+                  </div>
                 </div>
-              )}
 
-              {/* Submit Action Bar */}
-              <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-3">
-                <span className="text-xs text-gray-500">
-                  {readyFiles.length >= requiredFileCount && !hasBlockingFiles
-                    ? (isThai ? 'ไฟล์ทั้งหมดพร้อมสำหรับการส่งขั้นสุดท้าย' : 'All files are uploaded and ready for final submission.')
-                    : (isThai ? `ต้องมีไฟล์พร้อมส่งอย่างน้อย ${requiredFileCount} ไฟล์ และไม่มีไฟล์ที่กำลังอัปโหลดหรือมีข้อผิดพลาด` : `Prepare at least ${requiredFileCount} ready file${requiredFileCount === 1 ? '' : 's'} and resolve all uploading, invalid, or failed files.`)}
-                </span>
+                {/* Exam rules */}
+                <div className="mt-4 space-y-3">
+                  <section className="rounded-xl border border-gray-200 bg-gray-50 p-3.5">
+                    <h4 className="text-xs font-bold text-gray-900">
+                      {isThai ? 'กติกาการสอบ' : 'Exam Rules'}
+                    </h4>
+                    <ol className="mt-2 list-decimal space-y-1.5 pl-4 text-xs leading-relaxed text-gray-600">
+                    {activeExam?.rules.map((rule) => (
+                      <li key={rule.id} className="pl-1">
+                        {isThai ? localizedThaiExamCopy?.rules[rule.id] || rule.text : rule.text}
+                      </li>
+                    ))}
+                    </ol>
+                  </section>
+                </div>
 
-                <button
-                  type="button"
-                  disabled={!canFinishExam}
-                  onClick={() => setShowConfirmModal(true)}
-                  className="w-full sm:w-auto px-8 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-md shadow-blue-600/20 transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                {/* Development test controls */}
+                <hr className="my-4 border-gray-200" />
+                <section>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h4 className="text-xs font-bold text-gray-900">
+                      {isThai ? 'เครื่องมือทดสอบระบบ' : 'System Test Controls'}
+                    </h4>
+                    <Badge variant="purple" size="sm">
+                      {isThai ? 'โหมดทดสอบ' : 'Test Mode'}
+                    </Badge>
+                  </div>
+                  <p className="mt-1 text-[11px] text-gray-500">
+                    {isThai
+                      ? 'ใช้สำหรับจำลองสถานะไฟล์และตรวจสอบการทำงานของระบบ'
+                      : 'Simulate file states and verify system behavior.'}
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={addSimulatedPyFile}
+                      disabled={!canUpload}
+                      className="px-2.5 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-[11px] text-gray-700 border border-gray-200 flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <FileCode className="w-3 h-3 text-emerald-600" />
+                      <span>{isThai ? 'จำลองอัปโหลดไฟล์ .py' : 'Stage .py Solution File'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={addSimulatedCorruptFile}
+                      disabled={!canUpload}
+                      className="px-2.5 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-[11px] text-gray-700 border border-gray-200 flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <AlertTriangle className="w-3 h-3 text-amber-600" />
+                      <span>{isThai ? 'จำลองไฟล์ว่าง 0 Bytes' : 'Stage 0-Byte Empty File'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={addSimulatedFailedUpload}
+                      disabled={!canUpload}
+                      className="px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-[11px] text-red-700 border border-red-200 flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <AlertCircle className="w-3 h-3" />
+                      <span>{isThai ? 'จำลองอัปโหลดล้มเหลว' : 'Simulate Upload Failure'}</span>
+                    </button>
+                  </div>
+                </section>
+              </section>
+
+              <div className="flex min-w-0 flex-col gap-4">
+                {/* Drag & Drop Zone */}
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    if (canUpload) setDragActive(true);
+                  }}
+                  onDragLeave={() => setDragActive(false)}
+                  onDrop={handleDrop}
+                  onClick={() => canUpload ? fileInputRef.current?.click() : notifyUploadLocked()}
+                  className={`min-h-[200px] max-h-[240px] scroll-mt-[176px] p-6 rounded-2xl border-2 border-dashed transition-all text-center cursor-pointer flex flex-col items-center justify-center ${
+                    !canUpload
+                      ? 'border-gray-200 bg-gray-100/60 opacity-60 cursor-not-allowed'
+                      : dragActive
+                      ? 'border-blue-500 bg-blue-50/60 scale-101 shadow-md'
+                      : 'border-gray-300 bg-white hover:bg-gray-50/80 hover:border-gray-400 shadow-xs'
+                  }`}
                 >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>{isThai ? 'เสร็จสิ้นการสอบและส่งไฟล์' : 'Finish Exam and Submit Files'}</span>
-                </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept={(activeExam?.fileRequirements.acceptedExtensions || ['.zip', '.py']).join(',')}
+                    onClick={(event) => event.stopPropagation()}
+                    onChange={handleManualFileSelect}
+                    className="hidden"
+                    disabled={!canUpload}
+                  />
+                  <UploadCloud className="w-12 h-12 mx-auto text-blue-500 mb-3" />
+                  <div className="text-sm font-semibold text-gray-900">
+                    {isThai ? 'ลากและวางไฟล์ที่นี่ หรือคลิกเพื่อเลือกไฟล์' : 'Drag & drop answer files here, or click to browse'}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    {isThai ? 'นามสกุลที่รองรับ: ' : 'Accepted extensions: '}
+                    <span className="font-mono text-gray-700 font-medium">
+                      {(activeExam?.fileRequirements.acceptedExtensions || ['.zip', '.py']).join(', ')}
+                    </span> • {isThai ? 'ขนาดสูงสุด ' : 'Max '}
+                    {activeExam?.fileRequirements.maxSizeMb} MB{isThai ? ' ต่อไฟล์' : ' per file'}
+                  </div>
+                </div>
+
+                {/* Staged File List Table */}
+                <section className="min-w-0 scroll-mt-[176px] overflow-hidden bg-white border border-gray-200 rounded-2xl shadow-xs text-left">
+                  <div className="px-6 py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3">
+                    <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                      <FileCheck className="w-4 h-4 text-blue-600" />
+                      <span>
+                        {isThai ? `ไฟล์ที่เตรียมส่ง (${stagedFiles.length})` : `Files Prepared for Submission (${stagedFiles.length})`}
+                      </span>
+                    </h3>
+                    <span className="text-xs text-gray-500">
+                      {isThai ? 'ยังไม่ส่งจนกว่าจะกดเสร็จสิ้นการสอบ' : 'Not submitted until you finish the exam'}
+                    </span>
+                  </div>
+
+                  {!stagingLoaded ? (
+                    <div className="p-8 text-center text-gray-400 text-xs">
+                      {isThai ? 'กำลังโหลดไฟล์ชั่วคราว...' : 'Loading staged files...'}
+                    </div>
+                  ) : stagedFiles.length === 0 ? (
+                    <div className="p-8 text-center text-gray-400 text-xs">
+                      {isThai ? 'ยังไม่มีไฟล์ที่เตรียมส่ง กรุณาเลือกไฟล์ด้านบน' : 'No prepared files yet. Select files above.'}
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-gray-100">
+                      {stagedFiles.map((file) => (
+                        <div
+                          key={file.uploadId}
+                          className="px-6 py-3.5 flex flex-wrap items-center justify-between gap-4 hover:bg-gray-50/80 transition-colors"
+                        >
+                          <div className="flex min-w-0 flex-1 basis-[280px] items-center gap-3">
+                            <div
+                              className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                                file.extension === '.zip'
+                                  ? 'bg-amber-50 text-amber-600 border border-amber-200'
+                                  : 'bg-emerald-50 text-emerald-600 border border-emerald-200'
+                              }`}
+                            >
+                              {file.extension === '.zip' ? (
+                                <FileArchive className="w-5 h-5" />
+                              ) : (
+                                <FileCode className="w-5 h-5" />
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="text-[10px] text-gray-500">
+                                {isThai ? 'ชื่อไฟล์สำหรับส่ง' : 'Submission filename'}
+                              </div>
+                              <div className="text-xs font-semibold text-gray-900 truncate font-mono">
+                                {file.submissionName}
+                              </div>
+                              <div className="mt-0.5 truncate text-[10px] text-gray-400">
+                                {isThai ? 'ชื่อไฟล์ต้นฉบับ: ' : 'Original filename: '}
+                                <span className="font-mono">{file.originalName}</span>
+                              </div>
+                              <div className="text-[11px] text-gray-500 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                <span>{formatFileSize(file.sizeBytes)}</span>
+                                <span>•</span>
+                                <span className="uppercase">{file.extension.replace('.', '')}</span>
+                                <span>•</span>
+                                <span>
+                                  {isThai ? 'อัปเดต ' : 'Updated '}
+                                  {new Date(file.lastUpdated).toLocaleTimeString()}
+                                </span>
+                              </div>
+                              <div className="mt-2 h-1.5 w-full max-w-sm overflow-hidden rounded-full bg-gray-100">
+                                <div
+                                  className={`h-full transition-all duration-300 ${file.status === 'failed' || file.status === 'invalid' ? 'bg-red-500' : 'bg-blue-600'}`}
+                                  style={{ width: `${file.progress}%` }}
+                                />
+                              </div>
+                              {file.errorReason && (
+                                <div className="text-[11px] text-red-600 mt-0.5 flex items-center gap-1">
+                                  <AlertCircle className="w-3 h-3 shrink-0" />
+                                  <span>{file.errorReason}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex max-w-full flex-wrap items-center gap-2">
+                            <span className={`max-w-full text-xs font-medium border px-2.5 py-1 rounded-full flex items-center gap-1 ${getStagedStatusClass(file.status)}`}>
+                              {file.status === 'ready' || file.status === 'submitted' ? (
+                                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                              ) : file.status === 'uploading' ? (
+                                <RefreshCw className="w-3.5 h-3.5 shrink-0 animate-spin" />
+                              ) : (
+                                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                              )}
+                              <span>{getStagedStatusLabel(file.status)}</span>
+                            </span>
+
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => openRenameDialog(file)}
+                                disabled={!canUpload || file.status === 'submitted'}
+                                className="px-2.5 py-1.5 rounded-lg text-xs text-blue-700 hover:bg-blue-50 border border-blue-200 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+                                title={isThai ? 'เปลี่ยนชื่อ' : 'Rename'}
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                                <span>{isThai ? 'เปลี่ยนชื่อ' : 'Rename'}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveFile(file.uploadId)}
+                                disabled={!canUpload || file.status === 'submitted'}
+                                className="px-2.5 py-1.5 rounded-lg text-xs text-red-700 hover:bg-red-50 border border-red-200 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>{isThai ? 'ลบ' : 'Remove'}</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Submit Action Bar */}
+                  <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+                    <span className="text-xs text-gray-500">
+                      {readyFiles.length >= requiredFileCount && !hasBlockingFiles
+                        ? (isThai ? 'ไฟล์ทั้งหมดพร้อมสำหรับการส่งขั้นสุดท้าย' : 'All files are uploaded and ready for final submission.')
+                        : (isThai ? `ต้องมีไฟล์พร้อมส่งอย่างน้อย ${requiredFileCount} ไฟล์ และไม่มีไฟล์ที่กำลังอัปโหลดหรือมีข้อผิดพลาด` : `Prepare at least ${requiredFileCount} ready file${requiredFileCount === 1 ? '' : 's'} and resolve all uploading, invalid, or failed files.`)}
+                    </span>
+
+                    <button
+                      type="button"
+                      disabled={!canFinishExam}
+                      onClick={() => setShowConfirmModal(true)}
+                      className="w-full sm:w-auto px-8 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-md shadow-blue-600/20 transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shrink-0"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>{isThai ? 'เสร็จสิ้นการสอบและส่งไฟล์' : 'Finish Exam and Submit Files'}</span>
+                    </button>
+                  </div>
+                </section>
               </div>
-            </section>
+            </div>
           </div>
         )}
 
         {/* STEP 2: ST6 Integrity Check Animation */}
         {sessionStep === 'checking' && (
-          <div className="max-w-xl mx-auto bg-white border border-gray-200 rounded-2xl p-8 shadow-xl text-left animate-in fade-in duration-200">
+          <div className="mx-auto max-w-xl scroll-mt-[176px] rounded-2xl border border-gray-200 bg-white p-8 text-left shadow-xl animate-in fade-in duration-200">
             <div className="text-center mb-6">
               <div className="w-14 h-14 rounded-2xl bg-blue-50 border border-blue-200 text-blue-600 flex items-center justify-center mx-auto mb-3">
                 <RefreshCw className="w-7 h-7 animate-spin text-blue-600" />
@@ -1140,7 +1337,7 @@ export const ExamSessionView: React.FC = () => {
 
             {/* If error occurred */}
             {integrityError && (
-              <div className="mt-6 p-4 rounded-xl bg-red-50 border border-red-200 text-xs text-red-800 flex items-start gap-2.5">
+              <div className="mt-6 flex scroll-mt-[176px] items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 p-4 text-xs text-red-800">
                 <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
                 <div>
                   <strong className="block text-red-900 mb-0.5">
@@ -1161,7 +1358,7 @@ export const ExamSessionView: React.FC = () => {
 
         {/* STEP 3: ST7 Submission Successful Confirmation */}
         {sessionStep === 'success' && (
-          <div className="max-w-xl mx-auto bg-white border border-gray-200 rounded-2xl p-8 shadow-xl text-left animate-in zoom-in-95 duration-200">
+          <div className="mx-auto max-w-xl scroll-mt-[176px] rounded-2xl border border-gray-200 bg-white p-8 text-left shadow-xl animate-in zoom-in-95 duration-200">
             <div className="text-center mb-6">
               <div className="w-16 h-16 rounded-full bg-emerald-50 border-2 border-emerald-500 text-emerald-600 flex items-center justify-center mx-auto mb-4 shadow-sm">
                 <CheckCircle2 className="w-9 h-9" />
@@ -1268,7 +1465,7 @@ export const ExamSessionView: React.FC = () => {
         isOpen={!!renameTarget}
         onClose={closeRenameDialog}
         title={isThai ? 'เปลี่ยนชื่อไฟล์' : 'Rename File'}
-        maxWidth="sm"
+        maxWidth="640"
         footer={
           <>
             <button

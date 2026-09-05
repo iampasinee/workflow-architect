@@ -34,7 +34,7 @@ export const PasswordSetup: React.FC = () => {
   };
 
   return (
-    <div className="max-w-md mx-auto my-12 bg-white rounded-2xl shadow-xl border border-gray-100 p-8 text-left">
+    <div className="relative mx-auto mt-3 mb-6 w-[calc(100%-2rem)] max-w-md scroll-mt-[92px] rounded-2xl border border-gray-100 bg-white p-6 text-left shadow-xl sm:mt-4">
       <div className="w-12 h-12 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 mb-5">
         <Lock className="w-6 h-6" />
       </div>

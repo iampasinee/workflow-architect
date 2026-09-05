@@ -9,7 +9,7 @@ export const ViolationOverlay: React.FC = () => {
   if (!activeViolationAlert) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="relative w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl border-2 border-red-500 text-center animate-in zoom-in-95 duration-200">
         {/* Red warning header banner */}
         <div className="bg-red-600 px-6 py-4 text-white flex items-center justify-center gap-3">

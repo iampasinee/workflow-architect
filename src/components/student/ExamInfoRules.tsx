@@ -58,9 +58,9 @@ export const ExamInfoRules: React.FC = () => {
   };
 
   return (
-    <div className="max-w-3xl mx-auto my-8 bg-white rounded-2xl shadow-xl border border-gray-100 p-8 text-left">
+    <div className="relative mx-auto mt-3 mb-6 flex max-h-[calc(100dvh-84px)] w-[calc(100%-2rem)] max-w-[1180px] scroll-mt-[92px] flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white p-4 text-left shadow-xl sm:mt-4 sm:p-6 lg:w-[calc(100%-3rem)]">
       {/* Top Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-6 border-b border-gray-100 gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-gray-100 gap-3 shrink-0">
         <div>
           <span className="text-xs font-bold uppercase tracking-wider text-blue-600">
             {isThai ? 'ขั้นตอนที่ 3 จาก 4: ข้อมูลการสอบและระเบียบปฏิบัติ (ST3)' : 'Step 3 of 4: Pre-Exam Briefing (ST3)'}
@@ -84,15 +84,18 @@ export const ExamInfoRules: React.FC = () => {
         </div>
       </div>
 
+      <div className="flex-1 min-h-0 overflow-y-auto lg:overflow-hidden">
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,45%)_minmax(0,1fr)] gap-5 py-4 min-h-0">
+          <section className="min-w-0 scroll-mt-[92px] space-y-3">
       {/* Grid: Station & Time Specs */}
-      <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-2">
         {/* Seat / Machine Card */}
-        <div className="p-4 rounded-xl bg-blue-50/70 border border-blue-100">
+        <div className="p-3 rounded-xl bg-blue-50/70 border border-blue-100">
           <div className="flex items-center gap-2 text-blue-700 text-xs font-semibold mb-1">
             <Laptop className="w-4 h-4" />
             <span>{isThai ? 'ที่นั่งสอบที่จัดสรร' : 'Assigned Workstation'}</span>
           </div>
-          <div className="text-xl font-bold text-blue-950 font-mono">
+          <div className="text-base sm:text-lg font-bold text-blue-950 font-mono">
             {isThai ? `ที่นั่ง ${seatNo}` : `Seat ${seatNo}`}
           </div>
           <div className="text-xs text-blue-700/80 font-mono mt-0.5">
@@ -101,7 +104,7 @@ export const ExamInfoRules: React.FC = () => {
         </div>
 
         {/* Room / Lab */}
-        <div className="p-4 rounded-xl bg-gray-50 border border-gray-200">
+        <div className="p-3 rounded-xl bg-gray-50 border border-gray-200">
           <div className="flex items-center gap-2 text-gray-600 text-xs font-semibold mb-1">
             <MapPin className="w-4 h-4" />
             <span>{isThai ? 'ห้องสอบ' : 'Location'}</span>
@@ -111,7 +114,7 @@ export const ExamInfoRules: React.FC = () => {
         </div>
 
         {/* Date & Time */}
-        <div className="p-4 rounded-xl bg-gray-50 border border-gray-200">
+        <div className="p-3 rounded-xl bg-gray-50 border border-gray-200">
           <div className="flex items-center gap-2 text-gray-600 text-xs font-semibold mb-1">
             <Calendar className="w-4 h-4" />
             <span>{isThai ? 'วันที่สอบ & เวลา' : 'Date & Schedule'}</span>
@@ -123,12 +126,12 @@ export const ExamInfoRules: React.FC = () => {
         </div>
 
         {/* Duration */}
-        <div className="p-4 rounded-xl bg-gray-50 border border-gray-200">
+        <div className="p-3 rounded-xl bg-gray-50 border border-gray-200">
           <div className="flex items-center gap-2 text-gray-600 text-xs font-semibold mb-1">
             <Clock className="w-4 h-4" />
             <span>{isThai ? 'ระยะเวลาสอบ' : 'Duration'}</span>
           </div>
-          <div className="text-xl font-bold text-gray-900">
+          <div className="text-base sm:text-lg font-bold text-gray-900">
             {activeExam?.durationMinutes} {isThai ? 'นาที' : 'Mins'}
           </div>
           <div className="text-xs text-emerald-600 font-medium">
@@ -138,7 +141,7 @@ export const ExamInfoRules: React.FC = () => {
       </div>
 
       {/* File Submission Specifications */}
-      <div className="mt-6 p-5 rounded-2xl bg-amber-50/60 border border-amber-200/80">
+      <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200/80">
         <div className="flex items-center gap-2 text-amber-900 font-semibold text-sm mb-2">
           <HardDrive className="w-4 h-4 text-amber-700" />
           <span>
@@ -152,7 +155,7 @@ export const ExamInfoRules: React.FC = () => {
             ? 'ต้องบีบอัดไฟล์ซอร์สโค้ดและรายงานทั้งหมดเป็นไฟล์บีบอัดเดี่ยว (.zip) เท่านั้น โดยต้องไม่เกินขนาดสูงสุดที่กำหนด และต้องตั้งชื่อไฟล์ให้ตรงตามแบบฟอร์มที่ระบุ'
             : (activeExam?.fileRequirements?.instructions || 'Compress all source files into a single archive.')}
         </p>
-        <div className="flex flex-wrap items-center gap-3 text-xs">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
           <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-amber-200 font-mono text-gray-800">
             <FileCode className="w-3.5 h-3.5 text-blue-600" />
             <span>
@@ -172,11 +175,12 @@ export const ExamInfoRules: React.FC = () => {
               <strong>{currentStudent?.studentCode}_final.*</strong>
             </span>
           </div>
+          </div>
         </div>
-      </div>
+          </section>
 
       {/* Official Exam Rules */}
-      <div className="mt-6">
+      <section className="flex min-w-0 scroll-mt-[92px] flex-col rounded-2xl border border-gray-200 bg-white p-4 lg:min-h-0">
         <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-3 flex items-center gap-2">
           <ShieldAlert className="w-4 h-4 text-red-600" />
           <span>
@@ -185,7 +189,7 @@ export const ExamInfoRules: React.FC = () => {
               : 'Laboratory Examination Rules & Integrity Regulations'}
           </span>
         </h3>
-        <ul className="space-y-2.5">
+        <ul className="space-y-2.5 max-h-[clamp(220px,38vh,340px)] overflow-y-auto pr-2">
           {(isThai ? [
             { id: 'th1', text: 'ห้ามเปิดเว็บไซต์ที่ไม่ได้รับอนุญาต หรือสลับหน้าต่างโปรแกรมอื่นที่ไม่เกี่ยวข้องกับการสอบ' },
             { id: 'th2', text: 'ห้ามนำโทรศัพท์มือถือ อุปกรณ์สื่อสารไร้สาย หรืออุปกรณ์จัดเก็บข้อมูล USB เข้าห้องสอบโดยเด็ดขาด' },
@@ -203,11 +207,16 @@ export const ExamInfoRules: React.FC = () => {
             </li>
           ))}
         </ul>
+        <div className="mt-2 border-t border-gray-100 bg-linear-to-t from-white pt-2 text-center text-[10px] text-gray-400">
+          {isThai ? 'เลื่อนลงเพื่ออ่านกติกาทั้งหมด' : 'Scroll to read all exam rules'}
+        </div>
+      </section>
+        </div>
       </div>
 
       {/* Confirmation Checkbox & Start Button */}
-      <div className="mt-8 pt-6 border-t border-gray-200 space-y-4">
-        <label className="flex items-start gap-3 p-4 rounded-xl border border-blue-200 bg-blue-50/40 cursor-pointer hover:bg-blue-50/70 transition-colors">
+      <div className="sticky bottom-0 z-10 shrink-0 bg-white pt-3 border-t border-gray-200 space-y-3">
+        <label className="flex items-start gap-3 p-3 rounded-xl border border-blue-200 bg-blue-50/40 cursor-pointer hover:bg-blue-50/70 transition-colors">
           <input
             type="checkbox"
             checked={agreed}
@@ -226,7 +235,7 @@ export const ExamInfoRules: React.FC = () => {
           </div>
         </label>
 
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <span className="text-xs text-gray-400">
             {isThai ? 'ผู้เข้าสอบ: ' : 'Examinee: '}
             {currentStudent?.fullName} ({currentStudent?.studentCode})
@@ -235,7 +244,7 @@ export const ExamInfoRules: React.FC = () => {
             type="button"
             disabled={!agreed}
             onClick={handleStartExam}
-            className="px-8 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm shadow-md hover:shadow-lg transition-all flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            className="w-full sm:w-auto px-8 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
           >
             <span>{isThai ? 'ยืนยันและเริ่มทำข้อสอบ' : 'Confirm and Start Exam'}</span>
             <ArrowRight className="w-4 h-4" />

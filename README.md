@@ -38,7 +38,7 @@ The current frontend requires no API key. `.env.example` contains inherited `GEM
 
 ## Staged upload workflow
 
-The student page uses a single-column workflow containing the file guide, upload drop zone, and staged-file list. Selecting or dropping a file immediately copies its blob into browser-local IndexedDB and simulates progress over approximately 2–3 seconds. Staged drafts survive refreshes, and interrupted mock uploads resume when the exam page loads.
+The student page uses a two-column workflow at 1024px and above. The rules card occupies roughly 38% on the left, while a compact drop zone and the staged-file list share the 62% right column. Smaller screens stack all three sections vertically. Selecting or dropping a file immediately copies its blob into browser-local IndexedDB and simulates progress over approximately 2–3 seconds. Staged drafts survive refreshes, and interrupted mock uploads resume when the exam page loads.
 
 New files receive a unique `uploadId` and a persistent sequence shared across file types for each exam/student pair. The default submission name is:
 

@@ -106,7 +106,7 @@ export const FaceEnrollment: React.FC = () => {
   };
 
   return (
-    <div className="max-w-2xl mx-auto my-8 bg-white rounded-2xl shadow-xl border border-gray-100 p-8 text-left">
+    <div className="relative mx-auto mt-3 mb-6 w-[calc(100%-2rem)] max-w-2xl scroll-mt-[92px] rounded-2xl border border-gray-100 bg-white p-6 text-left shadow-xl sm:mt-4">
       <div className="flex items-center justify-between pb-4 border-b border-gray-100 mb-6">
         <div>
           <span className="text-xs font-bold uppercase tracking-wider text-blue-600">

@@ -15,6 +15,7 @@ import { FaceVerificationLogin } from './components/student/FaceVerificationLogi
 import { ExamInfoRules } from './components/student/ExamInfoRules';
 import { ExamSessionView } from './components/student/ExamSessionView';
 import { ViolationOverlay } from './components/student/ViolationOverlay';
+import { StudentExamProgressStepper } from './components/student/StudentExamProgressStepper';
 
 // Teacher screens
 import { TeacherSidebar } from './components/teacher/TeacherSidebar';
@@ -56,15 +57,32 @@ const MainRouter: React.FC = () => {
 
   // 2. Student Flow (Screens ST1 -> ST7 + ST8 Violation Overlay)
   if (role === 'student') {
+    const isExamSessionStep = activeStudentStep === 'ST4' ||
+      activeStudentStep === 'ST5' ||
+      activeStudentStep === 'ST6' ||
+      activeStudentStep === 'ST7';
+    const earlyProgressStep = activeStudentStep === 'ST3' ? 2 : 1;
+
     return (
-      <div className="min-h-screen bg-gray-50 text-gray-900 flex flex-col justify-between relative selection:bg-blue-600 selection:text-white">
+      <div className="relative flex min-h-screen flex-col justify-start overflow-visible bg-gray-50 text-gray-900 selection:bg-blue-600 selection:text-white">
         <ViolationOverlay />
 
-        {activeStudentStep === 'ST1' && <StudentAccessCheck />}
-        {activeStudentStep === 'ST2A' && <PasswordSetup />}
-        {activeStudentStep === 'ST2B' && <FaceEnrollment />}
-        {activeStudentStep === 'ST2C' && <FaceVerificationLogin />}
-        {activeStudentStep === 'ST3' && <ExamInfoRules />}
+        {!isExamSessionStep && (
+          <>
+            <div className="sticky top-0 z-50 w-full bg-white">
+              <StudentExamProgressStepper currentStep={earlyProgressStep} />
+            </div>
+
+            <main className="relative z-[1] flex-1 overflow-visible bg-gray-50">
+              {activeStudentStep === 'ST1' && <StudentAccessCheck />}
+              {activeStudentStep === 'ST2A' && <PasswordSetup />}
+              {activeStudentStep === 'ST2B' && <FaceEnrollment />}
+              {activeStudentStep === 'ST2C' && <FaceVerificationLogin />}
+              {activeStudentStep === 'ST3' && <ExamInfoRules />}
+            </main>
+          </>
+        )}
+
         {(activeStudentStep === 'ST4' ||
           activeStudentStep === 'ST5' ||
           activeStudentStep === 'ST6' ||

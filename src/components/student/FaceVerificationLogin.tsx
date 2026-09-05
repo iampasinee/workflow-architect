@@ -101,8 +101,8 @@ export const FaceVerificationLogin: React.FC = () => {
   };
 
   return (
-    <div className="max-w-2xl mx-auto my-8 bg-white rounded-2xl shadow-xl border border-gray-100 p-8 text-left">
-      <div className="flex items-center justify-between pb-4 border-b border-gray-100 mb-6">
+    <div className="relative mx-auto mt-3 mb-6 w-[calc(100%-2rem)] max-w-[920px] scroll-mt-[92px] rounded-2xl border border-gray-100 bg-white p-6 text-left shadow-xl sm:mt-4">
+      <div className="flex items-center justify-between pb-3 border-b border-gray-100 mb-4">
         <div>
           <span className="text-xs font-bold uppercase tracking-wider text-blue-600">
             {isThai ? 'การยืนยันตัวตนชีวมิติประจำเครื่องสอบ (ขั้นตอน ST2C)' : 'Workstation Biometric Authentication (ST2C)'}
@@ -120,7 +120,7 @@ export const FaceVerificationLogin: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Enrolled Reference Image */}
         <div className="md:col-span-1 flex flex-col items-center justify-center p-4 bg-gray-50 rounded-xl border border-gray-200 text-center">
           <span className="text-xs font-semibold text-gray-600 mb-3">
@@ -144,7 +144,7 @@ export const FaceVerificationLogin: React.FC = () => {
         </div>
 
         {/* Live Video / Scanner */}
-        <div className="md:col-span-2 relative aspect-4/3 bg-slate-950 rounded-xl overflow-hidden border-2 border-slate-800 flex items-center justify-center">
+        <div className="md:col-span-2 relative h-[280px] md:h-[300px] bg-slate-950 rounded-xl overflow-hidden border-2 border-slate-800 flex items-center justify-center">
           {stream ? (
             <video
               ref={videoRef}
@@ -201,7 +201,7 @@ export const FaceVerificationLogin: React.FC = () => {
 
       {/* Outcome Feedback */}
       {verificationState === 'success' && (
-        <div className="mb-6 p-4 rounded-xl bg-emerald-50 border border-emerald-200 flex items-start gap-3">
+        <div className="relative mt-4 flex w-full scroll-mt-[92px] transform-none items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3.5">
           <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
           <div className="text-xs text-emerald-800">
             <strong className="text-sm font-semibold block mb-0.5">
@@ -215,7 +215,7 @@ export const FaceVerificationLogin: React.FC = () => {
       )}
 
       {verificationState === 'failed' && (
-        <div className="mb-6 p-4 rounded-xl bg-red-50 border border-red-200 flex items-start gap-3">
+        <div className="relative mt-4 flex w-full scroll-mt-[92px] transform-none items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-3.5">
           <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
           <div className="text-xs text-red-800 flex-1">
             <strong className="text-sm font-semibold block mb-0.5">
@@ -249,7 +249,7 @@ export const FaceVerificationLogin: React.FC = () => {
       )}
 
       {/* Action Buttons */}
-      <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+      <div className="mt-4 flex items-center justify-between border-t border-gray-100 pt-2">
         <div className="flex items-center gap-2 text-xs text-gray-500">
           <button
             type="button"
