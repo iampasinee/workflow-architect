@@ -38,7 +38,7 @@ The current frontend requires no API key. `.env.example` contains inherited `GEM
 
 ## Staged upload workflow
 
-The student page uses three desktop columns for exam rules, local file preparation, and staged-file review; the columns stack below 1024px. File selection and drag-and-drop first create an in-memory queue. Clicking “Upload for Staging” copies valid blobs into browser-local IndexedDB and simulates progress over approximately 2–3 seconds. Only staged drafts survive refreshes.
+The student page uses a single-column workflow containing the file guide, upload drop zone, and staged-file list. Selecting or dropping a file immediately copies its blob into browser-local IndexedDB and simulates progress over approximately 2–3 seconds. Staged drafts survive refreshes, and interrupted mock uploads resume when the exam page loads.
 
 New files receive a unique `uploadId` and a persistent sequence shared across file types for each exam/student pair. The default submission name is:
 
@@ -49,7 +49,7 @@ New files receive a unique `uploadId` and a persistent sequence shared across fi
 
 `studentId` uses the profile's `studentCode`. Names use `firstName` and `lastName`, falling back to splitting `fullName`. Name parts are lowercased, spaces/hyphens become underscores, and characters other than English letters and underscores are removed. No romanization service is implemented. `fileRequirements.automaticFilenamePattern` optionally supplies the five-token template; backend configuration retrieval is not implemented.
 
-Students can Rename, Replace, or Remove staged files. Rename changes only `submissionName`; it preserves the original filename, binary, identifier, status, and progress. Replace retains `uploadId` and sequence while transferring a new valid binary and updating its extension. Base names are trimmed, limited to 1–100 characters, and validated against `^[A-Za-z0-9_-]+$`. Full-name duplicates are rejected case-insensitively. Enter saves; Escape or Cancel discards edits.
+Students can Rename or Remove staged files. Rename changes only `submissionName`; it preserves the original filename, binary, identifier, status, and progress. Base names are trimmed, limited to 1–100 characters, and validated against `^[A-Za-z0-9_-]+$`. Full-name duplicates are rejected case-insensitively. Enter saves; Escape or Cancel discards edits.
 
 Exam configuration controls allowed extensions and maximum file size. Only zero-byte files are empty; valid files under 1 KB are accepted and displayed in bytes. The default active exam accepts `.zip` and `.py`; `.jpg` requires instructor configuration.
 
