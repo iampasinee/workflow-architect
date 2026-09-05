@@ -587,38 +587,19 @@ export const ExamSessionView: React.FC = () => {
 
   const getStagedStatusLabel = (status: StagedUploadStatus) => {
     switch (status) {
-      case 'uploading': return 'กำลังอัปโหลด';
-      case 'ready': return 'อัปโหลดแล้ว — รอการส่งขั้นสุดท้าย';
-      case 'invalid': return 'ไฟล์ไม่ถูกต้อง';
-      case 'failed': return 'อัปโหลดไม่สำเร็จ';
-      case 'submitted': return 'ส่งแล้ว';
+      case 'uploading': return isThai ? 'กำลังอัปโหลด' : 'Uploading';
+      case 'ready': return isThai ? 'อัปโหลดแล้ว — รอการส่งขั้นสุดท้าย' : 'Uploaded — Waiting for Final Submission';
+      case 'invalid': return isThai ? 'ไฟล์ไม่ถูกต้อง' : 'Invalid';
+      case 'failed': return isThai ? 'อัปโหลดไม่สำเร็จ' : 'Failed';
+      case 'submitted': return isThai ? 'ส่งแล้ว' : 'Submitted';
     }
-  };
-
-  const getThaiFileError = (errorReason?: string) => {
-    if (!errorReason) return undefined;
-    if (!/[A-Za-z]{3}/.test(errorReason)) return errorReason;
-    if (errorReason.includes('0 bytes')) {
-      return 'ไฟล์ที่เลือกเป็นไฟล์ว่าง (0 ไบต์) กรุณาเลือกไฟล์ที่มีคำตอบของคุณ';
-    }
-    if (errorReason.includes('Unsupported file type')) {
-      return 'ประเภทไฟล์ไม่ได้รับอนุญาต กรุณาเลือกไฟล์ตามข้อกำหนดของข้อสอบ';
-    }
-    if (errorReason.includes('maximum limit')) {
-      return 'ไฟล์มีขนาดเกินขนาดสูงสุดที่กำหนด';
-    }
-    if (errorReason.includes('10-second timeout grace period')) {
-      return 'การอัปโหลดไม่เสร็จภายในเวลาผ่อนผัน 10 วินาที';
-    }
-    return 'เกิดข้อผิดพลาดระหว่างการเตรียมไฟล์ กรุณาลบไฟล์แล้วลองอัปโหลดใหม่';
   };
 
   const getStagedStatusClass = (status: StagedUploadStatus) => {
-    if (status === 'submitted') {
+    if (status === 'ready' || status === 'submitted') {
       return 'bg-emerald-50 text-emerald-700 border-emerald-200';
     }
-    if (status === 'ready') return 'bg-blue-50 text-blue-700 border-blue-200';
-    if (status === 'uploading') return 'bg-amber-50 text-amber-700 border-amber-200';
+    if (status === 'uploading') return 'bg-blue-50 text-blue-700 border-blue-200';
     return 'bg-red-50 text-red-700 border-red-200';
   };
 
@@ -1019,37 +1000,19 @@ export const ExamSessionView: React.FC = () => {
             </div>
 
             {/* Staged File List Table */}
-            <section className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-xs text-left h-full min-h-0 flex flex-col">
-              <input
-                ref={replaceInputRef}
-                type="file"
-                accept={(activeExam?.fileRequirements.acceptedExtensions || ['.zip', '.py']).join(',')}
-                onChange={handleReplaceFile}
-                className="hidden"
-                disabled={!canUpload}
-              />
-              <div className="px-4 xl:px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
+            <section className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-xs text-left">
+              <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
                 <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
                   <FileCheck className="w-4 h-4 text-blue-600" />
                   <span>
-                    {isThai ? '2. ตรวจสอบไฟล์ที่รอส่ง' : '2. Review Staged Files'}
+                    {isThai ? `ไฟล์ที่เตรียมส่ง (${stagedFiles.length})` : `Files Prepared for Submission (${stagedFiles.length})`}
                   </span>
                 </h3>
-                <span className="text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-full shrink-0">
-                  {isThai ? `พร้อมส่ง ${readyFiles.length} ไฟล์` : `${readyFiles.length} ready`}
+                <span className="text-xs text-gray-500">
+                  {isThai ? 'ยังไม่ส่งจนกว่าจะกดเสร็จสิ้นการสอบ' : 'Not submitted until you finish the exam'}
                 </span>
               </div>
 
-              <div className="mx-4 xl:mx-5 mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                <span>
-                  {isThai
-                    ? 'ไฟล์ถูกอัปโหลดไว้ชั่วคราวแล้ว แต่ยังไม่ถือว่าส่งข้อสอบสำเร็จ กรุณาตรวจสอบไฟล์และกด “เสร็จสิ้นการสอบและส่งไฟล์”'
-                    : "Files have been temporarily uploaded, but the exam submission is not yet finalized. Please review your files and click 'Finish Exam and Submit Files'."}
-                </span>
-              </div>
-
-              <div className="flex-1 min-h-0 overflow-y-auto mt-3">
               {!stagingLoaded ? (
                 <div className="p-8 text-center text-gray-400 text-xs">
                   {isThai ? 'กำลังโหลดไฟล์ชั่วคราว...' : 'Loading staged files...'}
@@ -1063,9 +1026,9 @@ export const ExamSessionView: React.FC = () => {
                   {stagedFiles.map((file) => (
                     <div
                       key={file.uploadId}
-                      className="px-4 xl:px-5 py-4 flex flex-col gap-3 hover:bg-gray-50/80 transition-colors"
+                      className="px-6 py-3.5 flex items-center justify-between gap-4 hover:bg-gray-50/80 transition-colors"
                     >
-                      <div className="flex items-start gap-3 min-w-0">
+                      <div className="flex items-center gap-3 min-w-0">
                         <div
                           className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
                             file.extension === '.zip'
@@ -1080,21 +1043,16 @@ export const ExamSessionView: React.FC = () => {
                           )}
                         </div>
                         <div className="min-w-0">
-                          <div className="text-[10px] uppercase tracking-wide text-gray-400">{isThai ? 'ชื่อไฟล์ต้นฉบับ' : 'Original filename'}</div>
-                          <div className="text-xs text-gray-700 truncate font-mono" title={file.originalName}>
-                            {file.originalName}
-                          </div>
-                          <div className="text-[10px] uppercase tracking-wide text-gray-400 mt-1.5">{isThai ? 'ชื่อไฟล์สำหรับส่ง' : 'Submission filename'}</div>
-                          <div className="text-xs font-semibold text-gray-900 truncate font-mono" title={file.submissionName}>
+                          <div className="text-xs font-semibold text-gray-900 truncate font-mono">
                             {file.submissionName}
                           </div>
-                          <div className="text-[11px] text-gray-500 flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1">
+                          <div className="text-[11px] text-gray-500 flex items-center gap-2">
                             <span>{formatFileSize(file.sizeBytes)}</span>
                             <span>•</span>
                             <span className="uppercase">{file.extension.replace('.', '')}</span>
                             <span>•</span>
                             <span>
-                              {isThai ? 'เวลาอัปโหลด ' : 'Updated '}
+                              {isThai ? 'อัปเดต ' : 'Updated '}
                               {new Date(file.lastUpdated).toLocaleTimeString()}
                             </span>
                           </div>
@@ -1113,7 +1071,7 @@ export const ExamSessionView: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-3 shrink-0">
                         <span className={`text-xs font-medium border px-2.5 py-1 rounded-full flex items-center gap-1 ${getStagedStatusClass(file.status)}`}>
                           {file.status === 'ready' || file.status === 'submitted' ? (
                             <CheckCircle2 className="w-3.5 h-3.5" />
@@ -1138,15 +1096,6 @@ export const ExamSessionView: React.FC = () => {
                           </button>
                           <button
                             type="button"
-                            onClick={() => openReplaceDialog(file)}
-                            disabled={!canUpload || file.status === 'submitted'}
-                            className="px-2.5 py-1.5 rounded-lg text-xs text-amber-700 hover:bg-amber-50 border border-amber-200 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
-                          >
-                            <RefreshCw className="w-3.5 h-3.5" />
-                            <span>{isThai ? 'แทนที่ไฟล์' : 'Replace'}</span>
-                          </button>
-                          <button
-                            type="button"
                             onClick={() => handleRemoveFile(file.uploadId)}
                             disabled={!canUpload || file.status === 'submitted'}
                             className="px-2.5 py-1.5 rounded-lg text-xs text-red-700 hover:bg-red-50 border border-red-200 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
@@ -1160,10 +1109,9 @@ export const ExamSessionView: React.FC = () => {
                   ))}
                 </div>
               )}
-              </div>
 
               {/* Submit Action Bar */}
-              <div className="sticky bottom-0 px-4 xl:px-5 py-4 bg-gray-50 border-t border-gray-100 flex flex-col gap-3">
+              <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-3">
                 <span className="text-xs text-gray-500">
                   {readyFiles.length >= requiredFileCount && !hasBlockingFiles
                     ? (isThai ? 'ไฟล์ทั้งหมดพร้อมสำหรับการส่งขั้นสุดท้าย' : 'All files are uploaded and ready for final submission.')
@@ -1174,10 +1122,10 @@ export const ExamSessionView: React.FC = () => {
                   type="button"
                   disabled={!canFinishExam}
                   onClick={() => setShowConfirmModal(true)}
-                  className="w-full px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-md shadow-blue-600/20 transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  className="w-full sm:w-auto px-8 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-md shadow-blue-600/20 transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                 >
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>{isThai ? `เสร็จสิ้นการสอบและส่งไฟล์ (${readyFiles.length} ไฟล์)` : `Finish Exam and Submit Files (${readyFiles.length})`}</span>
+                  <span>{isThai ? 'เสร็จสิ้นการสอบและส่งไฟล์' : 'Finish Exam and Submit Files'}</span>
                 </button>
               </div>
             </section>
