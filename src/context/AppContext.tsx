@@ -19,6 +19,7 @@ import {
   CheatDetectionRules
 } from '../types';
 import { getTranslation } from '../i18n/translations';
+import { getAdminRouteFromHash } from '../utils/adminRoutes';
 import {
   initialStudents,
   initialTeachers,
@@ -155,19 +156,15 @@ export const defaultSecurityRules: CheatDetectionRules = {
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // Website language state (default: 'th')
-  const [language, setLanguageState] = useState<AppLanguage>(() => {
-    const saved = localStorage.getItem('securelab_language');
-    return (saved as AppLanguage) || 'th';
-  });
+  const [language, setLanguageState] = useState<AppLanguage>('th');
 
-  const setLanguage = (lang: AppLanguage) => {
-    setLanguageState(lang);
-    localStorage.setItem('securelab_language', lang);
+  const setLanguage = (_lang: AppLanguage) => {
+    setLanguageState('th');
+    localStorage.setItem('securelab_language', 'th');
   };
 
   const toggleLanguage = () => {
-    const nextLang = language === 'th' ? 'en' : 'th';
-    setLanguage(nextLang);
+    setLanguage('th');
   };
 
   const t = (key: string, fallback?: string) => {
@@ -190,12 +187,24 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // instead of restoring a previously selected simulation role.
   const [role, setRole] = useState<Role | null>(null);
 
-  const [activeAdminRoute, setActiveAdminRoute] = useState<string>('A1');
+  const [activeAdminRoute, setActiveAdminRoute] = useState<string>(() => getAdminRouteFromHash());
   const [activeTeacherRoute, setActiveTeacherRoute] = useState<string>('T1');
   const [activeStudentStep, setActiveStudentStep] = useState<'ST1' | 'ST2A' | 'ST2B' | 'ST2C' | 'ST3' | 'ST4' | 'ST5' | 'ST6' | 'ST7'>('ST1');
 
   const [students, setStudents] = useState<Student[]>(() => {
-    return safeParse('securelab_students', initialStudents);
+    const storedStudents = safeParse('securelab_students', initialStudents);
+    const migrationKey = 'securelab_academic_mock_students_v1';
+    if (localStorage.getItem(migrationKey) === 'complete') return storedStudents;
+
+    const existingIds = new Set(storedStudents.map((student) => student.id));
+    const academicSamples = initialStudents.filter((student) =>
+      student.id.startsWith('std_inet_') || student.id.startsWith('std_ine_'));
+    const mergedStudents = [
+      ...storedStudents,
+      ...academicSamples.filter((student) => !existingIds.has(student.id)),
+    ];
+    localStorage.setItem(migrationKey, 'complete');
+    return mergedStudents;
   });
 
   const [teachers, setTeachers] = useState<Teacher[]>(() => {
@@ -255,6 +264,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // Sync to localStorage
   useEffect(() => {
     localStorage.removeItem('securelab_role');
+    localStorage.setItem('securelab_language', 'th');
   }, []);
 
   useEffect(() => {
@@ -311,7 +321,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const id = `std_${String(students.length + 1).padStart(4, '0')}`;
     const created: Student = { ...newStd, id };
     setStudents(prev => [created, ...prev]);
-    showToast('Student Added', `${created.fullName} (${created.studentCode}) registered successfully`, 'success');
+    showToast('เพิ่มนักศึกษาสำเร็จ', `ลงทะเบียน ${created.fullName} (${created.studentCode}) เรียบร้อยแล้ว`, 'success');
   };
 
   const updateStudent = (id: string, updates: Partial<Student>) => {
@@ -319,18 +329,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (currentStudent?.id === id) {
       setCurrentStudent(prev => prev ? { ...prev, ...updates } : null);
     }
-    showToast('Student Updated', 'Record saved successfully', 'success');
+    showToast('อัปเดตข้อมูลนักศึกษาแล้ว', 'บันทึกข้อมูลเรียบร้อยแล้ว', 'success');
   };
 
   const deleteStudent = (id: string): boolean => {
     // Check if student has exam assignments or submissions
     const hasAssignments = seatAssignments.some(sa => sa.studentId === id);
     if (hasAssignments) {
-      showToast('Cannot Delete Student', 'Student is currently assigned to an exam seat. Please unassign first or set account to Suspended.', 'error');
+      showToast('ไม่สามารถลบนักศึกษาได้', 'นักศึกษามีที่นั่งสอบอยู่ กรุณายกเลิกการกำหนดที่นั่งหรือระงับบัญชีก่อน', 'error');
       return false;
     }
     setStudents(prev => prev.filter(s => s.id !== id));
-    showToast('Student Deleted', 'Record removed from system', 'info');
+    showToast('ลบนักศึกษาแล้ว', 'นำข้อมูลออกจากระบบเรียบร้อยแล้ว', 'info');
     return true;
   };
 
@@ -339,8 +349,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const updateFaceReference = (id: string, url: string) => {
-    updateStudent(id, { faceReferenceUrl: url, isFirstTime: false });
-    showToast('Facial Reference Updated', 'Face template saved for exam verification.', 'success');
+    updateStudent(id, {
+      faceReferenceUrl: url,
+      faceReferenceStatus: url ? 'available' : 'missing',
+      isFirstTime: false,
+    });
+    showToast('อัปเดตข้อมูลใบหน้าแล้ว', 'บันทึกข้อมูลใบหน้าสำหรับยืนยันตัวตนเรียบร้อยแล้ว', 'success');
   };
 
   // Teacher CRUD
@@ -348,7 +362,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const id = `tch_${String(teachers.length + 1).padStart(4, '0')}`;
     const created: Teacher = { ...newTch, id };
     setTeachers(prev => [created, ...prev]);
-    showToast('Teacher Added', `${created.fullName} registered successfully`, 'success');
+    showToast('เพิ่มอาจารย์สำเร็จ', `ลงทะเบียน ${created.fullName} เรียบร้อยแล้ว`, 'success');
   };
 
   const updateTeacher = (id: string, updates: Partial<Teacher>) => {
@@ -356,23 +370,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (currentTeacher?.id === id) {
       setCurrentTeacher(prev => prev ? { ...prev, ...updates } : null);
     }
-    showToast('Teacher Updated', 'Record saved successfully', 'success');
+    showToast('อัปเดตข้อมูลอาจารย์แล้ว', 'บันทึกข้อมูลเรียบร้อยแล้ว', 'success');
   };
 
   const deleteTeacher = (id: string): boolean => {
     const hasAssignedSection = courses.some(c => c.sections.some(s => s.teacherId === id));
     if (hasAssignedSection) {
-      showToast('Cannot Delete Teacher', 'Teacher is assigned to active course sections. Reassign sections first.', 'error');
+      showToast('ไม่สามารถลบอาจารย์ได้', 'อาจารย์ยังรับผิดชอบรายวิชาที่เปิดใช้งาน กรุณาเปลี่ยนอาจารย์ผู้รับผิดชอบก่อน', 'error');
       return false;
     }
     setTeachers(prev => prev.filter(t => t.id !== id));
-    showToast('Teacher Deleted', 'Record removed', 'info');
+    showToast('ลบอาจารย์แล้ว', 'นำข้อมูลออกจากระบบเรียบร้อยแล้ว', 'info');
     return true;
   };
 
   const confirmTeacherProfile = (id: string) => {
     updateTeacher(id, { icitProfileStatus: 'confirmed' });
-    showToast('Profile Confirmed', 'ICIT identity verified for Teacher role.', 'success');
+    showToast('ยืนยันโปรไฟล์แล้ว', 'ยืนยันตัวตน ICIT สำหรับสิทธิ์อาจารย์เรียบร้อยแล้ว', 'success');
   };
 
   // Admin CRUD
@@ -380,7 +394,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const id = `adm_${String(admins.length + 1).padStart(4, '0')}`;
     const created: Admin = { ...newAdm, id };
     setAdmins(prev => [created, ...prev]);
-    showToast('Administrator Added', `${created.fullName} added with administrative privileges`, 'success');
+    showToast('เพิ่มผู้ดูแลระบบสำเร็จ', `เพิ่ม ${created.fullName} พร้อมสิทธิ์ผู้ดูแลระบบแล้ว`, 'success');
   };
 
   const updateAdmin = (id: string, updates: Partial<Admin>) => {
@@ -388,16 +402,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (currentAdmin?.id === id) {
       setCurrentAdmin(prev => prev ? { ...prev, ...updates } : null);
     }
-    showToast('Administrator Updated', 'Record saved', 'success');
+    showToast('อัปเดตผู้ดูแลระบบแล้ว', 'บันทึกข้อมูลเรียบร้อยแล้ว', 'success');
   };
 
   const deleteAdmin = (id: string): boolean => {
     if (admins.length <= 1) {
-      showToast('Action Prohibited', 'At least one active administrator must remain.', 'error');
+      showToast('ไม่อนุญาตให้ดำเนินการ', 'ระบบต้องมีผู้ดูแลที่ใช้งานได้อย่างน้อยหนึ่งบัญชี', 'error');
       return false;
     }
     setAdmins(prev => prev.filter(a => a.id !== id));
-    showToast('Administrator Deleted', 'Record removed', 'info');
+    showToast('ลบผู้ดูแลระบบแล้ว', 'นำข้อมูลออกจากระบบเรียบร้อยแล้ว', 'info');
     return true;
   };
 
@@ -406,28 +420,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const id = `room_${String(rooms.length + 1).padStart(4, '0')}`;
     const created: Room = { ...newRoom, id };
     setRooms(prev => [created, ...prev]);
-    showToast('Room Added', `${created.labName} (${created.building}) created`, 'success');
+    showToast('เพิ่มห้องสอบสำเร็จ', `สร้าง ${created.labName} (${created.building}) แล้ว`, 'success');
   };
 
   const updateRoom = (id: string, updates: Partial<Room>) => {
     setRooms(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
-    showToast('Room Updated', 'Exam room details saved', 'success');
+    showToast('อัปเดตห้องสอบแล้ว', 'บันทึกรายละเอียดห้องสอบเรียบร้อยแล้ว', 'success');
   };
 
   const deleteRoom = (id: string): boolean => {
     const hasActiveExam = examSessions.some(e => e.roomId === id && e.status !== 'completed');
     if (hasActiveExam) {
-      showToast('Cannot Delete Room', 'Room is currently booked for scheduled or in-progress exams.', 'error');
+      showToast('ไม่สามารถลบห้องสอบได้', 'ห้องนี้ถูกใช้กับการสอบที่กำลังจะเริ่มหรือกำลังดำเนินการ', 'error');
       return false;
     }
     setRooms(prev => prev.filter(r => r.id !== id));
-    showToast('Room Deleted', 'Exam room removed', 'info');
+    showToast('ลบห้องสอบแล้ว', 'นำห้องสอบออกจากระบบเรียบร้อยแล้ว', 'info');
     return true;
   };
 
   const updateRoomSeats = (roomId: string, seats: SeatBinding[], rows: number, columns: number) => {
     setRooms(prev => prev.map(r => r.id === roomId ? { ...r, seats, rows, columns } : r));
-    showToast('Seating Map Saved', `Layout updated to ${rows} rows × ${columns} columns (${seats.length} total stations).`, 'success');
+    showToast('บันทึกผังที่นั่งแล้ว', `อัปเดตผังเป็น ${rows} แถว × ${columns} คอลัมน์ รวม ${seats.length} เครื่อง`, 'success');
   };
 
   const updateSeatBinding = (roomId: string, seatNo: string, updates: Partial<SeatBinding>) => {
@@ -443,22 +457,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const id = `crs_${String(courses.length + 1).padStart(4, '0')}`;
     const created: Course = { ...newCourse, id };
     setCourses(prev => [created, ...prev]);
-    showToast('Course Created', `${created.courseCode} added to catalog`, 'success');
+    showToast('สร้างรายวิชาแล้ว', `เพิ่ม ${created.courseCode} ในรายการรายวิชาเรียบร้อยแล้ว`, 'success');
   };
 
   const updateCourse = (id: string, updates: Partial<Course>) => {
     setCourses(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
-    showToast('Course Updated', 'Course information saved', 'success');
+    showToast('อัปเดตรายวิชาแล้ว', 'บันทึกข้อมูลรายวิชาเรียบร้อยแล้ว', 'success');
   };
 
   const deleteCourse = (id: string): boolean => {
     const hasExams = examSessions.some(e => e.courseId === id);
     if (hasExams) {
-      showToast('Cannot Delete Course', 'Course has existing exam sessions linked to it.', 'error');
+      showToast('ไม่สามารถลบรายวิชาได้', 'รายวิชานี้เชื่อมโยงกับรอบการสอบอยู่', 'error');
       return false;
     }
     setCourses(prev => prev.filter(c => c.id !== id));
-    showToast('Course Deleted', 'Course removed from catalog', 'info');
+    showToast('ลบรายวิชาแล้ว', 'นำรายวิชาออกจากรายการเรียบร้อยแล้ว', 'info');
     return true;
   };
 
@@ -467,12 +481,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const id = `exam_${String(examSessions.length + 1).padStart(4, '0')}`;
     const created: ExamSession = { ...newExam, id };
     setExamSessions(prev => [created, ...prev]);
-    showToast('Exam Session Created', `Exam scheduled for ${created.examDate} at ${created.startTime}`, 'success');
+    showToast('สร้างรอบการสอบแล้ว', `กำหนดสอบวันที่ ${created.examDate} เวลา ${created.startTime}`, 'success');
   };
 
   const updateExamSession = (id: string, updates: Partial<ExamSession>) => {
     setExamSessions(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
-    showToast('Exam Session Updated', 'Changes saved successfully', 'success');
+    showToast('อัปเดตรอบการสอบแล้ว', 'บันทึกการเปลี่ยนแปลงเรียบร้อยแล้ว', 'success');
   };
 
   const adjustExamTime = (
@@ -492,15 +506,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const log: AuditLog = {
       id: 'log_' + Date.now(),
       timestamp: new Date().toLocaleTimeString(),
-      actor: currentTeacher?.fullName || 'Teacher',
-      action: `${deltaMinutes > 0 ? '+' : ''}${deltaMinutes} Minutes (${scope.toUpperCase()})`,
-      details: `Reason: ${reason}${targetStudentId ? ` | Student: ${targetStudentId}` : ''}`,
+      actor: currentTeacher?.fullName || 'อาจารย์',
+      action: `${deltaMinutes > 0 ? '+' : ''}${deltaMinutes} นาที (${scope === 'room' ? 'ทั้งห้อง' : 'รายบุคคล'})`,
+      details: `เหตุผล: ${reason}${targetStudentId ? ` | นักศึกษา: ${targetStudentId}` : ''}`,
     };
     setAuditLogs(prev => [log, ...prev]);
 
     showToast(
-      'Exam Time Adjusted',
-      `${deltaMinutes > 0 ? '+' : ''}${deltaMinutes} minutes applied to ${scope === 'room' ? 'entire room' : 'selected student'}. Reason: ${reason}`,
+      'ปรับเวลาสอบแล้ว',
+      `ปรับเวลา ${deltaMinutes > 0 ? '+' : ''}${deltaMinutes} นาทีสำหรับ${scope === 'room' ? 'ทั้งห้อง' : 'นักศึกษาที่เลือก'} เหตุผล: ${reason}`,
       'warning'
     );
   };
@@ -510,7 +524,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     extraMinutes: number,
     scope: 'room' | 'student',
     targetStudentId?: string,
-    reason: string = 'Special dispensation'
+    reason: string = 'อนุญาตเป็นกรณีพิเศษ'
   ) => {
     const now = new Date();
     const reopenedUntil = new Date(now.getTime() + extraMinutes * 60000).toISOString();
@@ -534,13 +548,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const log: AuditLog = {
       id: 'log_' + Date.now(),
       timestamp: new Date().toLocaleTimeString(),
-      actor: currentTeacher?.fullName || 'Teacher',
-      action: `Reopened Submission (+${extraMinutes}m, ${scope})`,
+      actor: currentTeacher?.fullName || 'อาจารย์',
+      action: `เปิดให้ส่งไฟล์อีกครั้ง (+${extraMinutes} นาที, ${scope === 'room' ? 'ทั้งห้อง' : 'รายบุคคล'})`,
       details: reason,
     };
     setAuditLogs(prev => [log, ...prev]);
 
-    showToast('Submission Reopened', `Submissions unlocked for +${extraMinutes} mins.`, 'success');
+    showToast('เปิดให้ส่งไฟล์อีกครั้ง', `ปลดล็อกการส่งไฟล์เพิ่มอีก ${extraMinutes} นาที`, 'success');
   };
 
   // Seat Assignments
@@ -579,7 +593,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return [...others, ...newAssignments];
     });
 
-    showToast('Seats Auto-Assigned', `Successfully seated ${minCount} students across active laboratory computers. Damaged and offline PCs were automatically skipped.`, 'success');
+    showToast('จัดที่นั่งอัตโนมัติแล้ว', `จัดที่นั่งให้นักศึกษา ${minCount} คน โดยข้ามเครื่องที่ชำรุดและออฟไลน์`, 'success');
   };
 
   // Student Submissions
@@ -601,17 +615,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       existingSubmission?.status === 'submitted' || existingSubmission?.status === 'late';
 
     if (!student || student.accountStatus !== 'active') {
-      showToast('Upload Not Permitted', 'Only active students registered in the roster may upload files.', 'error');
+      showToast('ไม่อนุญาตให้อัปโหลด', 'เฉพาะนักศึกษาที่ลงทะเบียนและมีบัญชีสถานะปกติเท่านั้นที่อัปโหลดได้', 'error');
       return false;
     }
 
     if (!exam || exam.status !== 'in_progress') {
-      showToast('Upload Not Permitted', 'File uploads are only available while the exam is in progress.', 'error');
+      showToast('ไม่อนุญาตให้อัปโหลด', 'อัปโหลดไฟล์ได้เฉพาะระหว่างการสอบที่กำลังดำเนินการ', 'error');
       return false;
     }
 
     if (hasFinalSubmission && !hasActiveReopening) {
-      showToast('Submission Locked', 'The final submission is locked. Ask the instructor to reopen it before uploading a replacement.', 'warning');
+      showToast('การส่งถูกล็อก', 'กรุณาขอให้อาจารย์เปิดการส่งอีกครั้งก่อนอัปโหลดไฟล์ทดแทน', 'warning');
       return false;
     }
 
@@ -649,9 +663,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
 
     if (anyDamaged) {
-      showToast('Integrity Check Failed', 'One or more files are empty or damaged. Please re-upload.', 'error');
+      showToast('ตรวจสอบความสมบูรณ์ไม่ผ่าน', 'มีไฟล์ว่างหรือเสียหาย กรุณาอัปโหลดใหม่', 'error');
     } else {
-      showToast('Submission Confirmed', 'Your examination answer files have been securely received and hashed.', 'success');
+      showToast('ยืนยันการส่งแล้ว', 'ระบบได้รับและสร้างค่าแฮชไฟล์คำตอบเรียบร้อยแล้ว', 'success');
     }
     return true;
   };
@@ -682,7 +696,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setActiveViolationAlert(newViolation);
     }
 
-    showToast('Violation Alert Triggered', `Seat ${seatNo}: ${detail}`, 'error');
+    showToast('แจ้งเตือนเหตุผิดปกติ', `ที่นั่ง ${seatNo}: ${detail}`, 'error');
   };
 
   const acknowledgeViolation = (id: string) => {
@@ -692,7 +706,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const toggleMachineStatus = (roomId: string, seatNo: string, status: MachineStatus) => {
     updateSeatBinding(roomId, seatNo, { status, disabled: status === 'unavailable' || status === 'damaged' });
-    showToast('Equipment Status Updated', `Seat ${seatNo} set to ${status.toUpperCase()}`, 'info');
+    const statusText: Record<MachineStatus, string> = {
+      online: 'ออนไลน์',
+      offline: 'ออฟไลน์',
+      damaged: 'ชำรุด',
+      unavailable: 'ไม่พร้อมใช้งาน',
+    };
+    showToast('อัปเดตสถานะอุปกรณ์แล้ว', `ตั้งค่าที่นั่ง ${seatNo} เป็น ${statusText[status]}`, 'info');
   };
 
   const resetToMockDefaults = () => {
@@ -713,7 +733,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setCurrentAdmin(initialAdmins[0]);
     setCurrentExamId('exam_0001');
     setActiveStudentStep('ST1');
-    showToast('Data Reset', 'All records restored to original PRD baseline.', 'info');
+    showToast('รีเซ็ตข้อมูลแล้ว', 'คืนค่าข้อมูลทั้งหมดเป็นข้อมูลเริ่มต้นเรียบร้อยแล้ว', 'info');
   };
 
   return (

@@ -1,21 +1,34 @@
-import React, { useState } from 'react';
-import { useApp } from '../../context/AppContext';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Users,
-  Search,
-  Plus,
-  Edit2,
-  Trash2,
-  Shield,
-  ShieldAlert,
-  CheckCircle2,
   AlertTriangle,
-  X,
-  UserCheck
+  BriefcaseBusiness,
+  Camera,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsUpDown,
+  Edit2,
+  Eye,
+  GraduationCap,
+  Plus,
+  Search,
+  Shield,
+  ShieldCheck,
+  Trash2,
+  UserCheck,
+  UserCog,
+  Users,
 } from 'lucide-react';
-import { Badge, AccountStatusBadge } from '../common/Badge';
+import { useApp } from '../../context/AppContext';
+import { AccountStatus, UserRole } from '../../types';
+import { UserManagementView } from '../../utils/adminRoutes';
+import { AccountStatusBadge, Badge } from '../common/Badge';
 import { Modal } from '../common/Modal';
-import { UserRole, AccountStatus } from '../../types';
+import { StudentManagement } from './StudentManagement';
+
+interface UserRoleManagerProps {
+  view: UserManagementView;
+}
 
 interface UnifiedUser {
   id: string;
@@ -23,450 +36,858 @@ interface UnifiedUser {
   name: string;
   email: string;
   role: UserRole;
+  faculty: string;
   department: string;
   status: AccountStatus;
+  year?: number;
+  faceReferenceUrl?: string;
+  isFirstTime?: boolean;
+  icitProfileStatus?: 'confirmed' | 'pending';
+  assignedCourses: string[];
 }
 
-export const UserRoleManager: React.FC = () => {
+type SortKey = 'code' | 'name' | 'email' | 'role' | 'faculty' | 'department' | 'year' | 'status';
+type SortDirection = 'asc' | 'desc';
+
+interface UserFormState {
+  code: string;
+  name: string;
+  email: string;
+  faculty: string;
+  department: string;
+  year: number;
+}
+
+const pageSize = 10;
+
+const createEmptyForm = (): UserFormState => ({
+  code: '',
+  name: '',
+  email: '',
+  faculty: 'Faculty of Engineering',
+  department: 'Computer Engineering',
+  year: 1,
+});
+
+const GeneralUserRoleManager: React.FC<UserRoleManagerProps> = ({ view }) => {
   const {
     students,
     teachers,
-    showToast,
-    updateStudentStatus,
+    admins,
+    courses,
+    currentAdmin,
     addStudent,
+    addTeacher,
+    addAdmin,
+    updateStudent,
+    updateTeacher,
+    updateAdmin,
+    updateAccountStatus,
+    deleteStudent,
+    deleteTeacher,
+    deleteAdmin,
     language,
   } = useApp();
   const isThai = language === 'th';
 
   const [searchTerm, setSearchTerm] = useState('');
-  const [roleFilter, setRoleFilter] = useState<string>('all');
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [roleFilter, setRoleFilter] = useState<UserRole | 'all'>('all');
+  const [statusFilter, setStatusFilter] = useState<AccountStatus | 'all'>('all');
+  const [faceFilter, setFaceFilter] = useState<'all' | 'registered' | 'missing'>('all');
+  const [icitFilter, setIcitFilter] = useState<'all' | 'confirmed' | 'pending'>('all');
+  const [sortKey, setSortKey] = useState<SortKey>('code');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+  const [page, setPage] = useState(1);
+  const [viewUser, setViewUser] = useState<UnifiedUser | null>(null);
+  const [editUser, setEditUser] = useState<UnifiedUser | null>(null);
+  const [editForm, setEditForm] = useState<UserFormState>(createEmptyForm);
+  const [statusUser, setStatusUser] = useState<UnifiedUser | null>(null);
+  const [statusTarget, setStatusTarget] = useState<AccountStatus>('suspended');
+  const [statusReason, setStatusReason] = useState('');
+  const [deleteUser, setDeleteUser] = useState<UnifiedUser | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createRole, setCreateRole] = useState<UserRole | null>(null);
+  const [createForm, setCreateForm] = useState<UserFormState>(createEmptyForm);
 
-  // Selected user for status modification
-  const [statusModalUser, setStatusModalUser] = useState<UnifiedUser | null>(null);
-  const [newStatus, setNewStatus] = useState<AccountStatus>('active');
-  const [suspensionReason, setSuspensionReason] = useState('');
-
-  // Add User Form
-  const [formData, setFormData] = useState({
-    name: '',
-    code: '',
-    email: '',
-    role: 'student' as UserRole,
-    department: 'Computer Engineering',
-    faculty: 'Faculty of Engineering',
-  });
-
-  // Combine users for global list
-  const allUsers: UnifiedUser[] = [
-    ...students.map((s) => ({
-      id: s.id,
-      code: s.studentCode,
-      name: s.fullName,
-      email: s.email,
-      role: 'student' as UserRole,
-      department: s.department,
-      status: s.accountStatus,
+  const allUsers = useMemo<UnifiedUser[]>(() => [
+    ...students.map((student) => ({
+      id: student.id,
+      code: student.studentCode,
+      name: student.fullName,
+      email: student.email,
+      role: 'student' as const,
+      faculty: student.faculty,
+      department: student.department,
+      status: student.accountStatus,
+      year: student.year,
+      faceReferenceUrl: student.faceReferenceUrl,
+      isFirstTime: student.isFirstTime,
+      assignedCourses: [],
     })),
-    ...teachers.map((t) => ({
-      id: t.id,
-      code: t.teacherCode,
-      name: t.fullName,
-      email: t.email,
-      role: 'teacher' as UserRole,
-      department: t.department,
-      status: 'active' as AccountStatus,
+    ...teachers.map((teacher) => ({
+      id: teacher.id,
+      code: teacher.teacherCode,
+      name: teacher.fullName,
+      email: teacher.email,
+      role: 'teacher' as const,
+      faculty: teacher.faculty,
+      department: teacher.department,
+      status: teacher.accountStatus,
+      icitProfileStatus: teacher.icitProfileStatus,
+      assignedCourses: courses
+        .filter((course) => course.sections.some((section) => section.teacherId === teacher.id))
+        .map((course) => course.courseCode),
     })),
-    {
-      id: 'adm_0001',
-      code: 'ADM-1001',
-      name: 'Dr. Pravit Chaiyaporn',
-      email: 'pravit.c@icit.university.ac.th',
-      role: 'admin' as UserRole,
-      department: 'Central IT Infrastructure',
-      status: 'active' as AccountStatus,
-    },
-  ];
+    ...admins.map((admin) => ({
+      id: admin.id,
+      code: admin.adminCode,
+      name: admin.fullName,
+      email: admin.email,
+      role: 'admin' as const,
+      faculty: '—',
+      department: '—',
+      status: admin.accountStatus,
+      assignedCourses: [],
+    })),
+  ], [students, teachers, admins, courses]);
 
-  const filteredUsers = allUsers.filter((u) => {
-    if (roleFilter !== 'all' && u.role !== roleFilter) return false;
-    const s = searchTerm.toLowerCase();
-    return (
-      (u.name || '').toLowerCase().includes(s) ||
-      (u.code || '').toLowerCase().includes(s) ||
-      (u.email || '').toLowerCase().includes(s) ||
-      (u.department || '').toLowerCase().includes(s)
-    );
-  });
+  const viewRole: UserRole | null = view === 'students'
+    ? 'student'
+    : view === 'teachers'
+    ? 'teacher'
+    : view === 'admins'
+    ? 'admin'
+    : null;
 
-  const handleOpenStatusModal = (user: UnifiedUser) => {
-    setStatusModalUser(user);
-    setNewStatus(user.status);
-    setSuspensionReason('');
+  const filteredUsers = useMemo(() => {
+    const normalizedSearch = searchTerm.trim().toLowerCase();
+    return allUsers
+      .filter((user) => !viewRole || user.role === viewRole)
+      .filter((user) => view !== 'overview' || roleFilter === 'all' || user.role === roleFilter)
+      .filter((user) => statusFilter === 'all' || user.status === statusFilter)
+      .filter((user) => view !== 'students' || faceFilter === 'all' || (
+        faceFilter === 'registered' ? Boolean(user.faceReferenceUrl) : !user.faceReferenceUrl
+      ))
+      .filter((user) => view !== 'teachers' || icitFilter === 'all' || user.icitProfileStatus === icitFilter)
+      .filter((user) => !normalizedSearch || [user.code, user.name, user.email, user.faculty, user.department]
+        .some((value) => value.toLowerCase().includes(normalizedSearch)))
+      .sort((left, right) => {
+        const leftValue = sortKey === 'year' ? left.year || 0 : left[sortKey];
+        const rightValue = sortKey === 'year' ? right.year || 0 : right[sortKey];
+        const comparison = typeof leftValue === 'number' && typeof rightValue === 'number'
+          ? leftValue - rightValue
+          : String(leftValue).localeCompare(String(rightValue), undefined, { sensitivity: 'base' });
+        return sortDirection === 'asc' ? comparison : -comparison;
+      });
+  }, [allUsers, viewRole, view, roleFilter, statusFilter, faceFilter, icitFilter, searchTerm, sortKey, sortDirection]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize));
+  const pagedUsers = filteredUsers.slice((page - 1) * pageSize, page * pageSize);
+
+  useEffect(() => {
+    setPage(1);
+    setRoleFilter('all');
+    setStatusFilter('all');
+    setFaceFilter('all');
+    setIcitFilter('all');
+  }, [view]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, roleFilter, statusFilter, faceFilter, icitFilter, sortKey, sortDirection]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  const roleLabel = (role: UserRole) => {
+    if (role === 'student') return isThai ? 'นักศึกษา' : 'Student';
+    if (role === 'teacher') return isThai ? 'อาจารย์' : 'Teacher';
+    return isThai ? 'ผู้ดูแลระบบ' : 'Admin';
   };
 
-  const handleApplyStatusChange = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!statusModalUser) return;
+  const statusLabel = (status: AccountStatus) => {
+    if (status === 'active') return isThai ? 'ใช้งานอยู่' : 'Active';
+    if (status === 'suspended') return isThai ? 'ระงับสิทธิ์' : 'Suspended';
+    return isThai ? 'สิ้นสุด/ลาออก' : 'Terminated/Resigned';
+  };
 
-    if (statusModalUser.role === 'student') {
-      updateStudentStatus(statusModalUser.id, newStatus);
-      showToast(
-        isThai ? 'อัปเดตสถานะบัญชีแล้ว' : 'Account Status Updated',
-        isThai
-          ? `อัปเดตสถานะของนักศึกษา ${statusModalUser.name} เป็น ${
-              newStatus === 'active' ? 'ปกติ (Active)' : newStatus === 'suspended' ? 'ระงับสิทธิ์ (Suspended)' : 'ไม่ใช้งาน (Inactive)'
-            }${newStatus === 'suspended' ? ' เซสชันการสอบที่กำลังดำเนินการจะถูกยกเลิกทันที' : ''}`
-          : `Student ${statusModalUser.name} status updated to ${newStatus.toUpperCase()}.${
-              newStatus === 'suspended' ? ' Active exam sessions immediately revoked.' : ''
-            }`,
-        newStatus === 'suspended' ? 'warning' : 'success'
-      );
+  const roleBadge = (role: UserRole) => (
+    <Badge variant={role === 'admin' ? 'danger' : role === 'teacher' ? 'purple' : 'blue'} size="sm">
+      {roleLabel(role)}
+    </Badge>
+  );
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDirection((direction) => direction === 'asc' ? 'desc' : 'asc');
     } else {
-      showToast(
-        isThai ? 'อัปเดตสถานะแล้ว' : 'Status Updated',
-        isThai ? `อัปเดตผู้ใช้ ${statusModalUser.name} เรียบร้อยแล้ว` : `User ${statusModalUser.name} updated to ${newStatus}.`,
-        'info'
-      );
+      setSortKey(key);
+      setSortDirection('asc');
     }
-
-    setStatusModalUser(null);
   };
 
-  const handleAddUser = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (formData.role === 'student') {
+  const sortHeader = (key: SortKey, label: string) => (
+    <button
+      type="button"
+      onClick={() => handleSort(key)}
+      className="inline-flex cursor-pointer items-center gap-1 font-semibold hover:text-blue-700"
+    >
+      {label}
+      <ChevronsUpDown className={`h-3.5 w-3.5 ${sortKey === key ? 'text-blue-600' : 'text-gray-400'}`} />
+    </button>
+  );
+
+  const isCurrentAdmin = (user: UnifiedUser) => user.role === 'admin' && user.id === currentAdmin?.id;
+
+  const openEditModal = (user: UnifiedUser) => {
+    setEditUser(user);
+    setEditForm({
+      code: user.code,
+      name: user.name,
+      email: user.email,
+      faculty: user.faculty === '—' ? '' : user.faculty,
+      department: user.department === '—' ? '' : user.department,
+      year: user.year || 1,
+    });
+  };
+
+  const saveEdit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editUser) return;
+    if (editUser.role === 'student') {
+      updateStudent(editUser.id, {
+        studentCode: editForm.code.trim(),
+        fullName: editForm.name.trim(),
+        email: editForm.email.trim(),
+        faculty: editForm.faculty.trim(),
+        department: editForm.department.trim(),
+        year: editForm.year,
+      });
+    } else if (editUser.role === 'teacher') {
+      updateTeacher(editUser.id, {
+        teacherCode: editForm.code.trim(),
+        fullName: editForm.name.trim(),
+        email: editForm.email.trim(),
+        faculty: editForm.faculty.trim(),
+        department: editForm.department.trim(),
+      });
+    } else {
+      updateAdmin(editUser.id, {
+        adminCode: editForm.code.trim(),
+        fullName: editForm.name.trim(),
+        email: editForm.email.trim(),
+      });
+    }
+    setEditUser(null);
+  };
+
+  const openStatusModal = (user: UnifiedUser) => {
+    if (isCurrentAdmin(user)) return;
+    setStatusUser(user);
+    setStatusTarget(user.status === 'active' ? 'suspended' : 'active');
+    setStatusReason('');
+  };
+
+  const applyStatus = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!statusUser || isCurrentAdmin(statusUser)) return;
+    if (statusUser.role === 'student') {
+      updateAccountStatus(statusUser.id, statusTarget, statusReason.trim() || undefined);
+    } else if (statusUser.role === 'teacher') {
+      updateTeacher(statusUser.id, { accountStatus: statusTarget });
+    } else {
+      updateAdmin(statusUser.id, { accountStatus: statusTarget });
+    }
+    setStatusUser(null);
+  };
+
+  const confirmDelete = () => {
+    if (!deleteUser || isCurrentAdmin(deleteUser)) return;
+    const deleted = deleteUser.role === 'student'
+      ? deleteStudent(deleteUser.id)
+      : deleteUser.role === 'teacher'
+      ? deleteTeacher(deleteUser.id)
+      : deleteAdmin(deleteUser.id);
+    if (deleted) setDeleteUser(null);
+  };
+
+  const closeCreateModal = () => {
+    setCreateOpen(false);
+    setCreateRole(null);
+    setCreateForm(createEmptyForm());
+  };
+
+  const createUser = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!createRole) return;
+    if (createRole === 'student') {
       addStudent({
-        studentCode: formData.code,
-        fullName: formData.name,
-        email: formData.email,
-        department: formData.department,
-        faculty: formData.faculty,
-        year: 3,
+        studentCode: createForm.code.trim(),
+        fullName: createForm.name.trim(),
+        email: createForm.email.trim(),
+        faculty: createForm.faculty.trim(),
+        department: createForm.department.trim(),
+        year: createForm.year,
+        faceReferenceUrl: '',
         accountStatus: 'active',
         isFirstTime: true,
       });
+    } else if (createRole === 'teacher') {
+      addTeacher({
+        teacherCode: createForm.code.trim(),
+        fullName: createForm.name.trim(),
+        email: createForm.email.trim(),
+        faculty: createForm.faculty.trim(),
+        department: createForm.department.trim(),
+        role: 'teacher',
+        icitProfileStatus: 'confirmed',
+        accountStatus: 'active',
+      });
+    } else {
+      addAdmin({
+        adminCode: createForm.code.trim(),
+        fullName: createForm.name.trim(),
+        email: createForm.email.trim(),
+        role: 'admin',
+        accountStatus: 'active',
+      });
     }
-
-    showToast(
-      isThai ? 'สร้างผู้ใช้สำเร็จ' : 'User Created',
-      isThai
-        ? `ลงทะเบียน ${formData.name} ในบทบาท ${
-            formData.role === 'student' ? 'นักศึกษา' : formData.role === 'teacher' ? 'อาจารย์' : 'ผู้ดูแลระบบ'
-          } เรียบร้อยแล้ว`
-        : `Successfully enrolled ${formData.name} as ${formData.role}.`,
-      'success'
-    );
-    setIsModalOpen(false);
+    closeCreateModal();
   };
 
-  const getRoleLabel = (role: UserRole) => {
-    if (!isThai) return role;
-    switch (role) {
-      case 'student':
-        return 'นักศึกษา';
-      case 'teacher':
-        return 'อาจารย์';
-      case 'admin':
-        return 'ผู้ดูแลระบบ';
-      default:
-        return role;
-    }
-  };
+  const titles = {
+    overview: {
+      eyebrow: isThai ? 'การจัดการระบบผู้ใช้งาน' : 'USER ADMINISTRATION',
+      title: isThai ? 'ภาพรวมผู้ใช้งาน' : 'User Overview',
+      subtitle: isThai ? 'ตรวจสอบและจัดการข้อมูลผู้ใช้งานทุกประเภทภายในระบบ' : 'Review and manage every type of system user.',
+      button: isThai ? 'เพิ่มผู้ใช้งาน' : 'Create User',
+      accent: 'text-blue-600',
+      buttonClass: 'bg-blue-600 hover:bg-blue-700',
+    },
+    students: {
+      eyebrow: isThai ? 'ระบบจัดการผู้เข้าสอบ' : 'STUDENT MANAGEMENT',
+      title: isThai ? 'จัดการข้อมูลนักศึกษา' : 'Student Management',
+      subtitle: isThai ? 'จัดการข้อมูลนักศึกษาผู้เข้าสอบ ตรวจสอบสถานะการเชื่อมโยงใบหน้าชีวมิติ และสิทธิ์การสอบ' : 'Manage examinee accounts, biometric references, and exam access.',
+      button: isThai ? 'เพิ่มนักศึกษา' : 'Add Student',
+      accent: 'text-blue-600',
+      buttonClass: 'bg-blue-600 hover:bg-blue-700',
+    },
+    teachers: {
+      eyebrow: isThai ? 'การจัดการผู้คุมสอบ' : 'TEACHER DIRECTORY',
+      title: isThai ? 'จัดการข้อมูลอาจารย์' : 'Teacher Management',
+      subtitle: isThai ? 'จัดการข้อมูลอาจารย์ผู้คุมสอบ การยืนยันตัวตน ICIT และรายวิชาที่รับผิดชอบ' : 'Manage proctor accounts, ICIT verification, and assigned courses.',
+      button: isThai ? 'เพิ่มอาจารย์' : 'Add Teacher',
+      accent: 'text-purple-600',
+      buttonClass: 'bg-purple-600 hover:bg-purple-700',
+    },
+    admins: {
+      eyebrow: isThai ? 'การจัดการสิทธิ์ระบบขั้นสูง' : 'SYSTEM ADMINISTRATORS',
+      title: isThai ? 'จัดการข้อมูลผู้ดูแลระบบ' : 'Administrator Management',
+      subtitle: isThai ? 'จัดการบัญชีผู้ดูแลระบบ ยืนยันตัวตนดิจิทัล และสิทธิ์การควบคุมระดับโครงสร้างพื้นฐาน' : 'Manage administrator identities and infrastructure-level privileges.',
+      button: isThai ? 'เพิ่มผู้ดูแลระบบ' : 'Add Admin',
+      accent: 'text-red-600',
+      buttonClass: 'bg-red-600 hover:bg-red-700',
+    },
+  }[view];
 
-  const getStatusLabel = (status: AccountStatus) => {
-    if (!isThai) return status;
-    switch (status) {
-      case 'active':
-        return 'ปกติ (Active)';
-      case 'suspended':
-        return 'ระงับสิทธิ์ (Suspended)';
-      case 'graduated_inactive':
-        return 'ไม่ใช้งาน / จบการศึกษา';
-      default:
-        return status;
-    }
-  };
+  const overviewMetrics = [
+    { label: isThai ? 'ผู้ใช้ทั้งหมด' : 'Total Users', value: allUsers.length, note: isThai ? 'บัญชีในระบบ' : 'system accounts', icon: Users, iconClass: 'text-blue-600', valueClass: 'text-gray-900' },
+    { label: isThai ? 'นักศึกษา' : 'Students', value: students.length, note: isThai ? 'ดูรายชื่อ →' : 'view list →', icon: GraduationCap, iconClass: 'text-blue-600', valueClass: 'text-gray-900' },
+    { label: isThai ? 'อาจารย์' : 'Teachers', value: teachers.length, note: isThai ? 'ดูรายชื่อ →' : 'view list →', icon: BriefcaseBusiness, iconClass: 'text-purple-600', valueClass: 'text-gray-900' },
+    { label: isThai ? 'ผู้ดูแลระบบ' : 'Admins', value: admins.length, note: isThai ? 'ดูรายชื่อ →' : 'view list →', icon: Shield, iconClass: 'text-red-600', valueClass: 'text-gray-900' },
+    { label: isThai ? 'ใช้งานปกติ' : 'Active', value: allUsers.filter((user) => user.status === 'active').length, note: isThai ? 'พร้อมเข้าสอบ' : 'ready for access', icon: CheckCircle2, iconClass: 'text-emerald-600', valueClass: 'text-emerald-600' },
+    { label: isThai ? 'ระงับสิทธิ์' : 'Suspended', value: allUsers.filter((user) => user.status === 'suspended').length, note: isThai ? 'ถูกจำกัดสิทธิ์' : 'access restricted', icon: AlertTriangle, iconClass: 'text-red-600', valueClass: 'text-red-600' },
+    { label: isThai ? 'พ้นสภาพ/จบ' : 'Inactive', value: allUsers.filter((user) => user.status === 'graduated_inactive').length, note: isThai ? 'ไม่สามารถสอบได้' : 'cannot sign in', icon: ShieldCheck, iconClass: 'text-gray-500', valueClass: 'text-gray-600' },
+  ];
+  const studentMetrics = [
+    { label: isThai ? 'นักศึกษาทั้งหมด' : 'Total Students', value: students.length, note: isThai ? 'บัญชีในระบบ' : 'system accounts', icon: GraduationCap, iconClass: 'text-blue-600', valueClass: 'text-gray-900' },
+    { label: isThai ? 'สถานะปกติ' : 'Active', value: students.filter((student) => student.accountStatus === 'active').length, note: isThai ? 'พร้อมเข้าสอบ' : 'ready for exams', icon: CheckCircle2, iconClass: 'text-emerald-600', valueClass: 'text-emerald-600' },
+    { label: isThai ? 'ระงับสิทธิ์' : 'Suspended', value: students.filter((student) => student.accountStatus === 'suspended').length, note: isThai ? 'ถูกจำกัดสิทธิ์' : 'access restricted', icon: AlertTriangle, iconClass: 'text-red-600', valueClass: 'text-red-600' },
+    { label: isThai ? 'มีภาพถ่ายชีวมิติ' : 'Face References', value: students.filter((student) => Boolean(student.faceReferenceUrl)).length, note: isThai ? 'ลงทะเบียนแล้ว' : 'registered', icon: Camera, iconClass: 'text-purple-600', valueClass: 'text-purple-600' },
+  ];
+  const teacherMetrics = [
+    { label: isThai ? 'อาจารย์ทั้งหมด' : 'Total Teachers', value: teachers.length, note: isThai ? 'ผู้สอนในระบบ' : 'faculty accounts', icon: BriefcaseBusiness, iconClass: 'text-purple-600', valueClass: 'text-gray-900' },
+    { label: isThai ? 'สถานะปกติ' : 'Active', value: teachers.filter((teacher) => teacher.accountStatus === 'active').length, note: isThai ? 'พร้อมคุมสอบ' : 'ready to proctor', icon: CheckCircle2, iconClass: 'text-emerald-600', valueClass: 'text-emerald-600' },
+    { label: isThai ? 'ยืนยัน ICIT แล้ว' : 'ICIT Confirmed', value: teachers.filter((teacher) => teacher.icitProfileStatus === 'confirmed').length, note: isThai ? 'โปรไฟล์สมบูรณ์' : 'profile complete', icon: ShieldCheck, iconClass: 'text-blue-600', valueClass: 'text-blue-600' },
+    { label: isThai ? 'รอยืนยันโปรไฟล์' : 'Pending Profile', value: teachers.filter((teacher) => teacher.icitProfileStatus === 'pending').length, note: isThai ? 'ต้องเข้าระบบครั้งแรก' : 'first login required', icon: AlertTriangle, iconClass: 'text-amber-600', valueClass: 'text-amber-600' },
+  ];
+  const adminMetrics = [
+    { label: isThai ? 'ผู้ดูแลระบบทั้งหมด' : 'Total Admins', value: admins.length, note: isThai ? 'สิทธิ์ระดับโครงสร้างพื้นฐาน' : 'infrastructure access', icon: Shield, iconClass: 'text-red-600', valueClass: 'text-gray-900' },
+    { label: isThai ? 'สถานะปกติ' : 'Active', value: admins.filter((admin) => admin.accountStatus === 'active').length, note: isThai ? 'ปฏิบัติการได้เต็มรูปแบบ' : 'fully operational', icon: CheckCircle2, iconClass: 'text-emerald-600', valueClass: 'text-emerald-600' },
+    { label: isThai ? 'ระงับสิทธิ์' : 'Suspended', value: admins.filter((admin) => admin.accountStatus === 'suspended').length, note: isThai ? 'ถูกระงับสิทธิ์' : 'access suspended', icon: AlertTriangle, iconClass: 'text-red-600', valueClass: 'text-red-600' },
+  ];
+  const metrics = view === 'overview'
+    ? overviewMetrics
+    : view === 'students'
+    ? studentMetrics
+    : view === 'teachers'
+    ? teacherMetrics
+    : adminMetrics;
+  const metricGridClass = view === 'overview' ? 'xl:grid-cols-7' : view === 'admins' ? 'lg:grid-cols-3' : 'lg:grid-cols-4';
+  const tableColumnCount = view === 'admins' ? 5 : view === 'overview' ? 7 : 8;
 
   return (
     <div className="space-y-6 text-left">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-gray-200 gap-3">
+      <header className="flex flex-col justify-between gap-3 border-b border-gray-200 pb-4 sm:flex-row sm:items-center">
         <div>
-          <span className="text-xs font-bold uppercase tracking-wider text-blue-600">
-            {isThai ? 'การควบคุมสิทธิ์การเข้าถึง (A2 & A3)' : 'Access Control (A2 & A3)'}
+          <span className={`text-xs font-bold uppercase tracking-wider ${titles.accent}`}>
+            {titles.eyebrow}
           </span>
-          <h1 className="text-2xl font-bold text-gray-900 mt-0.5">
-            {isThai ? 'จัดการผู้ใช้ & สิทธิ์การใช้งาน' : 'User & Role Management'}
-          </h1>
-          <p className="text-xs text-gray-500 mt-1">
+          <h1 className="mt-0.5 text-2xl font-bold text-gray-900">{titles.title}</h1>
+          <p className="mt-1 text-xs text-gray-500">{titles.subtitle}</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setCreateRole(viewRole);
+            setCreateOpen(true);
+          }}
+          className={`flex cursor-pointer items-center gap-2 self-start rounded-xl px-4 py-2.5 text-xs font-semibold text-white shadow-md transition-colors sm:self-auto ${titles.buttonClass}`}
+        >
+          <Plus className="h-4 w-4" />
+          <span>{titles.button}</span>
+        </button>
+      </header>
+
+      {view === 'admins' && (
+        <div className="flex items-start gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+          <Shield className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+          <p>
+            <strong>{isThai ? 'ข้อกำหนดความปลอดภัย: ' : 'Security Constraint: '}</strong>
             {isThai
-              ? 'จัดการบัญชีสถาบัน, กำหนดบทบาทอาจารย์/นักศึกษา และระงับสิทธิ์บัญชีผู้เข้าสอบทันทีเมื่อพบการทุจริต'
-              : 'Manage university credentials, assign Teacher/Student roles, and enforce immediate suspension of examinee accounts.'}
+              ? 'ระบบจะไม่อนุญาตให้ลบหรือระงับสิทธิ์บัญชีผู้ดูแลระบบที่กำลังเข้าสู่ระบบอยู่ในปัจจุบัน'
+              : 'The currently authenticated administrator cannot be deleted or suspended.'}
           </p>
         </div>
+      )}
 
-        <button
-          onClick={() => setIsModalOpen(true)}
-          className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-md transition-all flex items-center gap-2 cursor-pointer self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" />
-          <span>{isThai ? 'เพิ่มผู้ใช้ใหม่' : 'Provision New User'}</span>
-        </button>
-      </div>
+      <section className={`grid grid-cols-2 gap-3 ${metricGridClass}`} aria-label={isThai ? 'สรุปจำนวนผู้ใช้งาน' : 'User metrics'}>
+        {metrics.map((metric) => {
+          const Icon = metric.icon;
+          return (
+            <article key={metric.label} className="relative min-h-24 rounded-2xl border border-gray-200 bg-white p-4 shadow-xs">
+              <Icon className={`absolute top-4 right-4 h-4 w-4 ${metric.iconClass}`} />
+              <div className="pr-6 text-[11px] font-medium text-gray-500">{metric.label}</div>
+              <div className={`mt-2 font-mono text-2xl font-bold ${metric.valueClass}`}>{metric.value}</div>
+              <div className={`mt-1 text-[10px] ${metric.iconClass}`}>{metric.note}</div>
+            </article>
+          );
+        })}
+      </section>
 
-      {/* Filter Bar */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-gray-600">{isThai ? 'กรองตามบทบาท:' : 'Filter Role:'}</span>
-          <select
-            value={roleFilter}
-            onChange={(e) => setRoleFilter(e.target.value)}
-            className="px-3 py-1.5 bg-white border border-gray-200 rounded-xl text-xs text-gray-800 focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="all">
-              {isThai ? 'ทุกบทบาท' : 'All Roles'} ({allUsers.length})
-            </option>
-            <option value="student">
-              {isThai ? 'นักศึกษา' : 'Students'} ({students.length})
-            </option>
-            <option value="teacher">
-              {isThai ? 'อาจารย์' : 'Teachers'} ({teachers.length})
-            </option>
-            <option value="admin">
-              {isThai ? 'ผู้ดูแลระบบ' : 'Administrators'} (1)
-            </option>
-          </select>
+      <section className="space-y-4">
+        <div className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-3 shadow-xs lg:flex-row lg:items-center">
+          <div className="relative min-w-0 flex-1">
+            <Search className="absolute top-2.5 left-3 h-4 w-4 text-gray-400" />
+            <input
+              type="search"
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder={isThai ? 'ค้นหาด้วยรหัสประจำตัว, ชื่อ-นามสกุล, อีเมล หรือภาควิชา...' : 'Search by ID, full name, email, or department...'}
+              className="w-full rounded-xl border border-gray-200 bg-white py-2 pr-4 pl-9 text-xs text-gray-800 focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div className="flex w-full flex-col gap-2 sm:flex-row lg:w-auto">
+            {view === 'overview' && (
+              <select
+                value={roleFilter}
+                onChange={(event) => setRoleFilter(event.target.value as UserRole | 'all')}
+                className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs text-gray-800 focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="all">{isThai ? 'ทุกบทบาท' : 'All roles'}</option>
+                <option value="student">{isThai ? 'นักศึกษา' : 'Students'}</option>
+                <option value="teacher">{isThai ? 'อาจารย์' : 'Teachers'}</option>
+                <option value="admin">{isThai ? 'ผู้ดูแลระบบ' : 'Admins'}</option>
+              </select>
+            )}
+            <select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as AccountStatus | 'all')}
+              className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs text-gray-800 focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">{isThai ? 'ทุกสถานะ' : 'All statuses'}</option>
+              <option value="active">{statusLabel('active')}</option>
+              <option value="suspended">{statusLabel('suspended')}</option>
+              <option value="graduated_inactive">{statusLabel('graduated_inactive')}</option>
+            </select>
+            {view === 'students' && (
+              <select
+                value={faceFilter}
+                onChange={(event) => setFaceFilter(event.target.value as 'all' | 'registered' | 'missing')}
+                className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs text-gray-800 focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="all">{isThai ? 'ภาพถ่ายชีวมิติทั้งหมด' : 'All biometric photos'}</option>
+                <option value="registered">{isThai ? 'ยืนยันแล้ว' : 'Registered'}</option>
+                <option value="missing">{isThai ? 'ยังไม่มีภาพ' : 'Missing photo'}</option>
+              </select>
+            )}
+            {view === 'teachers' && (
+              <select
+                value={icitFilter}
+                onChange={(event) => setIcitFilter(event.target.value as 'all' | 'confirmed' | 'pending')}
+                className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs text-gray-800 focus:ring-2 focus:ring-purple-500"
+              >
+                <option value="all">{isThai ? 'ICIT: ทุกการยืนยัน' : 'ICIT: All verification'}</option>
+                <option value="confirmed">{isThai ? 'ยืนยันแล้ว' : 'Confirmed'}</option>
+                <option value="pending">{isThai ? 'รอยืนยัน' : 'Pending'}</option>
+              </select>
+            )}
+          </div>
         </div>
 
-        <div className="relative w-full sm:w-72">
-          <Search className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
-          <input
-            type="text"
-            placeholder={isThai ? 'ค้นหาด้วยรหัส, ชื่อ, ภาควิชา...' : 'Search by code, name, department...'}
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-xl text-xs text-gray-800 focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-      </div>
-
-      {/* Table */}
-      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-xs">
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs text-left">
-            <thead className="bg-gray-50 text-gray-600 font-semibold border-b border-gray-200">
-              <tr>
-                <th className="px-6 py-3.5">{isThai ? 'ข้อมูลผู้ใช้' : 'User Details'}</th>
-                <th className="px-4 py-3.5">{isThai ? 'รหัสประจำตัว' : 'Institutional ID'}</th>
-                <th className="px-4 py-3.5">{isThai ? 'บทบาท' : 'Assigned Role'}</th>
-                <th className="px-4 py-3.5">{isThai ? 'ภาควิชา / สาขา' : 'Department'}</th>
-                <th className="px-4 py-3.5">{isThai ? 'สถานะบัญชี' : 'Account Status'}</th>
-                <th className="px-6 py-3.5 text-right">{isThai ? 'การจัดการ' : 'Actions'}</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {filteredUsers.map((user) => (
-                <tr key={user.id} className="hover:bg-gray-50/70 transition-colors">
-                  <td className="px-6 py-3.5">
-                    <div className="font-semibold text-gray-900">{user.name}</div>
-                    <div className="text-gray-500 font-mono text-[11px]">{user.email}</div>
-                  </td>
-
-                  <td className="px-4 py-3.5 font-mono font-medium text-gray-800">
-                    {user.code}
-                  </td>
-
-                  <td className="px-4 py-3.5">
-                    {user.role === 'admin' ? (
-                      <Badge variant="danger" size="sm">{getRoleLabel('admin')}</Badge>
-                    ) : user.role === 'teacher' ? (
-                      <Badge variant="purple" size="sm">{getRoleLabel('teacher')}</Badge>
-                    ) : (
-                      <Badge variant="blue" size="sm">{getRoleLabel('student')}</Badge>
-                    )}
-                  </td>
-
-                  <td className="px-4 py-3.5 text-gray-600">
-                    {user.department}
-                  </td>
-
-                  <td className="px-4 py-3.5">
-                    <AccountStatusBadge status={user.status} />
-                  </td>
-
-                  <td className="px-6 py-3.5 text-right">
-                    <button
-                      onClick={() => handleOpenStatusModal(user)}
-                      className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-100 font-semibold text-[11px] cursor-pointer"
-                    >
-                      {isThai ? 'เปลี่ยนสถานะ' : 'Change Status'}
-                    </button>
-                  </td>
+        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xs">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] text-left text-xs">
+              <thead className="border-b border-gray-200 bg-gray-50 text-gray-600">
+                <tr>
+                  <th className="px-4 py-3.5">{sortHeader('code', isThai ? 'รหัส' : 'ID')}</th>
+                  <th className="px-4 py-3.5">{sortHeader('name', isThai ? 'ชื่อ-นามสกุล' : 'Full Name')}</th>
+                  <th className="px-4 py-3.5">{sortHeader('email', isThai ? 'อีเมลมหาวิทยาลัย' : 'University Email')}</th>
+                  {view === 'overview' && <th className="px-4 py-3.5">{sortHeader('role', isThai ? 'บทบาท / ประเภท' : 'Role / Type')}</th>}
+                  {view !== 'admins' && (
+                    <th className="px-4 py-3.5">{sortHeader('department', isThai ? 'คณะ / ภาควิชา' : 'Faculty / Department')}</th>
+                  )}
+                  {view === 'students' && <th className="px-4 py-3.5">{sortHeader('year', isThai ? 'ชั้นปี' : 'Year')}</th>}
+                  {view === 'students' && <th className="px-4 py-3.5">{isThai ? 'ภาพถ่ายชีวมิติ' : 'Biometric Photo'}</th>}
+                  {view === 'teachers' && <th className="px-4 py-3.5">{isThai ? 'รายวิชาที่รับผิดชอบ' : 'Assigned Courses'}</th>}
+                  {view === 'teachers' && <th className="px-4 py-3.5">{isThai ? 'สถานะ ICIT' : 'ICIT Status'}</th>}
+                  <th className="px-4 py-3.5">{sortHeader('status', isThai ? 'สถานะบัญชี' : 'Account Status')}</th>
+                  <th className="px-4 py-3.5 text-right">{isThai ? 'การจัดการ' : 'Actions'}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* STATUS CHANGE & SUSPENSION MODAL */}
-      <Modal
-        isOpen={!!statusModalUser}
-        onClose={() => setStatusModalUser(null)}
-        title={
-          isThai
-            ? `แก้ไขสถานะบัญชี: ${statusModalUser?.name}`
-            : `Modify Account Status: ${statusModalUser?.name}`
-        }
-        maxWidth="md"
-      >
-        <form onSubmit={handleApplyStatusChange} className="space-y-4 text-left text-xs">
-          <div>
-            <label className="block font-semibold text-gray-700 mb-1">
-              {isThai ? 'สถานะบัญชีใหม่' : 'Target Account Status'}
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              {(['active', 'suspended', 'graduated_inactive'] as AccountStatus[]).map((st) => (
-                <button
-                  key={st}
-                  type="button"
-                  onClick={() => setNewStatus(st)}
-                  className={`py-2 px-2 rounded-xl font-bold border capitalize transition-colors cursor-pointer ${
-                    newStatus === st
-                      ? st === 'suspended'
-                        ? 'bg-red-600 text-white border-red-600'
-                        : 'bg-blue-600 text-white border-blue-600'
-                      : 'bg-gray-50 border-gray-300 text-gray-700'
-                  }`}
-                >
-                  {getStatusLabel(st)}
-                </button>
-              ))}
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {pagedUsers.map((user) => {
+                  const protectedAdmin = isCurrentAdmin(user);
+                  return (
+                    <tr key={`${user.role}-${user.id}`} className="transition-colors hover:bg-gray-50/70">
+                      <td className="px-4 py-3.5 font-mono font-semibold text-gray-800">{user.code}</td>
+                      <td className="px-4 py-3.5 font-semibold text-gray-900">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span>{user.name}</span>
+                          {view === 'students' && user.isFirstTime && (
+                            <Badge variant="warning" size="sm">{isThai ? 'รอลงทะเบียน' : 'Enrollment pending'}</Badge>
+                          )}
+                          {view === 'admins' && protectedAdmin && (
+                            <Badge variant="warning" size="sm">{isThai ? 'บัญชีปัจจุบัน (คุณ)' : 'Current account (you)'}</Badge>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3.5 font-mono text-[11px] text-gray-500">{user.email}</td>
+                      {view === 'overview' && <td className="px-4 py-3.5">{roleBadge(user.role)}</td>}
+                      {view !== 'admins' && (
+                        <td className="px-4 py-3.5 text-gray-600">
+                          <div>{user.department}</div>
+                          <div className="mt-0.5 text-[10px] text-gray-400">{user.faculty}</div>
+                        </td>
+                      )}
+                      {view === 'students' && <td className="px-4 py-3.5 text-center text-gray-700">{user.year}</td>}
+                      {view === 'students' && (
+                        <td className="px-4 py-3.5">
+                          {user.faceReferenceUrl ? (
+                            <div className="flex items-center gap-2">
+                              <img src={user.faceReferenceUrl} alt="" className="h-7 w-7 rounded-full border border-emerald-300 object-cover" />
+                              <span className="whitespace-nowrap text-[10px] font-semibold text-emerald-700">{isThai ? 'ยืนยันแล้ว' : 'Verified'}</span>
+                            </div>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 whitespace-nowrap text-[10px] font-semibold text-amber-600">
+                              <AlertTriangle className="h-3.5 w-3.5" />
+                              {isThai ? 'ยังไม่มีภาพ' : 'Missing photo'}
+                            </span>
+                          )}
+                        </td>
+                      )}
+                      {view === 'teachers' && (
+                        <td className="px-4 py-3.5">
+                          <div className="flex max-w-44 flex-wrap gap-1">
+                            {user.assignedCourses.length
+                              ? user.assignedCourses.map((courseCode) => <Badge key={courseCode} variant="purple" size="sm">{courseCode}</Badge>)
+                              : '—'}
+                          </div>
+                        </td>
+                      )}
+                      {view === 'teachers' && (
+                        <td className="px-4 py-3.5">
+                          <Badge variant={user.icitProfileStatus === 'confirmed' ? 'success' : 'warning'} size="sm">
+                            {user.icitProfileStatus === 'confirmed'
+                              ? (isThai ? 'ยืนยันแล้ว' : 'Confirmed')
+                              : (isThai ? 'รอยืนยัน' : 'Pending')}
+                          </Badge>
+                        </td>
+                      )}
+                      <td className="px-4 py-3.5"><AccountStatusBadge status={user.status} /></td>
+                      <td className="px-4 py-3.5">
+                        <div className="flex justify-end gap-1.5">
+                          <button type="button" onClick={() => setViewUser(user)} className="cursor-pointer rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800" title={isThai ? 'ดูข้อมูล' : 'View'}>
+                            <Eye className="h-3.5 w-3.5" />
+                          </button>
+                          <button type="button" onClick={() => openEditModal(user)} className="cursor-pointer rounded-lg p-1.5 text-slate-500 hover:bg-blue-50 hover:text-blue-700" title={isThai ? 'แก้ไข' : 'Edit'}>
+                            <Edit2 className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openStatusModal(user)}
+                            disabled={protectedAdmin}
+                            className="cursor-pointer rounded-lg p-1.5 text-amber-600 hover:bg-amber-50 disabled:cursor-not-allowed disabled:text-gray-300 disabled:opacity-70"
+                            title={protectedAdmin
+                              ? (isThai ? 'ไม่สามารถระงับบัญชีผู้ดูแลที่กำลังใช้งาน' : 'The active admin cannot be suspended')
+                              : user.status === 'active' ? (isThai ? 'ระงับสิทธิ์' : 'Suspend') : (isThai ? 'เปิดใช้งานอีกครั้ง' : 'Reactivate')}
+                          >
+                            {user.status === 'active' ? <AlertTriangle className="h-3.5 w-3.5" /> : <UserCheck className="h-3.5 w-3.5" />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => !protectedAdmin && setDeleteUser(user)}
+                            disabled={protectedAdmin}
+                            className="cursor-pointer rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:text-gray-300 disabled:opacity-70"
+                            title={protectedAdmin
+                              ? (isThai ? 'ไม่สามารถลบบัญชีผู้ดูแลที่กำลังใช้งาน' : 'The active admin cannot be deleted')
+                              : (isThai ? 'ลบ' : 'Delete')}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {pagedUsers.length === 0 && (
+                  <tr>
+                    <td colSpan={tableColumnCount} className="px-6 py-12 text-center text-sm text-gray-400">
+                      {isThai ? 'ไม่พบผู้ใช้งานที่ตรงกับเงื่อนไข' : 'No users match the current filters.'}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex flex-col items-center justify-between gap-3 border-t border-gray-100 bg-gray-50 px-4 py-3 sm:flex-row">
+            <span className="text-[11px] text-gray-500">
+              {isThai
+                ? `แสดง ${(page - 1) * pageSize + (pagedUsers.length ? 1 : 0)} - ${(page - 1) * pageSize + pagedUsers.length} จากทั้งหมด ${filteredUsers.length} รายการ`
+                : `Showing ${pagedUsers.length} of ${filteredUsers.length} users`}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                disabled={page === 1}
+                className="cursor-pointer rounded-lg border border-gray-200 bg-white p-1.5 text-gray-600 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label={isThai ? 'หน้าก่อนหน้า' : 'Previous page'}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <span className="min-w-20 text-center text-xs font-medium text-gray-700">
+                {isThai ? `หน้า ${page} / ${totalPages}` : `Page ${page} / ${totalPages}`}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                disabled={page === totalPages}
+                className="cursor-pointer rounded-lg border border-gray-200 bg-white p-1.5 text-gray-600 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label={isThai ? 'หน้าถัดไป' : 'Next page'}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
             </div>
           </div>
+        </div>
+      </section>
 
-          {newStatus === 'suspended' && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-xl space-y-2 text-red-900">
-              <div className="font-semibold flex items-center gap-1.5">
-                <AlertTriangle className="w-4 h-4 text-red-600" />
-                <span>{isThai ? 'คำเตือน: การระงับสิทธิ์เซสชันทันที' : 'Immediate Session Revocation Warning'}</span>
+      <Modal isOpen={!!viewUser} onClose={() => setViewUser(null)} title={isThai ? 'รายละเอียดผู้ใช้งาน' : 'User Details'} maxWidth="md">
+        {viewUser && (
+          <div className="space-y-4 text-left text-xs">
+            <div className="flex items-center gap-3 rounded-xl bg-gray-50 p-4">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-100 text-blue-700">
+                <Users className="h-5 w-5" />
               </div>
-              <p className="text-[11px] text-red-700 leading-relaxed">
-                {isThai
-                  ? 'การระงับสิทธิ์จะตัดการสอบที่กำลังดำเนินการบนเครื่องคอมพิวเตอร์ห้องปฏิบัติการทันที และนักศึกษาจะไม่สามารถส่งไฟล์คำตอบได้'
-                  : 'Suspension will immediately terminate any active examination session on their assigned lab workstation. They will not be permitted to submit answer archives.'}
-              </p>
               <div>
-                <label className="block font-semibold text-red-900 mb-1">
-                  {isThai ? 'เหตุผลการระงับสิทธิ์ (จำเป็น):' : 'Mandatory Suspension Reason:'}
-                </label>
+                <div className="text-base font-bold text-gray-900">{viewUser.name}</div>
+                <div className="font-mono text-gray-500">{viewUser.code}</div>
+              </div>
+              <div className="ml-auto">{roleBadge(viewUser.role)}</div>
+            </div>
+            {[
+              [isThai ? 'อีเมลมหาวิทยาลัย' : 'University Email', viewUser.email],
+              [isThai ? 'คณะ' : 'Faculty', viewUser.faculty],
+              [isThai ? 'ภาควิชา' : 'Department', viewUser.department],
+              [isThai ? 'สถานะบัญชี' : 'Account Status', statusLabel(viewUser.status)],
+              ...(viewUser.role === 'student' ? [[isThai ? 'ชั้นปี' : 'Academic Year', String(viewUser.year || '—')]] : []),
+              ...(viewUser.role === 'teacher' ? [[isThai ? 'รายวิชาที่รับผิดชอบ' : 'Assigned Courses', viewUser.assignedCourses.join(', ') || '—']] : []),
+            ].map(([label, value]) => (
+              <div key={label} className="flex justify-between gap-4 border-b border-gray-100 pb-2">
+                <span className="text-gray-500">{label}</span>
+                <span className="text-right font-medium text-gray-900">{value}</span>
+              </div>
+            ))}
+            <div className="flex justify-end pt-2">
+              <button type="button" onClick={() => setViewUser(null)} className="cursor-pointer rounded-xl bg-gray-100 px-4 py-2 font-semibold text-gray-700 hover:bg-gray-200">
+                {isThai ? 'ปิด' : 'Close'}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal isOpen={!!editUser} onClose={() => setEditUser(null)} title={isThai ? 'แก้ไขข้อมูลผู้ใช้งาน' : 'Edit User'} maxWidth="lg">
+        {editUser && (
+          <UserForm
+            form={editForm}
+            onChange={setEditForm}
+            role={editUser.role}
+            isThai={isThai}
+            onSubmit={saveEdit}
+            onCancel={() => setEditUser(null)}
+            submitLabel={isThai ? 'บันทึกการแก้ไข' : 'Save Changes'}
+          />
+        )}
+      </Modal>
+
+      <Modal isOpen={!!statusUser} onClose={() => setStatusUser(null)} title={isThai ? 'ยืนยันการเปลี่ยนสถานะ' : 'Confirm Status Change'} maxWidth="md">
+        {statusUser && (
+          <form onSubmit={applyStatus} className="space-y-4 text-left text-xs">
+            <div className={`rounded-xl border p-4 ${statusTarget === 'suspended' ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-blue-200 bg-blue-50 text-blue-900'}`}>
+              <div className="font-semibold">
+                {statusTarget === 'suspended'
+                  ? (isThai ? `ระงับสิทธิ์บัญชี ${statusUser.name}` : `Suspend ${statusUser.name}`)
+                  : (isThai ? `เปิดใช้งานบัญชี ${statusUser.name}` : `Reactivate ${statusUser.name}`)}
+              </div>
+              <p className="mt-1 text-[11px] opacity-80">
+                {statusTarget === 'suspended'
+                  ? (isThai ? 'ผู้ใช้งานจะไม่สามารถเข้าถึงส่วนที่ต้องยืนยันสิทธิ์ได้' : 'The user will lose access to protected system flows.')
+                  : (isThai ? 'ผู้ใช้งานจะสามารถเข้าสู่ระบบตามสิทธิ์ของบทบาทได้อีกครั้ง' : 'Role-based system access will be restored.')}
+              </p>
+            </div>
+            {statusTarget === 'suspended' && statusUser.role === 'student' && (
+              <div>
+                <label className="mb-1 block font-semibold text-gray-700">{isThai ? 'เหตุผลการระงับสิทธิ์' : 'Suspension reason'}</label>
                 <input
                   type="text"
                   required
-                  value={suspensionReason}
-                  onChange={(e) => setSuspensionReason(e.target.value)}
-                  placeholder={isThai ? 'เช่น ฝ่าฝืนวินัยการสอบระหว่างดำเนินการ' : 'e.g. Disciplinary breach during exam'}
-                  className="w-full px-3 py-1.5 rounded-lg border border-red-300 text-xs focus:ring-2 focus:ring-red-500 bg-white"
+                  value={statusReason}
+                  onChange={(event) => setStatusReason(event.target.value)}
+                  className="w-full rounded-xl border border-gray-300 px-3 py-2 focus:ring-2 focus:ring-blue-500"
                 />
               </div>
+            )}
+            <div className="flex justify-end gap-2 border-t border-gray-100 pt-4">
+              <button type="button" onClick={() => setStatusUser(null)} className="cursor-pointer rounded-xl border border-gray-300 px-4 py-2 font-semibold text-gray-700 hover:bg-gray-50">{isThai ? 'ยกเลิก' : 'Cancel'}</button>
+              <button type="submit" className={`cursor-pointer rounded-xl px-5 py-2 font-semibold text-white ${statusTarget === 'suspended' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                {isThai ? 'ยืนยัน' : 'Confirm'}
+              </button>
             </div>
-          )}
-
-          <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
-            <button
-              type="button"
-              onClick={() => setStatusModalUser(null)}
-              className="px-4 py-2 rounded-xl border border-gray-300 text-gray-700 font-semibold text-xs hover:bg-gray-50 cursor-pointer"
-            >
-              {isThai ? 'ยกเลิก' : 'Cancel'}
-            </button>
-            <button
-              type="submit"
-              className={`px-6 py-2 rounded-xl text-white font-semibold text-xs shadow-md cursor-pointer ${
-                newStatus === 'suspended' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'
-              }`}
-            >
-              {isThai ? 'บันทึกสถานะ' : 'Save Status'}
-            </button>
-          </div>
-        </form>
+          </form>
+        )}
       </Modal>
 
-      {/* ADD USER MODAL */}
-      <Modal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        title={isThai ? 'เพิ่มผู้ใช้ใหม่เข้าสู่ระบบ' : 'Provision New System User'}
-        maxWidth="md"
-      >
-        <form onSubmit={handleAddUser} className="space-y-4 text-left text-xs">
-          <div>
-            <label className="block font-semibold text-gray-700 mb-1">{isThai ? 'ชื่อ-นามสกุล' : 'Full Name'}</label>
-            <input
-              type="text"
-              required
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block font-semibold text-gray-700 mb-1">
-                {isThai ? 'รหัสประจำตัวสถาบัน' : 'Institutional ID / Code'}
-              </label>
-              <input
-                type="text"
-                required
-                value={formData.code}
-                onChange={(e) => setFormData({ ...formData, code: e.target.value })}
-                className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs focus:ring-2 focus:ring-blue-500 font-mono"
-              />
+      <Modal isOpen={!!deleteUser} onClose={() => setDeleteUser(null)} title={isThai ? 'ยืนยันการลบผู้ใช้งาน' : 'Confirm User Deletion'} maxWidth="sm">
+        {deleteUser && (
+          <div className="space-y-4 text-left text-xs">
+            <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-900">
+              <div className="font-semibold">{isThai ? `ลบ ${deleteUser.name}?` : `Delete ${deleteUser.name}?`}</div>
+              <p className="mt-1 text-[11px] text-red-700">
+                {isThai ? 'ระบบจะตรวจสอบความสัมพันธ์ของข้อมูลด้วยข้อจำกัดเดิมก่อนลบ' : 'Existing data-relation safeguards will be checked before deletion.'}
+              </p>
             </div>
-            <div>
-              <label className="block font-semibold text-gray-700 mb-1">{isThai ? 'บทบาท' : 'Assigned Role'}</label>
-              <select
-                value={formData.role}
-                onChange={(e) => setFormData({ ...formData, role: e.target.value as any })}
-                className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="student">{isThai ? 'นักศึกษาผู้เข้าสอบ' : 'Student Examinee'}</option>
-                <option value="teacher">{isThai ? 'อาจารย์ผู้คุมสอบ' : 'Teacher Proctor'}</option>
-                <option value="admin">{isThai ? 'ผู้ดูแลระบบ' : 'System Administrator'}</option>
-              </select>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setDeleteUser(null)} className="cursor-pointer rounded-xl border border-gray-300 px-4 py-2 font-semibold text-gray-700 hover:bg-gray-50">{isThai ? 'ยกเลิก' : 'Cancel'}</button>
+              <button type="button" onClick={confirmDelete} className="cursor-pointer rounded-xl bg-red-600 px-5 py-2 font-semibold text-white hover:bg-red-700">{isThai ? 'ลบผู้ใช้งาน' : 'Delete User'}</button>
             </div>
           </div>
+        )}
+      </Modal>
 
-          <div>
-            <label className="block font-semibold text-gray-700 mb-1">{isThai ? 'อีเมล' : 'Email Address'}</label>
-            <input
-              type="email"
-              required
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs focus:ring-2 focus:ring-blue-500"
-            />
+      <Modal isOpen={createOpen} onClose={closeCreateModal} title={isThai ? 'เพิ่มผู้ใช้งาน' : 'Create User'} maxWidth={createRole ? 'lg' : 'md'}>
+        {!createRole ? (
+          <div className="space-y-3 text-left">
+            <p className="text-xs text-gray-500">{isThai ? 'เลือกประเภทบัญชีที่ต้องการสร้าง' : 'Choose the type of account to create.'}</p>
+            {([
+              { role: 'student' as const, icon: GraduationCap, th: 'เพิ่มนักศึกษา', en: 'Add Student', color: 'text-blue-700 bg-blue-50 border-blue-200' },
+              { role: 'teacher' as const, icon: UserCog, th: 'เพิ่มอาจารย์', en: 'Add Teacher', color: 'text-purple-700 bg-purple-50 border-purple-200' },
+              { role: 'admin' as const, icon: Shield, th: 'เพิ่มผู้ดูแลระบบ', en: 'Add Admin', color: 'text-red-700 bg-red-50 border-red-200' },
+            ]).map((option) => {
+              const Icon = option.icon;
+              return (
+                <button
+                  key={option.role}
+                  type="button"
+                  onClick={() => setCreateRole(option.role)}
+                  className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-gray-200 p-4 text-left transition-colors hover:border-blue-300 hover:bg-gray-50"
+                >
+                  <span className={`flex h-10 w-10 items-center justify-center rounded-xl border ${option.color}`}><Icon className="h-5 w-5" /></span>
+                  <span className="font-semibold text-gray-900">{isThai ? option.th : option.en}</span>
+                  <ChevronRight className="ml-auto h-4 w-4 text-gray-400" />
+                </button>
+              );
+            })}
           </div>
-
-          <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
-            <button
-              type="button"
-              onClick={() => setIsModalOpen(false)}
-              className="px-4 py-2 rounded-xl border border-gray-300 text-gray-700 font-semibold text-xs hover:bg-gray-50 cursor-pointer"
-            >
-              {isThai ? 'ยกเลิก' : 'Cancel'}
-            </button>
-            <button
-              type="submit"
-              className="px-6 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-md cursor-pointer"
-            >
-              {isThai ? 'สร้างบัญชีผู้ใช้' : 'Create Account'}
-            </button>
-          </div>
-        </form>
+        ) : (
+          <UserForm
+            form={createForm}
+            onChange={setCreateForm}
+            role={createRole}
+            isThai={isThai}
+            onSubmit={createUser}
+            onCancel={() => setCreateRole(null)}
+            submitLabel={isThai ? 'สร้างบัญชีผู้ใช้' : 'Create Account'}
+          />
+        )}
       </Modal>
     </div>
   );
 };
+
+export const UserRoleManager: React.FC<UserRoleManagerProps> = ({ view }) => (
+  view === 'students' ? <StudentManagement /> : <GeneralUserRoleManager view={view} />
+);
+
+interface UserFormProps {
+  form: UserFormState;
+  onChange: React.Dispatch<React.SetStateAction<UserFormState>>;
+  role: UserRole;
+  isThai: boolean;
+  onSubmit: (event: React.FormEvent) => void;
+  onCancel: () => void;
+  submitLabel: string;
+}
+
+const UserForm: React.FC<UserFormProps> = ({ form, onChange, role, isThai, onSubmit, onCancel, submitLabel }) => (
+  <form onSubmit={onSubmit} className="space-y-4 text-left text-xs">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <label className="space-y-1 font-semibold text-gray-700">
+        <span>{isThai ? 'รหัสประจำตัว' : 'Institutional ID'}</span>
+        <input required value={form.code} onChange={(event) => onChange((current) => ({ ...current, code: event.target.value }))} className="w-full rounded-xl border border-gray-300 px-3 py-2 font-mono font-normal focus:ring-2 focus:ring-blue-500" />
+      </label>
+      <label className="space-y-1 font-semibold text-gray-700">
+        <span>{isThai ? 'ชื่อ-นามสกุล' : 'Full Name'}</span>
+        <input required value={form.name} onChange={(event) => onChange((current) => ({ ...current, name: event.target.value }))} className="w-full rounded-xl border border-gray-300 px-3 py-2 font-normal focus:ring-2 focus:ring-blue-500" />
+      </label>
+    </div>
+    <label className="block space-y-1 font-semibold text-gray-700">
+      <span>{isThai ? 'อีเมลมหาวิทยาลัย' : 'University Email'}</span>
+      <input type="email" required value={form.email} onChange={(event) => onChange((current) => ({ ...current, email: event.target.value }))} className="w-full rounded-xl border border-gray-300 px-3 py-2 font-normal focus:ring-2 focus:ring-blue-500" />
+    </label>
+    {role !== 'admin' && (
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <label className="space-y-1 font-semibold text-gray-700">
+          <span>{isThai ? 'คณะ' : 'Faculty'}</span>
+          <input required value={form.faculty} onChange={(event) => onChange((current) => ({ ...current, faculty: event.target.value }))} className="w-full rounded-xl border border-gray-300 px-3 py-2 font-normal focus:ring-2 focus:ring-blue-500" />
+        </label>
+        <label className="space-y-1 font-semibold text-gray-700">
+          <span>{isThai ? 'ภาควิชา' : 'Department'}</span>
+          <input required value={form.department} onChange={(event) => onChange((current) => ({ ...current, department: event.target.value }))} className="w-full rounded-xl border border-gray-300 px-3 py-2 font-normal focus:ring-2 focus:ring-blue-500" />
+        </label>
+      </div>
+    )}
+    {role === 'student' && (
+      <label className="block space-y-1 font-semibold text-gray-700">
+        <span>{isThai ? 'ชั้นปี' : 'Academic Year'}</span>
+        <input type="number" min={1} max={8} required value={form.year} onChange={(event) => onChange((current) => ({ ...current, year: Number(event.target.value) }))} className="w-full rounded-xl border border-gray-300 px-3 py-2 font-normal focus:ring-2 focus:ring-blue-500 sm:w-32" />
+      </label>
+    )}
+    <div className="flex justify-end gap-2 border-t border-gray-100 pt-4">
+      <button type="button" onClick={onCancel} className="cursor-pointer rounded-xl border border-gray-300 px-4 py-2 font-semibold text-gray-700 hover:bg-gray-50">{isThai ? 'ยกเลิก' : 'Cancel'}</button>
+      <button type="submit" className="cursor-pointer rounded-xl bg-blue-600 px-5 py-2 font-semibold text-white hover:bg-blue-700">{submitLabel}</button>
+    </div>
+  </form>
+);

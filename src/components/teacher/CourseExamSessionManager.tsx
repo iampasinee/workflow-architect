@@ -124,7 +124,7 @@ export const CourseExamSessionManager: React.FC = () => {
   const handleSaveExam = (e: React.FormEvent) => {
     e.preventDefault();
     if (conflictingSession) {
-      showToast('Room Schedule Conflict', 'Selected room has an overlapping exam session.', 'error');
+      showToast('ตารางห้องสอบซ้ำซ้อน', 'ห้องที่เลือกมีรอบการสอบซ้อนกัน', 'error');
       return;
     }
 

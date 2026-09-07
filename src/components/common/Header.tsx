@@ -1,9 +1,13 @@
 import React from 'react';
 import { useApp } from '../../context/AppContext';
-import { ShieldCheck, LogOut, User, Bell, ChevronRight, Laptop, Languages } from 'lucide-react';
+import { ShieldCheck, LogOut, Bell, ChevronRight, Menu } from 'lucide-react';
 import { Badge } from './Badge';
 
-export const Header: React.FC = () => {
+interface HeaderProps {
+  onAdminMenuToggle?: () => void;
+}
+
+export const Header: React.FC<HeaderProps> = ({ onAdminMenuToggle }) => {
   const {
     role,
     setRole,
@@ -14,8 +18,6 @@ export const Header: React.FC = () => {
     setActiveTeacherRoute,
     setActiveAdminRoute,
     language,
-    toggleLanguage,
-    setLanguage,
   } = useApp();
 
   const isThai = language === 'th';
@@ -51,9 +53,19 @@ export const Header: React.FC = () => {
   const user = currentUserDisplay();
 
   return (
-    <header className="h-16 bg-white border-b border-gray-200 px-6 flex items-center justify-between sticky top-0 z-30 shadow-xs">
+    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-gray-200 bg-white px-3 shadow-xs sm:px-6">
       {/* Brand & Context */}
       <div className="flex items-center gap-4">
+        {role === 'admin' && onAdminMenuToggle && (
+          <button
+            type="button"
+            onClick={onAdminMenuToggle}
+            className="flex h-9 w-9 items-center justify-center rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 md:hidden"
+            aria-label="เปิดเมนูผู้ดูแลระบบ"
+          >
+            <Menu className="h-5 w-5" strokeWidth={1.75} />
+          </button>
+        )}
         <div className="flex items-center gap-2.5">
           <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-sm shadow-blue-500/30">
             <ShieldCheck className="w-5 h-5" />
@@ -74,44 +86,16 @@ export const Header: React.FC = () => {
         </div>
 
         <div className="hidden md:flex items-center text-xs text-gray-400 gap-1 pl-4 border-l border-gray-200">
-          <span>{isThai ? 'เกตเวย์ยืนยันตัวตน ICIT' : 'ICIT Authentication Gateway'}</span>
+          <span>เข้าสู่ระบบด้วยบัญชี ICIT</span>
           <ChevronRight className="w-3.5 h-3.5" />
           <Badge variant="success" size="sm">
-            {isThai ? 'เครือข่ายแล็บ LAN ปลอดภัย' : 'Protected LAN'}
+            เครือข่ายแลนภายในปลอดภัย
           </Badge>
         </div>
       </div>
 
       {/* Right User & Actions */}
       <div className="flex items-center gap-3">
-        {/* Language Switcher */}
-        <div className="flex items-center bg-gray-100 rounded-xl p-0.5 border border-gray-200 text-xs font-medium">
-          <button
-            onClick={() => setLanguage('th')}
-            title="เปลี่ยนเป็นภาษาไทย"
-            className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${
-              isThai
-                ? 'bg-white text-blue-700 font-semibold shadow-xs'
-                : 'text-gray-500 hover:text-gray-800'
-            }`}
-          >
-            <span>🇹🇭</span>
-            <span>ไทย</span>
-          </button>
-          <button
-            onClick={() => setLanguage('en')}
-            title="Switch to English"
-            className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${
-              !isThai
-                ? 'bg-white text-blue-700 font-semibold shadow-xs'
-                : 'text-gray-500 hover:text-gray-800'
-            }`}
-          >
-            <span>🇬🇧</span>
-            <span>EN</span>
-          </button>
-        </div>
-
         {/* Violation alert counter for teacher */}
         {role === 'teacher' && (
           <button
@@ -151,10 +135,12 @@ export const Header: React.FC = () => {
 
           <button
             onClick={() => setRole(null)}
-            title={isThai ? 'สลับผู้ใช้ / ออกจากระบบ' : 'Switch User / Sign out to SSO Landing'}
-            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+            title="ออกจากระบบ"
+            aria-label="ออกจากระบบ"
+            className="flex items-center gap-1.5 rounded-xl p-2 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600"
           >
             <LogOut className="w-4 h-4" />
+            <span className="hidden text-xs font-semibold lg:inline">ออกจากระบบ</span>
           </button>
         </div>
       </div>

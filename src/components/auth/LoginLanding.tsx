@@ -14,6 +14,7 @@ import {
   EyeOff
 } from 'lucide-react';
 import { Badge } from '../common/Badge';
+import { getAdminRouteFromHash } from '../../utils/adminRoutes';
 
 export const LoginLanding: React.FC = () => {
   const {
@@ -31,8 +32,7 @@ export const LoginLanding: React.FC = () => {
     teachers,
     admins,
     showToast,
-    language,
-    setLanguage
+    language
   } = useApp();
 
   const isThai = language === 'th';
@@ -65,7 +65,7 @@ export const LoginLanding: React.FC = () => {
       if (cleanUsername.startsWith('A') || cleanUsername.toLowerCase().includes('admin')) {
         setRole('admin');
         if (admins.length > 0) setCurrentAdmin(admins[0]);
-        setActiveAdminRoute('A1');
+        setActiveAdminRoute(getAdminRouteFromHash());
         const adminName = admins[0]?.fullName || 'Admin';
         showToast(
           isThai ? 'เข้าสู่ระบบสำเร็จผ่าน ICIT SSO' : 'ICIT SSO Authenticated',
@@ -104,7 +104,7 @@ export const LoginLanding: React.FC = () => {
       case 'admin':
         setRole('admin');
         setCurrentAdmin(admins[0]);
-        setActiveAdminRoute('A1');
+        setActiveAdminRoute(getAdminRouteFromHash());
         showToast(isThai ? 'เข้าสู่ระบบในฐานะผู้ดูแลระบบ' : 'Signed in as Admin', admins[0].fullName, 'info');
         break;
       case 'teacher_returning':
@@ -170,34 +170,6 @@ export const LoginLanding: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Language Switcher */}
-          <div className="flex items-center bg-white rounded-full p-0.5 border border-gray-200 shadow-xs text-xs font-medium">
-            <button
-              onClick={() => setLanguage('th')}
-              title="เปลี่ยนเป็นภาษาไทย"
-              className={`px-3 py-1 rounded-full transition-all flex items-center gap-1.5 cursor-pointer ${
-                isThai
-                  ? 'bg-blue-600 text-white font-semibold shadow-xs'
-                  : 'text-gray-500 hover:text-gray-900'
-              }`}
-            >
-              <span>🇹🇭</span>
-              <span>ภาษาไทย</span>
-            </button>
-            <button
-              onClick={() => setLanguage('en')}
-              title="Switch to English"
-              className={`px-3 py-1 rounded-full transition-all flex items-center gap-1.5 cursor-pointer ${
-                !isThai
-                  ? 'bg-blue-600 text-white font-semibold shadow-xs'
-                  : 'text-gray-500 hover:text-gray-900'
-              }`}
-            >
-              <span>🇬🇧</span>
-              <span>English</span>
-            </button>
-          </div>
-
           <div className="hidden sm:flex items-center gap-2 text-xs text-gray-600 bg-white px-3 py-1.5 rounded-full border border-gray-200 shadow-xs">
             <Building className="w-3.5 h-3.5 text-blue-600" />
             <span>{isThai ? 'เครือข่ายห้องปฏิบัติการคอมพิวเตอร์แบบบูรณาการ' : 'Integrated Computer Laboratory Network'}</span>

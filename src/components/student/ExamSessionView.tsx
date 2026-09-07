@@ -283,7 +283,7 @@ export const ExamSessionView: React.FC = () => {
         if (!cancelled) {
           setStagedFiles([]);
           setStagingLoaded(true);
-          showToast('Temporary Storage Unavailable', 'Unable to restore staged files from browser storage.', 'error');
+          showToast('ไม่สามารถใช้พื้นที่จัดเก็บชั่วคราวได้', 'ไม่สามารถกู้คืนไฟล์ที่เตรียมไว้จากพื้นที่จัดเก็บของเบราว์เซอร์', 'error');
         }
       });
 
@@ -337,7 +337,7 @@ export const ExamSessionView: React.FC = () => {
       return `Unsupported file type (${extension || 'none'}). Only ${accepted.join(', ')} are permitted.`;
     }
     if (file.size === 0) {
-      return 'The selected file is empty (0 bytes). Please choose a file containing your answer.';
+      return 'ไฟล์ที่เลือกว่างเปล่า (0 ไบต์) กรุณาเลือกไฟล์ที่มีคำตอบของคุณ';
     }
     if (file.size > maxBytes) {
       return `File exceeds maximum limit (${(file.size / 1024 / 1024).toFixed(2)} MB > ${maxMb} MB).`;
@@ -378,7 +378,7 @@ export const ExamSessionView: React.FC = () => {
     try {
       uploadSequences = await reserveUploadSequences(stagingSessionKey, files.length);
     } catch {
-      showToast('Staging Failed', 'Unable to reserve upload sequence numbers.', 'error');
+      showToast('เตรียมไฟล์ไม่สำเร็จ', 'ไม่สามารถจองลำดับการอัปโหลดได้', 'error');
       return;
     }
 
@@ -402,7 +402,7 @@ export const ExamSessionView: React.FC = () => {
             }
           : record
       ));
-      showToast('Staging Failed', 'The selected file could not be saved to browser temporary storage.', 'error');
+      showToast('เตรียมไฟล์ไม่สำเร็จ', 'ไม่สามารถบันทึกไฟล์ที่เลือกลงพื้นที่จัดเก็บชั่วคราวของเบราว์เซอร์', 'error');
     }
   };
 
@@ -432,10 +432,10 @@ export const ExamSessionView: React.FC = () => {
 
   const getRenameValidationError = (value: string, target: StagedUploadRecord) => {
     const trimmedBaseName = value.trim();
-    if (!trimmedBaseName) return 'Filename is required.';
-    if (trimmedBaseName.length > 100) return 'Filename cannot exceed 100 characters.';
+    if (!trimmedBaseName) return 'กรุณาระบุชื่อไฟล์';
+    if (trimmedBaseName.length > 100) return 'ชื่อไฟล์ต้องมีความยาวไม่เกิน 100 ตัวอักษร';
     if (!/^[A-Za-z0-9_-]+$/.test(trimmedBaseName)) {
-      return 'Use only English letters, numbers, hyphens (-), and underscores (_).';
+      return 'ใช้ได้เฉพาะตัวอักษรภาษาอังกฤษ ตัวเลข เครื่องหมายขีดกลาง (-) และขีดล่าง (_)';
     }
 
     const candidateName = `${trimmedBaseName}${target.extension}`.toLowerCase();
@@ -443,7 +443,7 @@ export const ExamSessionView: React.FC = () => {
       (file) => file.uploadId !== target.uploadId &&
         file.submissionName.toLowerCase() === candidateName
     )) {
-      return 'A file with this name already exists in your submission.';
+      return 'มีไฟล์ชื่อนี้อยู่ในการส่งครั้งนี้แล้ว กรุณาเลือกชื่ออื่น';
     }
     return null;
   };
@@ -484,7 +484,7 @@ export const ExamSessionView: React.FC = () => {
     updateStagedFile(renameTarget.uploadId, { submissionName: nextName });
     showToast(
       isThai ? 'อัปเดตชื่อไฟล์แล้ว' : 'Filename Updated',
-      'Filename updated successfully.',
+      'อัปเดตชื่อไฟล์สำเร็จ',
       'success'
     );
     closeRenameDialog();
@@ -647,8 +647,8 @@ export const ExamSessionView: React.FC = () => {
 
     if (filesToSubmit.length === 0) {
       setTimeoutStatus('no_files');
-      const message = 'No files submitted. Please contact the exam proctor/instructor.';
-      showToast('No Files Submitted', message, 'error');
+      const message = 'ไม่มีไฟล์ถูกส่ง กรุณาติดต่ออาจารย์ผู้คุมสอบ';
+      showToast('ไม่มีไฟล์ถูกส่ง', message, 'error');
       window.alert(message);
       return;
     }

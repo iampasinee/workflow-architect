@@ -11,6 +11,7 @@ import {
   UserCheck,
   Zap,
 } from 'lucide-react';
+import { getAdminRouteFromHash } from '../../utils/adminRoutes';
 
 export const SimulationToolbar: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -68,7 +69,7 @@ export const SimulationToolbar: React.FC = () => {
                 <button
                   onClick={() => {
                     setRole('admin');
-                    setActiveAdminRoute('A1');
+                    setActiveAdminRoute(getAdminRouteFromHash());
                   }}
                   className={`py-1.5 px-2 rounded-lg font-medium transition-all cursor-pointer ${
                     role === 'admin'

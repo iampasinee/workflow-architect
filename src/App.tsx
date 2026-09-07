@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { ToastContainer } from './components/common/ToastContainer';
 import { Header } from './components/common/Header';
@@ -32,11 +32,18 @@ import { TeacherProfile } from './components/teacher/TeacherProfile';
 import { AdminSidebar } from './components/admin/AdminSidebar';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { UserRoleManager } from './components/admin/UserRoleManager';
+import { RolePermissions } from './components/admin/RolePermissions';
 import { RoomComputerSetup } from './components/admin/RoomComputerSetup';
 import { BiometricReferenceManager } from './components/admin/BiometricReferenceManager';
 import { CheatDetectionConfig } from './components/admin/CheatDetectionConfig';
 import { SystemAuditLog } from './components/admin/SystemAuditLog';
 import { AdminProfile } from './components/admin/AdminProfile';
+import {
+  getAdminHashForRoute,
+  getAdminRouteFromHash,
+  getUserManagementView,
+  isUserManagementRoute,
+} from './utils/adminRoutes';
 
 const MainRouter: React.FC = () => {
   const {
@@ -45,10 +52,38 @@ const MainRouter: React.FC = () => {
     currentTeacher,
     activeTeacherRoute,
     activeAdminRoute,
+    setActiveAdminRoute,
   } = useApp();
 
   const [teacherSidebarCollapsed, setTeacherSidebarCollapsed] = useState(false);
   const [adminSidebarCollapsed, setAdminSidebarCollapsed] = useState(false);
+  const [adminMobileMenuOpen, setAdminMobileMenuOpen] = useState(false);
+  const [adminHashReady, setAdminHashReady] = useState(false);
+
+  useEffect(() => {
+    if (role !== 'admin') {
+      setAdminHashReady(false);
+      return;
+    }
+
+    const syncRouteFromHash = () => {
+      const routeFromHash = getAdminRouteFromHash();
+      setActiveAdminRoute(routeFromHash);
+    };
+
+    syncRouteFromHash();
+    setAdminHashReady(true);
+    window.addEventListener('hashchange', syncRouteFromHash);
+    return () => window.removeEventListener('hashchange', syncRouteFromHash);
+  }, [role, setActiveAdminRoute]);
+
+  useEffect(() => {
+    if (role !== 'admin' || !adminHashReady) return;
+    const expectedHash = getAdminHashForRoute(activeAdminRoute);
+    if (window.location.hash !== expectedHash) {
+      window.location.hash = expectedHash;
+    }
+  }, [role, activeAdminRoute, adminHashReady]);
 
   // 1. Unauthenticated SSO Landing (Screen S0)
   if (!role) {
@@ -138,19 +173,22 @@ const MainRouter: React.FC = () => {
   if (role === 'admin') {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col">
-        <Header />
+        <Header onAdminMenuToggle={() => setAdminMobileMenuOpen(true)} />
         <div className="flex-1 flex overflow-hidden">
           <AdminSidebar
             collapsed={adminSidebarCollapsed}
             onToggle={() => setAdminSidebarCollapsed(!adminSidebarCollapsed)}
+            mobileOpen={adminMobileMenuOpen}
+            onMobileClose={() => setAdminMobileMenuOpen(false)}
           />
 
           <main className="flex-1 overflow-y-auto p-6 md:p-8">
             <div className="max-w-7xl mx-auto">
               {activeAdminRoute === 'A1' && <AdminDashboard />}
-              {(activeAdminRoute === 'A2' || activeAdminRoute === 'A3') && (
-                <UserRoleManager />
+              {isUserManagementRoute(activeAdminRoute) && (
+                <UserRoleManager view={getUserManagementView(activeAdminRoute)} />
               )}
+              {activeAdminRoute === 'A3' && <RolePermissions />}
               {(activeAdminRoute === 'A4' || activeAdminRoute === 'A5') && (
                 <RoomComputerSetup />
               )}

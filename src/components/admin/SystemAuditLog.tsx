@@ -63,7 +63,7 @@ export const SystemAuditLog: React.FC = () => {
             {isThai ? 'ความสอดคล้องตามมาตรฐาน & การตรวจสอบย้อนหลัง (A10 & A11)' : 'Compliance & Traceability (A10 & A11)'}
           </span>
           <h1 className="text-2xl font-bold text-gray-900 mt-0.5">
-            {isThai ? 'บันทึกการตรวจสอบระบบ (Audit Log)' : 'System Audit Log'}
+            {isThai ? 'บันทึกการตรวจสอบระบบ' : 'System Audit Log'}
           </h1>
           <p className="text-xs text-gray-500 mt-1">
             {isThai
