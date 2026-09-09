@@ -23,18 +23,19 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import {
-  academicStructure,
   AcademicClassGroup,
   AcademicDepartment,
   AcademicFaculty,
   AcademicProgram,
   findAcademicPathByGroup,
-  legacyStudentAcademicAssignments,
   ResolvedAcademicPath,
+  resolveAcademicGroupId,
 } from '../../data/academicStructure';
 import { AccountStatus, Student } from '../../types';
 import { AccountStatusBadge, Badge } from '../common/Badge';
 import { Modal } from '../common/Modal';
+import { isAcademicPathActive, toAcademicHierarchy } from '../../services/academicState';
+import { AcademicCascade, AcademicSelection, defaultAcademicSelection } from './AcademicCascade';
 
 type StudentViewMode = 'all' | 'groups';
 type SortKey = 'studentCode' | 'fullName' | 'programCode' | 'classGroup' | 'yearLevel' | 'accountStatus';
@@ -54,10 +55,11 @@ interface HierarchySelection {
   facultyId: string;
   departmentId: string;
   programId: string;
+  yearLevel: string;
   groupId: string;
 }
 
-interface StudentFormState extends HierarchySelection {
+interface StudentFormState extends Omit<HierarchySelection, 'yearLevel'> {
   studentCode: string;
   firstName: string;
   lastName: string;
@@ -68,7 +70,13 @@ interface StudentFormState extends HierarchySelection {
 }
 
 const pageSize = 10;
-const emptyHierarchy: HierarchySelection = { facultyId: '', departmentId: '', programId: '', groupId: '' };
+const emptyHierarchy: HierarchySelection = {
+  facultyId: '',
+  departmentId: '',
+  programId: '',
+  yearLevel: '',
+  groupId: '',
+};
 
 const getNameParts = (student: Student) => {
   const parts = student.fullName.trim().split(/\s+/);
@@ -78,9 +86,11 @@ const getNameParts = (student: Student) => {
   };
 };
 
-const resolveStudent = (student: Student, isThai: boolean): ResolvedStudent => {
-  const groupId = student.classGroupId || legacyStudentAcademicAssignments[student.id];
-  const path = findAcademicPathByGroup(groupId);
+const resolveStudent = (student: Student, isThai: boolean, hierarchy: AcademicFaculty[]): ResolvedStudent => {
+  const groupId = resolveAcademicGroupId(
+    student.classGroupId,
+  );
+  const path = findAcademicPathByGroup(groupId, hierarchy);
   const names = getNameParts(student);
   return {
     student,
@@ -88,18 +98,19 @@ const resolveStudent = (student: Student, isThai: boolean): ResolvedStudent => {
     ...names,
     programName: path ? (isThai ? path.program.nameTh : path.program.nameEn) : student.program || '—',
     programCode: path?.program.code || student.programCode || '—',
-    classGroup: path?.group.code || student.classGroup || '—',
+    classGroup: path?.group.code || 'ยังไม่มีกลุ่มเรียน',
     yearLevel: student.yearLevel || path?.group.yearLevel || student.year,
   };
 };
 
-const initialForm = (): StudentFormState => ({
+const initialForm = (facultyId = ''): StudentFormState => ({
   ...emptyHierarchy,
+  facultyId,
   studentCode: '',
   firstName: '',
   lastName: '',
   email: '',
-  yearLevel: 1,
+  yearLevel: 0,
   faceReferenceUrl: '',
   accountStatus: 'active',
 });
@@ -121,7 +132,7 @@ const exportStudentRows = (rows: ResolvedStudent[], filename: string) => {
     row.student.studentCode,
     row.student.fullName,
     row.student.email,
-    row.path?.faculty.nameTh || row.student.faculty,
+    row.path?.faculty.name || row.student.faculty,
     row.path?.department.nameTh || row.student.department,
     row.path?.program.nameTh || row.student.program || '',
     row.programCode,
@@ -144,6 +155,10 @@ const exportStudentRows = (rows: ResolvedStudent[], filename: string) => {
 export const StudentManagement: React.FC = () => {
   const {
     students,
+    academicState,
+    setActiveAdminRoute,
+    assignStudentsToClassGroup,
+    showToast,
     addStudent,
     updateStudent,
     deleteStudent,
@@ -151,15 +166,22 @@ export const StudentManagement: React.FC = () => {
     language,
   } = useApp();
   const isThai = language === 'th';
+  const academicStructure = useMemo(() => toAcademicHierarchy(academicState), [academicState]);
+  const defaultFacultyId = academicState.faculties.find((f) => f.status === 'active')?.id || '';
+  const defaultHierarchy = { ...emptyHierarchy, facultyId: defaultFacultyId };
+  const [assignmentFilter, setAssignmentFilter] = useState('');
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkSelection, setBulkSelection] = useState<AcademicSelection>(() => defaultAcademicSelection(academicState));
+  const [bulkConfirmed, setBulkConfirmed] = useState(false);
   const [viewMode, setViewMode] = useState<StudentViewMode>('all');
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState({
-    ...emptyHierarchy,
+    ...defaultHierarchy,
     yearLevel: '',
     accountStatus: '',
     faceStatus: '',
   });
-  const [browse, setBrowse] = useState<HierarchySelection>(emptyHierarchy);
+  const [browse, setBrowse] = useState<HierarchySelection>(defaultHierarchy);
   const [sortKey, setSortKey] = useState<SortKey>('studentCode');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [page, setPage] = useState(1);
@@ -169,9 +191,9 @@ export const StudentManagement: React.FC = () => {
   const [statusTarget, setStatusTarget] = useState<Student | null>(null);
   const [statusReason, setStatusReason] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
-  const [form, setForm] = useState<StudentFormState>(initialForm);
+  const [form, setForm] = useState<StudentFormState>(() => initialForm(defaultFacultyId));
   const [transferTarget, setTransferTarget] = useState<ResolvedStudent | null>(null);
-  const [transfer, setTransfer] = useState<HierarchySelection>(emptyHierarchy);
+  const [transfer, setTransfer] = useState<HierarchySelection>(defaultHierarchy);
   const [transferReason, setTransferReason] = useState('');
   const [transferConfirm, setTransferConfirm] = useState(false);
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
@@ -179,23 +201,32 @@ export const StudentManagement: React.FC = () => {
   const selectAllRef = useRef<HTMLInputElement>(null);
 
   const resolvedStudents = useMemo(
-    () => students.map((student) => resolveStudent(student, isThai)),
-    [students, isThai],
+    () => students.map((student) => resolveStudent(student, isThai, academicStructure)),
+    [students, isThai, academicStructure],
   );
 
-  const findFaculty = (id: string) => academicStructure.find((item) => item.id === id);
-  const findDepartment = (facultyId: string, departmentId: string) =>
-    findFaculty(facultyId)?.departments.find((item) => item.id === departmentId);
-  const findProgram = (facultyId: string, departmentId: string, programId: string) =>
-    findDepartment(facultyId, departmentId)?.programs.find((item) => item.id === programId);
+  const findFaculty = (facultyId: string) =>
+    academicStructure.find((item) => item.id === facultyId);
+  const findDepartment = (facultyName: string, departmentId: string) =>
+    findFaculty(facultyName)?.departments.find((item) => item.id === departmentId);
+  const findProgram = (facultyName: string, departmentId: string, programId: string) =>
+    findDepartment(facultyName, departmentId)?.programs.find((item) => item.id === programId);
+  const getYearLevels = (program?: AcademicProgram) =>
+    [...new Set((program?.yearLevels || []).map((year) => year.level))].sort((left, right) => left - right);
 
   const filterDepartments = findFaculty(filters.facultyId)?.departments || [];
   const filterPrograms = findDepartment(filters.facultyId, filters.departmentId)?.programs || [];
-  const filterGroups = findProgram(filters.facultyId, filters.departmentId, filters.programId)?.classGroups || [];
+  const filterProgram = findProgram(filters.facultyId, filters.departmentId, filters.programId);
+  const filterYearLevels = getYearLevels(filterProgram);
+  const filterGroups = (filterProgram?.classGroups || []).filter((group) =>
+    !filters.yearLevel || group.yearLevel === Number(filters.yearLevel));
   const browseFaculty = findFaculty(browse.facultyId);
   const browseDepartment = findDepartment(browse.facultyId, browse.departmentId);
   const browseProgram = findProgram(browse.facultyId, browse.departmentId, browse.programId);
-  const browseGroup = browseProgram?.classGroups.find((item) => item.id === browse.groupId);
+  const browseYearLevels = getYearLevels(browseProgram);
+  const browseGroups = (browseProgram?.classGroups || []).filter((group) =>
+    !browse.yearLevel || group.yearLevel === Number(browse.yearLevel));
+  const browseGroup = browseGroups.find((item) => item.id === browse.groupId);
 
   const filteredStudents = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -210,7 +241,8 @@ export const StudentManagement: React.FC = () => {
         row.classGroup,
       ].some((value) => value.toLowerCase().includes(term));
       return matchesSearch
-        && (!filters.facultyId || row.path?.faculty.id === filters.facultyId)
+        && (!filters.facultyId || (row.path?.faculty.id || row.student.facultyId) === filters.facultyId)
+        && (!assignmentFilter || (assignmentFilter === 'unassigned' ? !row.path : Boolean(row.path)))
         && (!filters.departmentId || row.path?.department.id === filters.departmentId)
         && (!filters.programId || row.path?.program.id === filters.programId)
         && (!filters.groupId || row.path?.group.id === filters.groupId)
@@ -230,7 +262,7 @@ export const StudentManagement: React.FC = () => {
         : String(leftValue).localeCompare(String(rightValue), undefined, { sensitivity: 'base' });
       return sortDirection === 'asc' ? comparison : -comparison;
     });
-  }, [resolvedStudents, search, filters, sortKey, sortDirection]);
+  }, [resolvedStudents, search, filters, assignmentFilter, sortKey, sortDirection]);
 
   const groupStudents = browse.groupId
     ? resolvedStudents.filter((row) => row.path?.group.id === browse.groupId)
@@ -257,8 +289,8 @@ export const StudentManagement: React.FC = () => {
   const totalPages = Math.max(1, Math.ceil(visibleStudents.length / pageSize));
   const pagedStudents = visibleStudents.slice((page - 1) * pageSize, page * pageSize);
 
-  useEffect(() => setPage(1), [viewMode, search, filters, browse.groupId, sortKey, sortDirection]);
-  useEffect(() => setSelectedStudentIds(new Set()), [viewMode, search, filters, browse.groupId]);
+  useEffect(() => setPage(1), [viewMode, search, filters, assignmentFilter, browse.groupId, sortKey, sortDirection]);
+  useEffect(() => setSelectedStudentIds(new Set()), [viewMode, search, filters, assignmentFilter, browse.groupId]);
   useEffect(() => {
     const existingIds = new Set(students.map((student) => student.id));
     setSelectedStudentIds((current) => {
@@ -278,17 +310,29 @@ export const StudentManagement: React.FC = () => {
   }, [selectedOnPage, pagedStudents.length]);
 
   const selectFilterFaculty = (facultyId: string) => setFilters((current) => ({
-    ...current, facultyId, departmentId: '', programId: '', groupId: '',
+    ...current, facultyId, departmentId: '', programId: '', yearLevel: '', groupId: '',
   }));
   const selectFilterDepartment = (departmentId: string) => setFilters((current) => ({
-    ...current, departmentId, programId: '', groupId: '',
+    ...current, departmentId, programId: '', yearLevel: '', groupId: '',
   }));
   const selectFilterProgram = (programId: string) => setFilters((current) => ({
-    ...current, programId, groupId: '',
+    ...current, programId, yearLevel: '', groupId: '',
   }));
-  const selectBrowseFaculty = (facultyId: string) => setBrowse({ facultyId, departmentId: '', programId: '', groupId: '' });
-  const selectBrowseDepartment = (departmentId: string) => setBrowse((current) => ({ ...current, departmentId, programId: '', groupId: '' }));
-  const selectBrowseProgram = (programId: string) => setBrowse((current) => ({ ...current, programId, groupId: '' }));
+  const selectFilterYear = (yearLevel: string) => setFilters((current) => ({
+    ...current, yearLevel, groupId: '',
+  }));
+  const selectBrowseFaculty = (facultyId: string) => setBrowse({
+    facultyId, departmentId: '', programId: '', yearLevel: '', groupId: '',
+  });
+  const selectBrowseDepartment = (departmentId: string) => setBrowse((current) => ({
+    ...current, departmentId, programId: '', yearLevel: '', groupId: '',
+  }));
+  const selectBrowseProgram = (programId: string) => setBrowse((current) => ({
+    ...current, programId, yearLevel: '', groupId: '',
+  }));
+  const selectBrowseYear = (yearLevel: string) => setBrowse((current) => ({
+    ...current, yearLevel, groupId: '',
+  }));
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDirection((current) => current === 'asc' ? 'desc' : 'asc');
@@ -299,14 +343,18 @@ export const StudentManagement: React.FC = () => {
   };
 
   const openCreate = () => {
-    setForm(initialForm());
+    setForm(initialForm(defaultFacultyId));
     setCreateOpen(true);
   };
 
   const openCreateForGroup = () => {
     if (!browseFaculty || !browseDepartment || !browseProgram || !browseGroup) return;
+    if (!isAcademicPathActive(academicState, 'classGroups', browseGroup.id)) {
+      showToast('ไม่สามารถเพิ่มนักศึกษาในกลุ่มนี้ได้', 'กลุ่มเรียนหรือต้นสังกัดถูกปิดใช้งาน', 'warning');
+      return;
+    }
     setForm({
-      ...initialForm(),
+      ...initialForm(defaultFacultyId),
       facultyId: browseFaculty.id,
       departmentId: browseDepartment.id,
       programId: browseProgram.id,
@@ -336,15 +384,15 @@ export const StudentManagement: React.FC = () => {
   };
 
   const openEdit = (student: Student) => {
-    const row = resolveStudent(student, isThai);
+    const row = resolveStudent(student, isThai, academicStructure);
     setForm({
       studentCode: student.studentCode,
       firstName: row.firstName,
       lastName: row.lastName,
       email: student.email,
-      facultyId: row.path?.faculty.id || '',
-      departmentId: row.path?.department.id || '',
-      programId: row.path?.program.id || '',
+      facultyId: row.path?.faculty.id || student.facultyId || defaultFacultyId,
+      departmentId: row.path?.department.id || student.departmentId || '',
+      programId: row.path?.program.id || student.programId || '',
       groupId: row.path?.group.id || '',
       yearLevel: row.yearLevel,
       faceReferenceUrl: student.faceReferenceUrl,
@@ -354,25 +402,33 @@ export const StudentManagement: React.FC = () => {
   };
 
   const academicUpdates = (values: StudentFormState) => {
-    const path = findAcademicPathByGroup(values.groupId);
-    if (!path) return null;
+    const path = findAcademicPathByGroup(values.groupId, academicStructure);
+    if (!path) {
+      if (!editStudent || editStudent.classGroupId || values.programId !== editStudent.programId ||
+        values.yearLevel !== (editStudent.yearLevel || editStudent.year)) return null;
+      return {
+        ...editStudent, studentCode: values.studentCode.trim(), firstName: values.firstName.trim(), lastName: values.lastName.trim(),
+        fullName: `${values.firstName.trim()} ${values.lastName.trim()}`.trim(), email: values.email.trim(),
+        faceReferenceUrl: values.faceReferenceUrl.trim(), accountStatus: values.accountStatus,
+      };
+    }
     return {
       studentCode: values.studentCode.trim(),
       firstName: values.firstName.trim(),
       lastName: values.lastName.trim(),
       fullName: `${values.firstName.trim()} ${values.lastName.trim()}`.trim(),
       email: values.email.trim(),
-      facultyId: path.faculty.id,
       departmentId: path.department.id,
       programId: path.program.id,
       classGroupId: path.group.id,
-      faculty: path.faculty.nameEn,
-      department: path.department.nameEn,
-      program: path.program.nameEn,
+      facultyId: path.faculty.id,
+      faculty: path.faculty.name,
+      department: path.department.nameTh,
+      program: path.program.nameTh,
       programCode: path.program.code,
       classGroup: path.group.code,
-      year: values.yearLevel,
-      yearLevel: values.yearLevel,
+      year: path.group.yearLevel,
+      yearLevel: path.group.yearLevel,
       faceReferenceUrl: values.faceReferenceUrl.trim(),
       faceReferenceStatus: values.faceReferenceUrl.trim() ? 'available' as const : 'missing' as const,
       accountStatus: values.accountStatus,
@@ -385,38 +441,37 @@ export const StudentManagement: React.FC = () => {
     const updates = academicUpdates(form);
     if (!updates) return;
     if (editStudent) {
-      updateStudent(editStudent.id, updates);
-      setEditStudent(null);
+      if (updateStudent(editStudent.id, updates)) setEditStudent(null);
     } else {
-      addStudent(updates);
-      setCreateOpen(false);
+      if (addStudent(updates)) setCreateOpen(false);
     }
   };
 
   const openTransfer = (row: ResolvedStudent) => {
     setTransferTarget(row);
-    setTransfer(emptyHierarchy);
+    setTransfer({ ...defaultHierarchy });
     setTransferReason('');
     setTransferConfirm(false);
   };
 
   const executeTransfer = () => {
     if (!transferTarget) return;
-    const path = findAcademicPathByGroup(transfer.groupId);
+    const path = findAcademicPathByGroup(transfer.groupId, academicStructure);
     if (!path || path.group.id === transferTarget.path?.group.id) return;
-    updateStudent(transferTarget.student.id, {
-      facultyId: path.faculty.id,
+    const updated = updateStudent(transferTarget.student.id, {
       departmentId: path.department.id,
       programId: path.program.id,
       classGroupId: path.group.id,
-      faculty: path.faculty.nameEn,
-      department: path.department.nameEn,
-      program: path.program.nameEn,
+      facultyId: path.faculty.id,
+      faculty: path.faculty.name,
+      department: path.department.nameTh,
+      program: path.program.nameTh,
       programCode: path.program.code,
       classGroup: path.group.code,
       year: path.group.yearLevel,
       yearLevel: path.group.yearLevel,
     });
+    if (!updated) return;
     setTransferTarget(null);
     setTransferConfirm(false);
   };
@@ -428,12 +483,8 @@ export const StudentManagement: React.FC = () => {
   const activeCount = students.filter((student) => student.accountStatus === 'active').length;
   const suspendedCount = students.filter((student) => student.accountStatus === 'suspended').length;
   const faceCount = students.filter((student) => Boolean(student.faceReferenceUrl)).length;
-  const allClassGroups = academicStructure.flatMap((faculty) => faculty.departments.flatMap((department) => department.programs.flatMap((program) => program.classGroups)));
 
   const label = (item: { nameTh?: string; nameEn?: string }) => (isThai ? item.nameTh : item.nameEn) || '';
-  const facultyLabel = (faculty: AcademicFaculty) => faculty.code
-    ? `[${faculty.code}] ${faculty.nameTh}`
-    : faculty.nameTh;
   return (
     <div className="space-y-5 text-left">
       <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
@@ -491,8 +542,8 @@ export const StudentManagement: React.FC = () => {
               <select value={filters.faceStatus} onChange={(event) => setFilters((current) => ({ ...current, faceStatus: event.target.value }))} className="h-10 rounded-xl border border-slate-200 px-3 text-xs">
                 <option value="">ภาพใบหน้า: ทั้งหมด</option><option value="available">มีข้อมูล</option><option value="missing">ยังไม่มีข้อมูล</option>
               </select>
-              <select value={filters.groupId} onChange={(event) => setFilters((current) => ({ ...current, groupId: event.target.value }))} className="h-10 rounded-xl border border-slate-200 px-3 text-xs">
-                <option value="">ทุกกลุ่มเรียน</option>{allClassGroups.map((group) => <option key={group.id} value={group.id}>{group.code}</option>)}
+              <select aria-label="การกำหนดกลุ่มเรียน" value={assignmentFilter} onChange={(event) => setAssignmentFilter(event.target.value)} className="h-10 rounded-xl border border-slate-200 px-3 text-xs">
+                <option value="">การกำหนดกลุ่ม: ทั้งหมด</option><option value="unassigned">ยังไม่มีกลุ่มเรียน</option><option value="assigned">มีกลุ่มเรียนแล้ว</option>
               </select>
               <button type="button" onClick={() => exportStudentRows(filteredStudents, `students-${new Date().toISOString().slice(0, 10)}.csv`)} disabled={!filteredStudents.length} className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-300 px-4 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">
                 <Download className="h-4 w-4" strokeWidth={1.75} /> ส่งออก CSV
@@ -502,15 +553,22 @@ export const StudentManagement: React.FC = () => {
               <button type="button" onClick={() => setAdvancedFiltersOpen((current) => !current)} aria-expanded={advancedFiltersOpen} className="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-blue-700">
                 <Filter className="h-4 w-4" strokeWidth={1.75} /> ตัวกรองเพิ่มเติม <ChevronDown className={`h-4 w-4 transition-transform ${advancedFiltersOpen ? 'rotate-180' : ''}`} />
               </button>
-              {selectedStudentIds.size > 0 && <span className="text-xs font-semibold text-blue-700">เลือกแล้ว {selectedStudentIds.size} รายการ</span>}
+              {selectedStudentIds.size > 0 && <div className="flex flex-wrap items-center gap-3">
+                <span className="text-xs font-semibold text-blue-700">เลือกแล้ว {selectedStudentIds.size} รายการ</span>
+                <button type="button" disabled={resolvedStudents.some((row) => selectedStudentIds.has(row.student.id) && Boolean(row.path))}
+                  onClick={() => { setBulkSelection(defaultAcademicSelection(academicState)); setBulkConfirmed(false); setBulkOpen(true); }}
+                  className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"
+                  title="กำหนดกลุ่มเรียนให้เฉพาะนักศึกษาที่ยังไม่มีกลุ่ม">กำหนดกลุ่มเรียน</button>
+              </div>}
             </div>
             {advancedFiltersOpen && (
-              <div className="grid grid-cols-1 gap-2 rounded-xl bg-slate-50 p-3 sm:grid-cols-2 lg:grid-cols-5">
-                <AcademicSelect<AcademicFaculty> value={filters.facultyId} onChange={selectFilterFaculty} options={academicStructure} getValue={(item) => item.id} getLabel={facultyLabel} placeholder="ทุกคณะ" />
+              <div className="grid grid-cols-1 gap-2 rounded-xl bg-slate-50 p-3 sm:grid-cols-2 xl:grid-cols-6">
+                <AcademicSelect<AcademicFaculty> value={filters.facultyId} onChange={selectFilterFaculty} options={academicStructure} getValue={(item) => item.id} getLabel={(item) => item.name} placeholder="ทุกคณะ" />
                 <AcademicSelect<AcademicDepartment> value={filters.departmentId} onChange={selectFilterDepartment} options={filterDepartments} getValue={(item) => item.id} getLabel={(item) => item.nameTh} placeholder="ทุกภาควิชา" disabled={!filters.facultyId} />
-                <AcademicSelect<AcademicProgram> value={filters.programId} onChange={selectFilterProgram} options={filterPrograms} getValue={(item) => item.id} getLabel={(item) => `${item.code} — ${item.nameTh}`} placeholder="ทุกสาขาวิชา" disabled={!filters.departmentId} />
-                <select value={filters.yearLevel} onChange={(event) => setFilters((current) => ({ ...current, yearLevel: event.target.value }))} className="rounded-xl border border-slate-200 px-3 py-2 text-xs"><option value="">ทุกชั้นปี</option>{[1, 2, 3, 4].map((year) => <option key={year} value={year}>ชั้นปีที่ {year}</option>)}</select>
-                <button type="button" onClick={() => { setFilters({ ...emptyHierarchy, yearLevel: '', accountStatus: '', faceStatus: '' }); setSearch(''); }} className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-white"><RotateCcw className="h-4 w-4" /> ล้างตัวกรอง</button>
+                <AcademicSelect<AcademicProgram> value={filters.programId} onChange={selectFilterProgram} options={filterPrograms} getValue={(item) => item.id} getLabel={(item) => `[${item.code}] ${item.nameTh}`} placeholder="ทุกสาขาวิชา" disabled={!filters.departmentId} />
+                <AcademicSelect<{ id: string; label: string }> value={filters.yearLevel} onChange={selectFilterYear} options={filterYearLevels.map((year) => ({ id: String(year), label: `ชั้นปีที่ ${year}` }))} getValue={(item) => item.id} getLabel={(item) => item.label} placeholder="ทุกชั้นปี" disabled={!filters.programId} />
+                <AcademicSelect<AcademicClassGroup> value={filters.groupId} onChange={(groupId) => setFilters((current) => ({ ...current, groupId }))} options={filterGroups} getValue={(item) => item.id} getLabel={(item) => item.code} placeholder="ทุกกลุ่มเรียน" disabled={!filters.yearLevel} />
+                <button type="button" onClick={() => { setFilters({ ...defaultHierarchy, yearLevel: '', accountStatus: '', faceStatus: '' }); setSearch(''); setAssignmentFilter(''); }} className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-white"><RotateCcw className="h-4 w-4" /> ล้างตัวกรอง</button>
               </div>
             )}
           </section>
@@ -521,26 +579,27 @@ export const StudentManagement: React.FC = () => {
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
             <div className="mb-4 flex flex-col justify-between gap-2 border-b border-slate-100 pb-3 sm:flex-row sm:items-center">
               <h2 className="flex items-center gap-2 text-sm font-bold text-slate-900"><Network className="h-5 w-5 text-blue-600" strokeWidth={1.75} /> ตัวกรองโครงสร้างการศึกษา</h2>
-              <span className="text-[10px] text-slate-400">เลือก คณะ › ภาควิชา › สาขาวิชา เพื่อดูและจัดกลุ่มนักศึกษา</span>
+              <span className="text-[10px] text-slate-400">เลือก คณะ › ภาควิชา › สาขาวิชา › ชั้นปี › กลุ่มเรียน</span>
             </div>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <LabeledAcademicSelect<AcademicFaculty> step="1" label="คณะ" value={browse.facultyId} onChange={selectBrowseFaculty} options={academicStructure} getValue={(item) => item.id} getLabel={facultyLabel} />
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
+              <LabeledAcademicSelect<AcademicFaculty> step="1" label="คณะ" value={browse.facultyId} onChange={selectBrowseFaculty} options={academicStructure} getValue={(item) => item.id} getLabel={(item) => item.name} placeholder="ทุกคณะ" />
               <LabeledAcademicSelect<AcademicDepartment> step="2" label="ภาควิชา" value={browse.departmentId} onChange={selectBrowseDepartment} options={browseFaculty?.departments || []} getValue={(item) => item.id} getLabel={(item) => item.nameTh} disabled={!browse.facultyId} />
               <LabeledAcademicSelect<AcademicProgram> step="3" label="สาขาวิชา" value={browse.programId} onChange={selectBrowseProgram} options={browseDepartment?.programs || []} getValue={(item) => item.id} getLabel={(item) => `[${item.code}] ${item.nameTh}`} disabled={!browse.departmentId} />
-              <LabeledAcademicSelect<AcademicClassGroup> step="4" label="กลุ่มเรียน" value={browse.groupId} onChange={(groupId) => setBrowse((current) => ({ ...current, groupId }))} options={browseProgram?.classGroups || []} getValue={(item) => item.id} getLabel={(item) => item.code} disabled={!browse.programId} />
+              <LabeledAcademicSelect<{ id: string; label: string }> step="4" label="ชั้นปี" value={browse.yearLevel} onChange={selectBrowseYear} options={browseYearLevels.map((year) => ({ id: String(year), label: `ชั้นปีที่ ${year}` }))} getValue={(item) => item.id} getLabel={(item) => item.label} disabled={!browse.programId} />
+              <LabeledAcademicSelect<AcademicClassGroup> step="5" label="กลุ่มเรียน" value={browse.groupId} onChange={(groupId) => setBrowse((current) => ({ ...current, groupId }))} options={browseGroups} getValue={(item) => item.id} getLabel={(item) => item.code} disabled={!browse.yearLevel} />
             </div>
           </div>
 
-          {!browse.facultyId && <EmptyState text={isThai ? 'กรุณาเลือกคณะเพื่อเริ่มค้นหากลุ่มเรียน' : 'Select a faculty to begin finding class groups.'} />}
-          {browse.facultyId && browseFaculty?.departments.length === 0 && <EmptyState text={isThai ? 'ไม่พบภาควิชาในคณะที่เลือก' : 'No departments were found in this faculty.'} />}
-          {browse.departmentId && browseDepartment?.programs.length === 0 && <EmptyState text={isThai ? 'ไม่พบสาขาวิชาในภาควิชาที่เลือก' : 'No programs were found in this department.'} />}
-          {browse.programId && browseProgram?.classGroups.length === 0 && <EmptyState text={isThai ? 'ไม่พบกลุ่มเรียนในสาขาวิชาที่เลือก' : 'No class groups were found in this program.'} />}
+          {!browse.departmentId && <EmptyState text="กรุณาเลือกภาควิชา" />}
+          {browse.departmentId && !browse.programId && <EmptyState text="กรุณาเลือกสาขาวิชา" />}
+          {browse.programId && !browse.yearLevel && <EmptyState text="กรุณาเลือกชั้นปี" />}
+          {browse.programId && browse.yearLevel && browseGroups.length === 0 && <EmptyState text="ไม่พบกลุ่มเรียนในชั้นปีที่เลือก" />}
 
-          {browseProgram && browseProgram.classGroups.length > 0 && (
+          {browseProgram && browse.yearLevel && browseGroups.length > 0 && (
             <section className="space-y-3">
-              <div className="flex items-center justify-between"><h2 className="flex items-center gap-2 text-sm font-bold text-slate-900"><Layers className="h-4 w-4 text-blue-600" /> กลุ่มเรียนทั้งหมดในสาขาวิชา {browseProgram.code} <Badge variant="default">{browseProgram.classGroups.length} กลุ่ม</Badge></h2><span className="text-[10px] text-slate-400">คลิกที่กลุ่มเพื่อดูรายชื่อนักศึกษา</span></div>
+              <div className="flex items-center justify-between"><h2 className="flex items-center gap-2 text-sm font-bold text-slate-900"><Layers className="h-4 w-4 text-blue-600" /> กลุ่มเรียนชั้นปีที่ {browse.yearLevel} ในสาขาวิชา {browseProgram.code} <Badge variant="default">{browseGroups.length} กลุ่ม</Badge></h2><span className="text-[10px] text-slate-400">คลิกที่กลุ่มเพื่อดูรายชื่อนักศึกษา</span></div>
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {browseProgram.classGroups.map((group) => {
+                {browseGroups.map((group) => {
                   const members = resolvedStudents.filter((row) => row.path?.group.id === group.id);
                   const active = members.filter((row) => row.student.accountStatus === 'active').length;
                   const suspended = members.filter((row) => row.student.accountStatus === 'suspended').length;
@@ -562,11 +621,13 @@ export const StudentManagement: React.FC = () => {
           {browseGroup && browseFaculty && browseDepartment && browseProgram && (
             <>
               <nav className="flex flex-wrap items-center gap-1 text-xs text-gray-500" aria-label={isThai ? 'เส้นทางโครงสร้างการศึกษา' : 'Academic breadcrumb'}>
-                <Crumb label={label(browseFaculty)} onClick={() => setBrowse(emptyHierarchy)} />
+                <Crumb label={browseFaculty.name} onClick={() => setBrowse({ ...defaultHierarchy })} />
                 <ChevronRight className="h-3.5 w-3.5" />
-                <Crumb label={label(browseDepartment)} onClick={() => setBrowse({ facultyId: browse.facultyId, departmentId: '', programId: '', groupId: '' })} />
+                <Crumb label={label(browseDepartment)} onClick={() => setBrowse({ ...defaultHierarchy, facultyId: browse.facultyId })} />
                 <ChevronRight className="h-3.5 w-3.5" />
-                <Crumb label={`${label(browseProgram)} (${browseProgram.code})`} onClick={() => setBrowse((current) => ({ ...current, groupId: '' }))} />
+                <Crumb label={`${label(browseProgram)} (${browseProgram.code})`} onClick={() => setBrowse((current) => ({ ...current, yearLevel: '', groupId: '' }))} />
+                <ChevronRight className="h-3.5 w-3.5" />
+                <Crumb label={`ชั้นปีที่ ${browse.yearLevel}`} onClick={() => setBrowse((current) => ({ ...current, groupId: '' }))} />
                 <ChevronRight className="h-3.5 w-3.5" /><strong className="text-gray-900">{browseGroup.code}</strong>
               </nav>
               <GroupSummary group={browseGroup} program={browseProgram} rows={groupStudents} onAdd={openCreateForGroup} onExport={() => exportStudentRows(groupStudents, `students-${browseGroup.code}.csv`)} />
@@ -582,12 +643,33 @@ export const StudentManagement: React.FC = () => {
         </section>
       )}
 
+      <Modal isOpen={bulkOpen} onClose={() => setBulkOpen(false)} title="กำหนดกลุ่มเรียน" maxWidth="640">
+        <form className="space-y-4" onSubmit={(event) => {
+          event.preventDefault();
+          if (!bulkConfirmed) return;
+          if (assignStudentsToClassGroup([...selectedStudentIds], bulkSelection.groupId).success) {
+            setBulkOpen(false);
+            setSelectedStudentIds(new Set());
+          }
+        }}>
+          <p className="text-sm text-slate-600">นักศึกษาที่เลือก {selectedStudentIds.size} คน ต้องยังไม่มีกลุ่มเรียน และสังกัดกับชั้นปีต้องตรงกับกลุ่มปลายทาง</p>
+          <ul className="max-h-36 overflow-y-auto rounded-xl bg-slate-50 p-3 text-xs">{students.filter((student) => selectedStudentIds.has(student.id)).map((student) => <li key={student.id} className="py-1">{student.studentCode} — {student.fullName}</li>)}</ul>
+          <AcademicCascade value={bulkSelection} onChange={(next) => { setBulkSelection(next); setBulkConfirmed(false); }} />
+          {bulkSelection.yearLevelId && !academicState.classGroups.some((g) => g.yearLevelId === bulkSelection.yearLevelId && isAcademicPathActive(academicState, 'classGroups', g.id)) && <div className="rounded-xl bg-amber-50 p-3 text-xs text-amber-800">
+            ยังไม่มีกลุ่มเรียน กรุณาสร้างกลุ่มเรียนก่อนเพิ่มนักศึกษา
+            <button type="button" onClick={() => setActiveAdminRoute('ACADEMIC')} className="mt-2 block font-semibold text-blue-600">ไปจัดการคณะและกลุ่มเรียน</button>
+          </div>}
+          <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={bulkConfirmed} onChange={(event) => setBulkConfirmed(event.target.checked)} />ยืนยันการกำหนดกลุ่มเรียนให้นักศึกษาที่เลือกทั้งหมด</label>
+          <ModalActions isThai={isThai} onCancel={() => setBulkOpen(false)} submitLabel="ยืนยันการกำหนดกลุ่ม" disabled={!bulkConfirmed || !bulkSelection.groupId} />
+        </form>
+      </Modal>
+
       {visibleStudents.length > 0 && (
         <Pagination page={page} totalPages={totalPages} count={visibleStudents.length} pageSize={pageSize} isThai={isThai} onChange={setPage} />
       )}
 
       <Modal isOpen={createOpen || Boolean(editStudent)} onClose={() => { setCreateOpen(false); setEditStudent(null); }} title={editStudent ? (isThai ? 'แก้ไขข้อมูลนักศึกษา' : 'Edit Student') : (isThai ? 'เพิ่มนักศึกษา' : 'Add Student')} maxWidth="xl">
-        <StudentForm form={form} setForm={setForm} isThai={isThai} onSubmit={saveStudent} onCancel={() => { setCreateOpen(false); setEditStudent(null); }} />
+        <StudentForm existingStudent={editStudent} form={form} setForm={setForm} isThai={isThai} onSubmit={saveStudent} onCancel={() => { setCreateOpen(false); setEditStudent(null); }} />
       </Modal>
 
       <Modal isOpen={Boolean(viewStudent)} onClose={() => setViewStudent(null)} title={isThai ? 'รายละเอียดนักศึกษา' : 'Student Details'} maxWidth="lg">
@@ -618,7 +700,7 @@ export const StudentManagement: React.FC = () => {
           </form>
         )}
         {transferTarget && transferConfirm && (() => {
-          const destination = findAcademicPathByGroup(transfer.groupId);
+          const destination = findAcademicPathByGroup(transfer.groupId, academicStructure);
           return <div className="space-y-4 text-xs"><p className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">{isThai ? `ยืนยันการย้าย ${transferTarget.student.fullName} จากกลุ่ม ${transferTarget.classGroup} ไปยังกลุ่ม ${destination?.group.code} หรือไม่` : `Transfer ${transferTarget.student.fullName} from ${transferTarget.classGroup} to ${destination?.group.code}?`}</p><div className="rounded-xl bg-gray-50 p-3 text-gray-600"><strong>{isThai ? 'เหตุผล' : 'Reason'}:</strong> {transferReason.trim()}</div><div className="flex justify-end gap-2"><button type="button" onClick={() => setTransferConfirm(false)} className="rounded-xl border border-gray-300 px-4 py-2 font-semibold">{isThai ? 'ย้อนกลับ' : 'Back'}</button><button type="button" onClick={executeTransfer} className="rounded-xl bg-blue-600 px-5 py-2 font-semibold text-white">{isThai ? 'ยืนยันการย้าย' : 'Confirm Transfer'}</button></div></div>;
         })()}
       </Modal>
@@ -627,8 +709,10 @@ export const StudentManagement: React.FC = () => {
 };
 
 interface SelectableAcademicItem {
-  id: string;
+  id?: string;
   code?: string;
+  label?: string;
+  name?: string;
   nameTh?: string;
   nameEn?: string;
 }
@@ -640,13 +724,14 @@ interface AcademicSelectProps<T extends SelectableAcademicItem> {
   getValue: (item: T) => string;
   getLabel: (item: T) => string;
   placeholder?: string;
+  allowEmpty?: boolean;
   disabled?: boolean;
 }
 
-const AcademicSelect = <T extends SelectableAcademicItem,>({ value, onChange, options, getValue, getLabel, placeholder = '', disabled }: AcademicSelectProps<T>) => (
+const AcademicSelect = <T extends SelectableAcademicItem,>({ value, onChange, options, getValue, getLabel, placeholder = '', allowEmpty = true, disabled }: AcademicSelectProps<T>) => (
   <span className="relative block min-w-0">
     <select value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} className="h-10 w-full min-w-0 appearance-none rounded-xl border border-slate-200 bg-white px-3 pr-9 text-xs disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400">
-      <option value="">{placeholder}</option>{options.map((item) => <option key={getValue(item)} value={getValue(item)}>{getLabel(item)}</option>)}
+      {allowEmpty && <option value="">{placeholder}</option>}{options.map((item) => <option key={getValue(item)} value={getValue(item)}>{getLabel(item)}</option>)}
     </select>
     <ChevronDown className="pointer-events-none absolute top-3 right-3 h-4 w-4 text-slate-400" strokeWidth={1.75} />
   </span>
@@ -719,8 +804,8 @@ const StudentTable: React.FC<StudentTableProps> = ({ rows, grouped, selectable =
                 <td className="px-4 py-3 font-mono font-semibold text-slate-900">{row.student.studentCode}</td>
                 <td className="px-4 py-3 font-semibold text-slate-900">{row.student.fullName}</td>
                 <td className="px-4 py-3 font-mono text-[10px] text-slate-500">{row.student.email}</td>
-                {!grouped && <td className="px-4 py-3"><div className="font-medium text-slate-800">{row.path?.department.nameTh || row.student.department}</div><div className="text-[10px] text-slate-400">{row.path?.faculty.nameTh || row.student.faculty}</div></td>}
-                {!grouped && <td className="px-4 py-3"><Badge variant={row.path ? 'default' : 'neutral'}>{row.classGroup}</Badge><div className="mt-1 text-[10px] text-slate-500">[{row.programCode}]</div></td>}
+                {!grouped && <td className="px-4 py-3"><div className="font-medium text-slate-800">{row.path?.department.nameTh || row.student.department}</div><div className="text-[10px] text-slate-400">{row.path?.faculty.name || row.student.faculty}</div></td>}
+                {!grouped && <td className="px-4 py-3"><Badge variant={row.path ? 'default' : 'neutral'}>{row.classGroup}</Badge></td>}
                 <td className="px-4 py-3 text-center font-semibold">ปี {row.yearLevel}</td>
                 <td className="px-4 py-3"><div className="flex items-center gap-2">{row.student.faceReferenceUrl ? <img src={row.student.faceReferenceUrl} alt="" className="h-7 w-7 rounded-full border border-violet-300 object-cover" /> : <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-400">?</span>}<Badge variant={row.student.faceReferenceUrl ? 'purple' : 'warning'}>{row.student.faceReferenceUrl ? 'มีข้อมูล' : 'ยังไม่มีข้อมูล'}</Badge></div></td>
                 <td className="px-4 py-3"><AccountStatusBadge status={row.student.accountStatus} /></td>
@@ -739,27 +824,87 @@ const ActionButton: React.FC<{ title: string; onClick: () => void; icon: React.E
 
 const Pagination: React.FC<{ page: number; totalPages: number; count: number; pageSize: number; isThai: boolean; onChange: (page: number) => void }> = ({ page, totalPages, count, pageSize, isThai, onChange }) => <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-4 py-3 text-xs"><span className="text-gray-500">{isThai ? `แสดง ${(page - 1) * pageSize + 1} - ${Math.min(page * pageSize, count)} จากทั้งหมด ${count} รายการ` : `Showing ${(page - 1) * pageSize + 1}-${Math.min(page * pageSize, count)} of ${count}`}</span><div className="flex items-center gap-2"><button type="button" disabled={page === 1} onClick={() => onChange(page - 1)} className="rounded-lg border border-gray-200 p-1.5 disabled:opacity-40"><ChevronLeft className="h-4 w-4" /></button><span>{page} / {totalPages}</span><button type="button" disabled={page === totalPages} onClick={() => onChange(page + 1)} className="rounded-lg border border-gray-200 p-1.5 disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button></div></div>;
 
-const StudentDetails: React.FC<{ row: ResolvedStudent; isThai: boolean }> = ({ row, isThai }) => <div className="space-y-3 text-xs">{[[isThai ? 'รหัสนักศึกษา' : 'Student Code', row.student.studentCode], [isThai ? 'ชื่อ-นามสกุล' : 'Full Name', row.student.fullName], [isThai ? 'อีเมลมหาวิทยาลัย' : 'University Email', row.student.email], [isThai ? 'คณะ' : 'Faculty', row.path ? (isThai ? row.path.faculty.nameTh : row.path.faculty.nameEn) : row.student.faculty], [isThai ? 'ภาควิชา' : 'Department', row.path ? (isThai ? row.path.department.nameTh : row.path.department.nameEn) : row.student.department], [isThai ? 'สาขาวิชา' : 'Program', `${row.programName} (${row.programCode})`], [isThai ? 'กลุ่มเรียน' : 'Class Group', row.classGroup], [isThai ? 'ชั้นปี' : 'Year Level', String(row.yearLevel)]].map(([title, value]) => <div key={title} className="flex justify-between gap-4 border-b border-gray-100 pb-2"><span className="text-gray-500">{title}</span><strong className="text-right text-gray-900">{value}</strong></div>)}</div>;
+const StudentDetails: React.FC<{ row: ResolvedStudent; isThai: boolean }> = ({ row, isThai }) => <div className="space-y-3 text-xs">{[[isThai ? 'รหัสนักศึกษา' : 'Student Code', row.student.studentCode], [isThai ? 'ชื่อ-นามสกุล' : 'Full Name', row.student.fullName], [isThai ? 'อีเมลมหาวิทยาลัย' : 'University Email', row.student.email], [isThai ? 'คณะ' : 'Faculty', row.path?.faculty.name || row.student.faculty], [isThai ? 'ภาควิชา' : 'Department', row.path ? (isThai ? row.path.department.nameTh : row.path.department.nameEn) : row.student.department], [isThai ? 'สาขาวิชา' : 'Program', `${row.programName} (${row.programCode})`], [isThai ? 'กลุ่มเรียน' : 'Class Group', row.classGroup], [isThai ? 'ชั้นปี' : 'Year Level', String(row.yearLevel)]].map(([title, value]) => <div key={title} className="flex justify-between gap-4 border-b border-gray-100 pb-2"><span className="text-gray-500">{title}</span><strong className="text-right text-gray-900">{value}</strong></div>)}</div>;
 
-const StudentForm: React.FC<{ form: StudentFormState; setForm: React.Dispatch<React.SetStateAction<StudentFormState>>; isThai: boolean; onSubmit: (event: React.FormEvent) => void; onCancel: () => void }> = ({ form, setForm, isThai, onSubmit, onCancel }) => {
-  const faculty = academicStructure.find((item) => item.id === form.facultyId);
-  const department = faculty?.departments.find((item) => item.id === form.departmentId);
-  const program = department?.programs.find((item) => item.id === form.programId);
-  const group = program?.classGroups.find((item) => item.id === form.groupId);
-  const name = (item: { nameTh?: string; nameEn?: string }) => (isThai ? item.nameTh : item.nameEn) || '';
-  const facultyName = (item: AcademicFaculty) => item.code ? `[${item.code}] ${name(item)}` : name(item);
-  return <form onSubmit={onSubmit} className="space-y-5 text-xs"><FormSection title={isThai ? 'ข้อมูลส่วนบุคคล' : 'Personal Information'}><div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><TextField label={isThai ? 'รหัสนักศึกษา' : 'Student Code'} value={form.studentCode} onChange={(studentCode) => setForm((current) => ({ ...current, studentCode }))} /><TextField label={isThai ? 'อีเมลมหาวิทยาลัย' : 'University Email'} value={form.email} type="email" onChange={(email) => setForm((current) => ({ ...current, email }))} /><TextField label={isThai ? 'ชื่อ' : 'First Name'} value={form.firstName} onChange={(firstName) => setForm((current) => ({ ...current, firstName }))} /><TextField label={isThai ? 'นามสกุล' : 'Last Name'} value={form.lastName} onChange={(lastName) => setForm((current) => ({ ...current, lastName }))} /></div></FormSection><FormSection title={isThai ? 'ข้อมูลการศึกษา' : 'Academic Information'}><div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><LabeledAcademicSelect step="1" label={isThai ? 'คณะ' : 'Faculty'} value={form.facultyId} onChange={(facultyId) => setForm((current) => ({ ...current, facultyId, departmentId: '', programId: '', groupId: '' }))} options={academicStructure} getValue={(item) => item.id} getLabel={facultyName} /><LabeledAcademicSelect step="2" label={isThai ? 'ภาควิชา' : 'Department'} value={form.departmentId} onChange={(departmentId) => setForm((current) => ({ ...current, departmentId, programId: '', groupId: '' }))} options={faculty?.departments || []} getValue={(item) => item.id} getLabel={name} disabled={!form.facultyId} /><LabeledAcademicSelect step="3" label={isThai ? 'สาขาวิชา' : 'Program'} value={form.programId} onChange={(programId) => setForm((current) => ({ ...current, programId, groupId: '' }))} options={department?.programs || []} getValue={(item) => item.id} getLabel={(item) => `${item.code} — ${name(item)}`} disabled={!form.departmentId} /><LabeledAcademicSelect step="4" label={isThai ? 'กลุ่มเรียน' : 'Class Group'} value={form.groupId} onChange={(groupId) => { const nextGroup = program?.classGroups.find((item) => item.id === groupId); setForm((current) => ({ ...current, groupId, yearLevel: nextGroup?.yearLevel || current.yearLevel })); }} options={program?.classGroups || []} getValue={(item) => item.id} getLabel={(item) => item.code} disabled={!form.programId} /><label className="space-y-1.5 font-semibold text-gray-700"><span>{isThai ? 'ชั้นปี' : 'Year Level'}</span><select required value={form.yearLevel} onChange={(event) => setForm((current) => ({ ...current, yearLevel: Number(event.target.value) }))} className="w-full rounded-xl border border-gray-200 px-3 py-2">{[1, 2, 3, 4].map((year) => <option key={year} value={year}>{isThai ? `ชั้นปีที่ ${year}` : `Year ${year}`}</option>)}</select></label>{group && group.yearLevel !== form.yearLevel && <p className="self-end rounded-lg bg-amber-50 p-2 text-amber-700">{isThai ? `กลุ่ม ${group.code} กำหนดไว้สำหรับชั้นปีที่ ${group.yearLevel}` : `${group.code} is configured for year ${group.yearLevel}.`}</p>}</div></FormSection><FormSection title={isThai ? 'ข้อมูลความปลอดภัยและสถานะ' : 'Security & Status'}><div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><TextField label={isThai ? 'URL ภาพใบหน้าอ้างอิง (ไม่บังคับ)' : 'Face reference URL (optional)'} value={form.faceReferenceUrl} required={false} onChange={(faceReferenceUrl) => setForm((current) => ({ ...current, faceReferenceUrl }))} /><label className="space-y-1.5 font-semibold text-gray-700"><span>{isThai ? 'สถานะบัญชี' : 'Account Status'}</span><select value={form.accountStatus} onChange={(event) => setForm((current) => ({ ...current, accountStatus: event.target.value as AccountStatus }))} className="w-full rounded-xl border border-gray-200 px-3 py-2"><option value="active">{isThai ? 'ปกติ' : 'Active'}</option><option value="suspended">{isThai ? 'ถูกระงับ' : 'Suspended'}</option><option value="graduated_inactive">{isThai ? 'พ้นสภาพ' : 'Terminated'}</option></select></label></div>{form.faceReferenceUrl ? <div className="mt-3 flex items-center gap-3 rounded-xl bg-emerald-50 p-3"><img src={form.faceReferenceUrl} alt="" className="h-12 w-12 rounded-full object-cover" /><Badge variant="success">{isThai ? 'มีข้อมูลภาพใบหน้าแล้ว' : 'Face reference available'}</Badge></div> : <div className="mt-3"><Badge variant="warning">{isThai ? 'ยังไม่มีข้อมูลภาพใบหน้า' : 'Face reference missing'}</Badge></div>}</FormSection><ModalActions isThai={isThai} onCancel={onCancel} submitLabel={isThai ? 'บันทึกข้อมูลนักศึกษา' : 'Save Student'} disabled={!form.groupId} /></form>;
+const StudentForm: React.FC<{ existingStudent: Student | null; form: StudentFormState; setForm: React.Dispatch<React.SetStateAction<StudentFormState>>; isThai: boolean; onSubmit: (event: React.FormEvent) => void; onCancel: () => void }> = ({ existingStudent, form, setForm, isThai, onSubmit, onCancel }) => {
+  const { academicState, setActiveAdminRoute } = useApp();
+  const selection: AcademicSelection = {
+    facultyId: form.facultyId, departmentId: form.departmentId, programId: form.programId,
+    yearLevelId: academicState.yearLevels.find((y) => y.programId === form.programId && y.level === form.yearLevel)?.id || '',
+    groupId: form.groupId,
+  };
+  const existingYear = academicState.yearLevels.find((y) => y.programId === existingStudent?.programId && y.level === (existingStudent?.yearLevel || existingStudent?.year));
+  const retained = existingStudent ? {
+    facultyId: existingStudent.facultyId || '', departmentId: existingStudent.departmentId || '', programId: existingStudent.programId || '',
+    yearLevelId: existingStudent.yearLevelId || existingYear?.id || '', groupId: existingStudent.classGroupId || '',
+  } : undefined;
+  const ready = Boolean(form.groupId && (isAcademicPathActive(academicState, 'classGroups', form.groupId) || form.groupId === existingStudent?.classGroupId));
+  const groups = academicState.classGroups.filter((g) => g.yearLevelId === selection.yearLevelId && isAcademicPathActive(academicState, 'classGroups', g.id));
+  return (
+    <form onSubmit={onSubmit} className="space-y-5 text-xs">
+      <FormSection title={isThai ? 'ข้อมูลส่วนบุคคล' : 'Personal Information'}>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <TextField label={isThai ? 'รหัสนักศึกษา' : 'Student Code'} value={form.studentCode} onChange={(studentCode) => setForm((current) => ({ ...current, studentCode }))} />
+          <TextField label={isThai ? 'อีเมลมหาวิทยาลัย' : 'University Email'} value={form.email} type="email" onChange={(email) => setForm((current) => ({ ...current, email }))} />
+          <TextField label={isThai ? 'ชื่อ' : 'First Name'} value={form.firstName} onChange={(firstName) => setForm((current) => ({ ...current, firstName }))} />
+          <TextField label={isThai ? 'นามสกุล' : 'Last Name'} value={form.lastName} onChange={(lastName) => setForm((current) => ({ ...current, lastName }))} />
+        </div>
+      </FormSection>
+
+      <FormSection title="ข้อมูลการศึกษา">
+        <AcademicCascade value={selection} retained={retained} onChange={(next) => setForm((current) => ({
+          ...current, facultyId: next.facultyId, departmentId: next.departmentId, programId: next.programId,
+          yearLevel: academicState.yearLevels.find((y) => y.id === next.yearLevelId)?.level || 0, groupId: next.groupId,
+        }))} />
+        {selection.yearLevelId && !groups.length && !ready && <div className="mt-3 rounded-xl bg-amber-50 p-3 text-xs text-amber-800">
+          ยังไม่มีกลุ่มเรียน กรุณาสร้างกลุ่มเรียนก่อนเพิ่มนักศึกษา
+          <button type="button" onClick={() => setActiveAdminRoute('ACADEMIC')} className="mt-2 block font-semibold text-blue-600">ไปจัดการคณะและกลุ่มเรียน</button>
+        </div>}
+      </FormSection>
+
+      <FormSection title={isThai ? 'ข้อมูลความปลอดภัยและสถานะ' : 'Security & Status'}>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <TextField label={isThai ? 'URL ภาพใบหน้าอ้างอิง (ไม่บังคับ)' : 'Face reference URL (optional)'} value={form.faceReferenceUrl} required={false} onChange={(faceReferenceUrl) => setForm((current) => ({ ...current, faceReferenceUrl }))} />
+          <label className="space-y-1.5 font-semibold text-gray-700">
+            <span>{isThai ? 'สถานะบัญชี' : 'Account Status'}</span>
+            <select value={form.accountStatus} onChange={(event) => setForm((current) => ({ ...current, accountStatus: event.target.value as AccountStatus }))} className="w-full rounded-xl border border-gray-200 px-3 py-2">
+              <option value="active">{isThai ? 'ปกติ' : 'Active'}</option>
+              <option value="suspended">{isThai ? 'ถูกระงับ' : 'Suspended'}</option>
+              <option value="graduated_inactive">{isThai ? 'พ้นสภาพ' : 'Terminated'}</option>
+            </select>
+          </label>
+        </div>
+        {form.faceReferenceUrl ? (
+          <div className="mt-3 flex items-center gap-3 rounded-xl bg-emerald-50 p-3">
+            <img src={form.faceReferenceUrl} alt="" className="h-12 w-12 rounded-full object-cover" />
+            <Badge variant="success">{isThai ? 'มีข้อมูลภาพใบหน้าแล้ว' : 'Face reference available'}</Badge>
+          </div>
+        ) : (
+          <div className="mt-3"><Badge variant="warning">{isThai ? 'ยังไม่มีข้อมูลภาพใบหน้า' : 'Face reference missing'}</Badge></div>
+        )}
+      </FormSection>
+      <ModalActions isThai={isThai} onCancel={onCancel} submitLabel={isThai ? 'บันทึกข้อมูลนักศึกษา' : 'Save Student'} disabled={!ready && !(existingStudent && !existingStudent.classGroupId && form.programId === existingStudent.programId && form.yearLevel === (existingStudent.yearLevel || existingStudent.year))} />
+    </form>
+  );
 };
 
 const FormSection: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => <section className="rounded-2xl border border-gray-200 p-4"><h3 className="mb-3 text-sm font-bold text-gray-900">{title}</h3>{children}</section>;
 const TextField: React.FC<{ label: string; value: string; onChange: (value: string) => void; type?: string; required?: boolean }> = ({ label, value, onChange, type = 'text', required = true }) => <label className="space-y-1.5 font-semibold text-gray-700"><span>{label}</span><input type={type} required={required} value={value} onChange={(event) => onChange(event.target.value)} className="w-full rounded-xl border border-gray-200 px-3 py-2 font-normal" /></label>;
 const ModalActions: React.FC<{ isThai: boolean; onCancel: () => void; submitLabel: string; disabled?: boolean }> = ({ isThai, onCancel, submitLabel, disabled }) => <div className="flex justify-end gap-2 border-t border-gray-100 pt-4"><button type="button" onClick={onCancel} className="rounded-xl border border-gray-300 px-4 py-2 font-semibold">{isThai ? 'ยกเลิก' : 'Cancel'}</button><button type="submit" disabled={disabled} className="rounded-xl bg-blue-600 px-5 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">{submitLabel}</button></div>;
 
-const TransferSelectors: React.FC<{ selection: HierarchySelection; setSelection: React.Dispatch<React.SetStateAction<HierarchySelection>>; isThai: boolean; currentGroupId?: string }> = ({ selection, setSelection, isThai, currentGroupId }) => {
-  const faculty = academicStructure.find((item) => item.id === selection.facultyId);
-  const department = faculty?.departments.find((item) => item.id === selection.departmentId);
-  const program = department?.programs.find((item) => item.id === selection.programId);
-  const name = (item: { nameTh?: string; nameEn?: string }) => (isThai ? item.nameTh : item.nameEn) || '';
-  const facultyName = (item: AcademicFaculty) => item.code ? `[${item.code}] ${name(item)}` : name(item);
-  return <div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><LabeledAcademicSelect step="1" label={isThai ? 'คณะปลายทาง' : 'Target Faculty'} value={selection.facultyId} onChange={(facultyId) => setSelection({ facultyId, departmentId: '', programId: '', groupId: '' })} options={academicStructure} getValue={(item) => item.id} getLabel={facultyName} /><LabeledAcademicSelect step="2" label={isThai ? 'ภาควิชาปลายทาง' : 'Target Department'} value={selection.departmentId} onChange={(departmentId) => setSelection((current) => ({ ...current, departmentId, programId: '', groupId: '' }))} options={faculty?.departments || []} getValue={(item) => item.id} getLabel={name} disabled={!selection.facultyId} /><LabeledAcademicSelect step="3" label={isThai ? 'สาขาวิชาปลายทาง' : 'Target Program'} value={selection.programId} onChange={(programId) => setSelection((current) => ({ ...current, programId, groupId: '' }))} options={department?.programs || []} getValue={(item) => item.id} getLabel={(item) => `${item.code} — ${name(item)}`} disabled={!selection.departmentId} /><LabeledAcademicSelect step="4" label={isThai ? 'กลุ่มเรียนใหม่' : 'New Class Group'} value={selection.groupId} onChange={(groupId) => setSelection((current) => ({ ...current, groupId }))} options={(program?.classGroups || []).filter((item) => item.id !== currentGroupId)} getValue={(item) => item.id} getLabel={(item) => item.code} disabled={!selection.programId} /></div>;
+const TransferSelectors: React.FC<{ selection: HierarchySelection; setSelection: React.Dispatch<React.SetStateAction<HierarchySelection>>; isThai: boolean; currentGroupId?: string }> = ({ selection, setSelection, currentGroupId }) => {
+  const { academicState, setActiveAdminRoute } = useApp();
+  const yearLevelId = academicState.yearLevels.find((y) => y.programId === selection.programId && y.level === Number(selection.yearLevel))?.id || '';
+  const value = { ...selection, yearLevelId };
+  const groups = academicState.classGroups.filter((g) => g.yearLevelId === yearLevelId && g.id !== currentGroupId && isAcademicPathActive(academicState, 'classGroups', g.id));
+  return <div className="space-y-3">
+    <AcademicCascade value={value} excludeGroupId={currentGroupId} onChange={(next) => setSelection({
+      facultyId: next.facultyId, departmentId: next.departmentId, programId: next.programId,
+      yearLevel: String(academicState.yearLevels.find((y) => y.id === next.yearLevelId)?.level || ''), groupId: next.groupId,
+    })} />
+    {yearLevelId && !groups.length && <div className="rounded-xl bg-amber-50 p-3 text-xs text-amber-800">
+      ยังไม่มีกลุ่มเรียน กรุณาสร้างกลุ่มเรียนก่อนเพิ่มนักศึกษา
+      <button type="button" onClick={() => setActiveAdminRoute('ACADEMIC')} className="mt-2 block font-semibold text-blue-600">ไปจัดการคณะและกลุ่มเรียน</button>
+    </div>}
+  </div>;
 };

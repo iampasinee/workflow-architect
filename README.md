@@ -1,70 +1,94 @@
 # SecureLab
 
-SecureLab is a frontend prototype for laboratory exam submission and monitoring, built with React 19, TypeScript, Vite 6, and Tailwind CSS 4. It provides Thai/English interfaces and simulated student, teacher, and administrator workflows. Authentication, biometric verification, and uploads are demonstrations.
+SecureLab is a Thai-language frontend prototype for secure laboratory exam administration and file submission. It uses React 19, TypeScript, Vite 6, and Tailwind CSS 4. Login, ICIT identity checks, biometric verification, exam monitoring, file transfer, and integrity checks are simulated in the browser; there is no production backend.
 
 ## Run locally
 
-Install Node.js with npm, then run:
+Install Node.js and npm, then run:
 
 ```sh
 npm install
 npm run dev
 ```
 
-Open http://localhost:3000. The initial page is the login screen; select a demo persona to explore the role workflows. The development server is exposed on the local network. In PowerShell, use `npm.cmd` if execution policy blocks `npm.ps1`.
+Open <http://localhost:3000>. Vite also prints LAN addresses for testing from another device. The app always starts on the login page; choose a demo persona to enter a Student, Teacher, or Admin flow. In PowerShell, use `npm.cmd` if execution policy blocks `npm.ps1`.
 
-The current frontend requires no API key. `.env.example` contains inherited `GEMINI_API_KEY` and `APP_URL` placeholders, but application source does not currently use them. Never commit populated environment files or put secrets in client-side code.
+No API key is currently required. `.env.example` contains inherited placeholders that application source does not use. Never place secrets in client-side environment variables or commit populated `.env` files.
 
 ## Development commands
 
 | Command | Purpose |
 | --- | --- |
-| `npm install` | Install dependencies; `package-lock.json` is present. |
-| `npm run dev` | Start Vite on port 3000. |
-| `npm run lint` | Check TypeScript with `tsc --noEmit`. |
-| `npm run build` | Build production assets into `dist/`. |
+| `npm install` | Install dependencies from `package-lock.json`. |
+| `npm run dev` | Start Vite on port 3000 and expose it on the LAN. |
+| `npm run lint` | Run TypeScript validation with `tsc --noEmit`. |
+| `npm run test:academic` | Test academic migration, relationships, validation, and bulk assignment with Node/tsx. |
+| `npm run build` | Create the production bundle in `dist/`. |
 | `npm run preview` | Serve the production bundle locally. |
 | `npm run clean` | Remove `dist/` and `server.js`; requires a Unix-compatible shell. |
 
 ## Project structure
 
-- `src/main.tsx`, `src/App.tsx`: startup and role-based screen selection.
-- `src/components/`: authentication, student, teacher, administrator, shared, and simulation UI.
-- `src/context/AppContext.tsx`: application state and simulated actions.
-- `src/types.ts`, `src/data/initialData.ts`: shared models and mock records.
-- `src/types/stagedUpload.ts`, `src/services/stagedUploadStorage.ts`: staged-file model and IndexedDB persistence.
-- `src/utils/fileSize.ts`: byte-size display formatting.
-- `src/index.css`, `public/`: global styling and static assets.
+- `src/main.tsx` and `src/App.tsx`: startup, login-first behavior, and role flow selection.
+- `src/components/student/`: identity confirmation, exam rules, progress stepper, staged uploads, and submission confirmation.
+- `src/components/teacher/`: course, exam, monitoring, integrity, and reopening workflows.
+- `src/components/admin/`: dashboard, user management, roles, rooms, biometrics, security, audit, and profile screens.
+- `src/components/common/` and `src/components/simulation/`: shared UI and demo controls.
+- `src/context/AppContext.tsx`: application state, permissions, CRUD actions, and localStorage migrations.
+- `src/data/initialData.ts` and `src/data/academicStructure.ts`: mock records and academic hierarchy.
+- `src/types.ts` and `src/types/stagedUpload.ts`: shared domain models.
+- `src/services/stagedUploadStorage.ts`: IndexedDB staged-file and sequence persistence.
+- `src/types/academic.ts`, `src/services/academicState.ts`: normalized academic records, migration, and integrity validation.
+- `src/components/admin/FacultiesAndGroupsPage.tsx` and `AcademicCascade.tsx`: academic administration and shared assignment selectors.
+- `src/utils/`: route, translation, and file-size helpers.
+
+## Current role workflows
+
+The interface is fixed to Thai. `AppContext` retains the language API for compatibility but always stores and returns `th`.
+
+Admin navigation uses hash routes such as `#/admin/users/students` and `#/admin/roles-permissions`. User Management has separate Student, Teacher, and Administrator views. Student Management supports search, sorting, pagination, status actions, browser-generated UTF-8 CSV exports, list and class-group views, and create/edit/transfer/delete workflows.
+
+The initial faculty is `คณะเทคโนโลยีและการจัดการอุตสาหกรรม`. Administrators can configure additional faculties, departments, programs, years, and class groups at `#/admin/faculties-and-groups`. The page has five management tabs, live metrics, search, parent/status filters, sorting, pagination, and confirmed status/deletion actions. Academic relationships use stable internal IDs; Thai names and group/program codes are display values. Academic selection is a five-level cascade:
+
+```text
+คณะ → ภาควิชา → สาขาวิชา → ชั้นปี → กลุ่มเรียน
+```
+
+Changing a parent clears all dependent selections. INET, INE, and all other existing programs/groups are preserved. Years 1–4 are seeded per program, including for newly created programs. Group lists/cards are filtered by program and year. Inactive records and their descendants are excluded from new assignments; existing student associations remain visible. Deletion is blocked whenever children or students reference a record.
+
+Student Management consumes the same state. It supports an unassigned-student filter and confirmed bulk assignment into an active group matching each selected student's affiliation and year. CSV still exports all filtered rows, independently of checkbox selection.
+
+Legacy group IDs are migrated to their current INET groups while preserving profile, account, and biometric data. Normalization adds `facultyId` and `yearLevelId` to student records and synchronizes legacy display fields. An explicitly empty group remains unassigned across refreshes. Existing program/group IDs are retained; the separate normalized store is persisted as `securelab_academic_state`.
 
 ## Staged upload workflow
 
-The student page uses a two-column workflow at 1024px and above. The rules card occupies roughly 38% on the left, while a compact drop zone and the staged-file list share the 62% right column. Smaller screens stack all three sections vertically. Selecting or dropping a file immediately copies its blob into browser-local IndexedDB and simulates progress over approximately 2–3 seconds. Staged drafts survive refreshes, and interrupted mock uploads resume when the exam page loads.
+At desktop widths, the Student Exam File Submission page uses two columns: rules on the left and a compact drop zone followed immediately by staged files on the right. Below 1024px, these sections stack vertically.
 
-New files receive a unique `uploadId` and a persistent sequence shared across file types for each exam/student pair. The default submission name is:
+Selecting or dropping a file immediately stores its blob in browser-local IndexedDB and simulates upload progress. Drafts survive refreshes, and interrupted simulated transfers resume when the upload page mounts. Each new file receives a stable `uploadId` and a persistent, non-reusable `uploadSequence` shared across file types for that exam and student.
+
+The default generated submission name is:
 
 ```text
 {studentId}_{firstName}_{lastName}_{uploadSequence}.{extension}
 6410123457_somying_rakrian_1.py
 ```
 
-`studentId` uses the profile's `studentCode`. Names use `firstName` and `lastName`, falling back to splitting `fullName`. Name parts are lowercased, spaces/hyphens become underscores, and characters other than English letters and underscores are removed. No romanization service is implemented. `fileRequirements.automaticFilenamePattern` optionally supplies the five-token template; backend configuration retrieval is not implemented.
+The exam can override this through `fileRequirements.automaticFilenamePattern`. Profile name parts are lowercased, spaces and hyphens become underscores, and unsupported characters are stripped. The original machine filename remains in `originalName`; the final filename is stored separately as `submissionName`.
 
-Students can Rename or Remove staged files. Rename changes only `submissionName`; it preserves the original filename, binary, identifier, status, and progress. Base names are trimmed, limited to 1–100 characters, and validated against `^[A-Za-z0-9_-]+$`. Full-name duplicates are rejected case-insensitively. Enter saves; Escape or Cancel discards edits.
+Rename updates only `submissionName` and never changes the binary, `uploadId`, sequence, progress, or status. Rename accepts a 1–100 character base name matching `^[A-Za-z0-9_-]+$`, preserves the extension, and rejects case-insensitive duplicates.
 
-Exam configuration controls allowed extensions and maximum file size. Only zero-byte files are empty; valid files under 1 KB are accepted and displayed in bytes. The default active exam accepts `.zip` and `.py`; `.jpg` requires instructor configuration.
+File validation uses raw `File.size` bytes. Only `file.size === 0` is considered empty, so valid files smaller than 1 KB are accepted and displayed in bytes. Allowed extensions, maximum size, and minimum ready-file count come from the exam configuration.
 
-Manual finalization requires at least `requiredFileCount` ready files and no uploading, invalid, or failed rows. “Finish Exam and Submit Files” opens a review dialog. Timer expiry locks editing and automatically submits ready files, allowing active uploads a 10-second grace period. Unfinished transfers become failed. With no ready files, the page displays “No files submitted” and prompts contact with the instructor. Successful submission displays the submitted files and timestamp. Teachers can reopen submissions for a limited duration.
+Manual submission opens a confirmation dialog and locks file actions after success. When time expires, ready files are submitted automatically; active uploads receive a 10-second grace period. If no valid file is ready, the result is “No files submitted.” Teachers may reopen a finalized submission for a limited duration.
 
 ## Persistence and limitations
 
-Application records use `localStorage`. Blobs and sequence counters use the `securelab-staged-uploads` IndexedDB database, currently version 6. Migrations preserve existing submission names. Deleting a staged file does not decrement the sequence counter.
+Application records use `localStorage`. Staged blobs and sequence counters use the `securelab-staged-uploads` IndexedDB database, version 6. Deleting a staged file does not release its sequence number. Storage is local to the current browser and origin—not a server backup—and automatic timeout logic cannot execute while the app is closed.
 
-Storage is local to the browser and origin, not a remote backup. Closing the browser stops mock timers; automatic finalization cannot execute while the app is closed. The simulation reset restores application seeds but does not clear IndexedDB drafts or counters. Deleting that database through browser developer tools permanently removes its staged files and counters.
-
-Existing localStorage records take precedence over updated seed data. Authentication, security monitoring, and integrity-check UI are mock workflows and should not be treated as production security guarantees.
+The simulation reset restores seeded application records but does not clear IndexedDB drafts. Existing localStorage data normally takes precedence over seed data, except when a documented forward migration applies. Authentication, biometric checks, monitoring, upload transfer, and integrity validation are demonstrations and must not be treated as production security controls.
 
 ## Verification and contributions
 
-Run `npm run lint` and `npm run build` before handing off changes. No automated test runner or coverage threshold is configured. Manually check affected role flows, selection/drop, rename validation, refresh restoration, submission locks, and timeout behavior with demo controls. Builds may report a non-failing bundle-size advisory.
+Run `npm run test:academic`, `npm run lint`, `npm run build`, and `git diff --check` before handing off changes. Academic tests use Node's test runner through the existing `tsx` dependency; no coverage threshold is configured. Manually regression-test affected Student, Teacher, and Admin flows. Vite may print a non-failing bundle-size advisory during production builds.
 
 See [AGENTS.md](AGENTS.md) for contributor guidelines.

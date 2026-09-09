@@ -2,35 +2,36 @@
 
 ## Project Structure & Module Organization
 
-This is a React 19, TypeScript, Vite 6, and Tailwind CSS 4 frontend prototype. Startup lives in `src/main.tsx`; `src/App.tsx` selects login and role flows. Place role UI in `src/components/student/`, `teacher/`, or `admin/`, shared primitives in `common/`, and demo controls in `simulation/`. Central state lives in `src/context/AppContext.tsx`; shared models and seeds are in `src/types.ts` and `src/data/initialData.ts`. Staging uses `src/types/stagedUpload.ts` and `src/services/stagedUploadStorage.ts`. Global styles belong in `src/index.css`; static assets go in `public/`.
+This React 19, TypeScript, Vite 6, and Tailwind CSS 4 prototype starts in `src/main.tsx`; `src/App.tsx` selects login and role flows. Put role UI in `src/components/student/`, `teacher/`, or `admin/`, shared primitives in `common/`, and demo controls in `simulation/`. State and migrations live in `src/context/AppContext.tsx`; models and seeds are in `src/types.ts` and `src/data/`. IndexedDB staging uses `src/types/stagedUpload.ts` and `src/services/stagedUploadStorage.ts`. Global styles belong in `src/index.css`; static assets go in `public/`.
 
 ## Build, Test, and Development Commands
 
-- `npm install` installs dependencies; `package-lock.json` is present.
-- `npm run dev` starts Vite on port 3000 and exposes it on the local network.
-- `npm run lint` runs TypeScript checking with `tsc --noEmit`.
-- `npm run build` creates a production bundle in `dist/`.
-- `npm run preview` serves the production bundle for a local smoke test.
-- `npm run clean` removes generated `dist/` and `server.js` files; it requires a Unix-compatible shell.
+- `npm install`: install locked dependencies.
+- `npm run dev`: start Vite on port 3000 and expose it on the LAN.
+- `npm run lint`: run `tsc --noEmit`.
+- `npm run build`: create production files in `dist/`.
+- `npm run preview`: serve the production bundle locally.
 
-Use `npm.cmd` in PowerShell if script policy blocks npm. Run lint and build before submitting changes.
+Use `npm.cmd` in PowerShell if script policy blocks npm. `npm run clean` uses Unix `rm`; do not rely on it in plain PowerShell.
 
 ## Coding Style & Naming Conventions
 
-Use two-space indentation, semicolons, single quotes, and multiline trailing commas. Prefer PascalCase component filenames, camelCase variables, descriptive Props interfaces, and named exports. Reuse shared types and context. Styling uses Tailwind utilities; no ESLint or formatter configuration is present.
+Use two-space indentation, semicolons, single quotes, and multiline trailing commas. Prefer PascalCase component files, camelCase variables, descriptive Props interfaces, and named exports. Reuse context actions and shared types. Style with Tailwind utilities; no ESLint or formatter is configured. Interface copy is Thai-only; technical identifiers such as ICIT, CSV, IP Address, and MAC Address may remain English.
 
-## Staged Upload Conventions
+## Domain and Persistence Conventions
 
-Use `uploadId` for identity and raw `sizeBytes` for validation. Preserve `originalName`; manual rename changes only `submissionName`. Automatic naming uses profile fields, a configurable template, and persistent per-session sequences. Keep blobs, progress, and status intact during rename. IndexedDB changes require forward migrations preserving existing drafts. See README.md for current behavior and storage limitations.
+Academic definitions live in Context's `academicState` with stable internal IDs; Thai names are display values. Use `src/services/academicState.ts` for validation, migration, and relationship checks. Selectors cascade Faculty → Department → Program → Year → Class Group. Exclude inactive ancestors from new assignments and block deletion of referenced records.
+
+For staged uploads, identify records by `uploadId` and validate raw `sizeBytes`. Preserve `originalName`; rename changes only `submissionName`. Keep `uploadSequence`, blobs, progress, and status intact. IndexedDB schema changes require forward migrations that preserve drafts.
 
 ## Testing Guidelines
 
-No automated runner or coverage threshold is configured. Check affected roles through demo controls, including file selection/drop, naming, refresh restoration, submission locks, and timeout/grace behavior. If adding tests, use colocated `*.test.tsx` files and document the runner in `package.json`.
+Run `npm run test:academic` for Node tests covering migration and academic integrity, plus `npm run lint`, `npm run build`, and `git diff --check`. Manually check cascades, CRUD, bulk assignment, CSV, and affected exam flows. No coverage threshold is configured.
 
 ## Commit & Pull Request Guidelines
 
-Git history is unavailable in this snapshot. Use short imperative subjects, optionally prefixed with `feat:` or `fix:`. PRs should describe user-visible changes, verification, relevant issues, UI screenshots, and configuration or storage migrations.
+History uses short imperative subjects such as `feat: add academic structure`. PRs should describe visible changes, verification performed, related issues, screenshots for UI work, and any localStorage or IndexedDB migration.
 
 ## Security & Configuration
 
-Current frontend flows require no Gemini API key. `.env.example` contains unused integration placeholders. Never commit secrets or populated environment files, or log biometric, authentication, or exam data. IndexedDB is browser-local mock storage, not a server backup.
+No API key is required. Never commit secrets or populated environment files, and never log biometric, authentication, or exam data. Browser storage is mock persistence, not a production backup.

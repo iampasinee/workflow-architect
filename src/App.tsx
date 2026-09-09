@@ -30,6 +30,7 @@ import { TeacherProfile } from './components/teacher/TeacherProfile';
 
 // Admin screens
 import { AdminSidebar } from './components/admin/AdminSidebar';
+import { FacultiesAndGroupsPage } from './components/admin/FacultiesAndGroupsPage';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { UserRoleManager } from './components/admin/UserRoleManager';
 import { RolePermissions } from './components/admin/RolePermissions';
@@ -189,6 +190,7 @@ const MainRouter: React.FC = () => {
                 <UserRoleManager view={getUserManagementView(activeAdminRoute)} />
               )}
               {activeAdminRoute === 'A3' && <RolePermissions />}
+              {activeAdminRoute === 'ACADEMIC' && <FacultiesAndGroupsPage />}
               {(activeAdminRoute === 'A4' || activeAdminRoute === 'A5') && (
                 <RoomComputerSetup />
               )}

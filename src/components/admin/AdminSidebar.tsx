@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
   LayoutDashboard,
+  Network,
   Users,
   Monitor,
   ScanFace,
@@ -43,6 +44,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ collapsed, onToggle,
   ];
   const menuItems = [
     { id: 'A3', label: 'บทบาทและสิทธิ์', icon: Shield },
+    { id: 'ACADEMIC', label: 'จัดการคณะและกลุ่มเรียน', icon: Network },
     { id: 'A4', label: 'ห้องสอบและเครื่องคอมพิวเตอร์', icon: Monitor },
     { id: 'A6', label: 'จัดการข้อมูลใบหน้าอ้างอิง', icon: ScanFace },
     {

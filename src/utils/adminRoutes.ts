@@ -5,6 +5,7 @@ export const adminRouteHashes: Record<string, string> = {
   A2_TEACHERS: '#/admin/users/teachers',
   A2_ADMINS: '#/admin/users/admins',
   A3: '#/admin/roles-permissions',
+  ACADEMIC: '#/admin/faculties-and-groups',
   A4: '#/admin/rooms',
   A5: '#/admin/rooms/devices',
   A6: '#/admin/biometrics',

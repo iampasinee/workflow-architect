@@ -20,6 +20,17 @@ import {
 } from '../types';
 import { getTranslation } from '../i18n/translations';
 import { getAdminRouteFromHash } from '../utils/adminRoutes';
+import { AcademicInput, AcademicResult, AcademicState, AcademicTier } from '../types/academic';
+import {
+  academicDeleteError, bulkAssignmentError, createInitialAcademicState, isAcademicPathActive, migrateAcademicStudents,
+  normalizeAcademicInput, saveAcademicState, studentAcademicFields, validateAcademicInput,
+} from '../services/academicState';
+import {
+  findAcademicPathByGroup,
+  legacyStudentAcademicAssignments,
+  OFFICIAL_FACULTY_NAME,
+  resolveAcademicGroupId,
+} from '../data/academicStructure';
 import {
   initialStudents,
   initialTeachers,
@@ -76,6 +87,11 @@ interface AppContextType {
   updateSecurityRules: (rules: Partial<CheatDetectionRules>) => void;
 
   // Collections
+  academicState: AcademicState;
+  saveAcademicRecord: (tier: AcademicTier, input: AcademicInput, id?: string) => AcademicResult;
+  deleteAcademicRecord: (tier: AcademicTier, id: string) => AcademicResult;
+  setAcademicStatus: (tier: AcademicTier, id: string, status: 'active' | 'inactive') => AcademicResult;
+  assignStudentsToClassGroup: (studentIds: string[], groupId: string) => AcademicResult;
   students: Student[];
   teachers: Teacher[];
   admins: Admin[];
@@ -93,8 +109,8 @@ interface AppContextType {
   dismissToast: (id: string) => void;
 
   // Student Actions
-  addStudent: (student: Omit<Student, 'id'>) => void;
-  updateStudent: (id: string, updates: Partial<Student>) => void;
+  addStudent: (student: Omit<Student, 'id'>) => boolean;
+  updateStudent: (id: string, updates: Partial<Student>) => boolean;
   deleteStudent: (id: string) => boolean;
   updateAccountStatus: (id: string, status: AccountStatus, reason?: string) => void;
   updateFaceReference: (id: string, url: string) => void;
@@ -191,20 +207,54 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [activeTeacherRoute, setActiveTeacherRoute] = useState<string>('T1');
   const [activeStudentStep, setActiveStudentStep] = useState<'ST1' | 'ST2A' | 'ST2B' | 'ST2C' | 'ST3' | 'ST4' | 'ST5' | 'ST6' | 'ST7'>('ST1');
 
+  const [academicState, setAcademicState] = useState<AcademicState>(() =>
+    safeParse('securelab_academic_state', createInitialAcademicState()));
+
   const [students, setStudents] = useState<Student[]>(() => {
     const storedStudents = safeParse('securelab_students', initialStudents);
-    const migrationKey = 'securelab_academic_mock_students_v1';
-    if (localStorage.getItem(migrationKey) === 'complete') return storedStudents;
+    const seedMigrationKey = 'securelab_academic_mock_students_v1';
+    let mergedStudents = storedStudents;
 
-    const existingIds = new Set(storedStudents.map((student) => student.id));
-    const academicSamples = initialStudents.filter((student) =>
-      student.id.startsWith('std_inet_') || student.id.startsWith('std_ine_'));
-    const mergedStudents = [
-      ...storedStudents,
-      ...academicSamples.filter((student) => !existingIds.has(student.id)),
-    ];
-    localStorage.setItem(migrationKey, 'complete');
-    return mergedStudents;
+    if (localStorage.getItem(seedMigrationKey) !== 'complete') {
+      const existingIds = new Set(storedStudents.map((student) => student.id));
+      const academicSamples = initialStudents.filter((student) =>
+        student.id.startsWith('std_inet_') || student.id.startsWith('std_ine_'));
+      mergedStudents = [
+        ...storedStudents,
+        ...academicSamples.filter((student) => !existingIds.has(student.id)),
+      ];
+      localStorage.setItem(seedMigrationKey, 'complete');
+    }
+
+    const facultyMigrationKey = 'securelab_thai_faculty_relation_v2';
+    if (localStorage.getItem(facultyMigrationKey) === 'complete' || localStorage.getItem('securelab_academic_state')) {
+      return migrateAcademicStudents(mergedStudents, academicState);
+    }
+
+    const migratedStudents = mergedStudents.map((student) => {
+      const legacyStudent = student as Student & { facultyId?: string };
+      const { facultyId: _removedFacultyId, ...studentWithoutFacultyId } = legacyStudent;
+      const groupId = resolveAcademicGroupId(
+        student.classGroupId || legacyStudentAcademicAssignments[student.id],
+      );
+      const path = findAcademicPathByGroup(groupId);
+
+      return {
+        ...studentWithoutFacultyId,
+        faculty: OFFICIAL_FACULTY_NAME,
+        departmentId: path?.department.id || student.departmentId,
+        programId: path?.program.id || student.programId,
+        classGroupId: path?.group.id || groupId,
+        department: path?.department.nameTh || student.department,
+        program: path?.program.nameTh || student.program,
+        programCode: path?.program.code || student.programCode,
+        classGroup: path?.group.code || student.classGroup,
+        year: path?.group.yearLevel || student.year,
+        yearLevel: path?.group.yearLevel || student.yearLevel || student.year,
+      };
+    });
+    localStorage.setItem(facultyMigrationKey, 'complete');
+    return migrateAcademicStudents(migratedStudents, academicState);
   });
 
   const [teachers, setTeachers] = useState<Teacher[]>(() => {
@@ -263,6 +313,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Sync to localStorage
   useEffect(() => {
+    localStorage.setItem('securelab_academic_state', JSON.stringify(academicState));
+  }, [academicState]);
+  useEffect(() => {
     localStorage.removeItem('securelab_role');
     localStorage.setItem('securelab_language', 'th');
   }, []);
@@ -316,20 +369,86 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
+  const academicFailure = (error: string): AcademicResult => {
+    showToast('ไม่สามารถดำเนินการได้', error, 'error');
+    return { success: false, error };
+  };
+
+  const commitAcademicState = (next: AcademicState) => {
+    setAcademicState(next);
+    setStudents((current) => current.map((student) => ({ ...student, ...studentAcademicFields(next, student) })));
+    setCurrentStudent((current) => current ? { ...current, ...studentAcademicFields(next, current) } : null);
+  };
+
+  const saveAcademicRecord = (tier: AcademicTier, rawInput: AcademicInput, id?: string): AcademicResult => {
+    if (role !== 'admin') return academicFailure('เฉพาะผู้ดูแลระบบเท่านั้น');
+    const input = normalizeAcademicInput(rawInput);
+    const error = validateAcademicInput(academicState, tier, input, id);
+    if (error) return academicFailure(error);
+    commitAcademicState(saveAcademicState(academicState, tier, input, id));
+    showToast('บันทึกข้อมูลสำเร็จ', 'อัปเดตข้อมูลคณะและกลุ่มเรียนเรียบร้อยแล้ว', 'success');
+    return { success: true };
+  };
+
+  const deleteAcademicRecord = (tier: AcademicTier, id: string): AcademicResult => {
+    if (role !== 'admin') return academicFailure('เฉพาะผู้ดูแลระบบเท่านั้น');
+    if (!academicState[tier].some((r) => r.id === id)) return academicFailure('ไม่พบข้อมูลที่ต้องการลบ');
+    const error = academicDeleteError(academicState, students, tier, id);
+    if (error) return academicFailure(error);
+    setAcademicState({ ...academicState, [tier]: academicState[tier].filter((r) => r.id !== id) });
+    showToast('ลบข้อมูลเรียบร้อยแล้ว', undefined, 'success');
+    return { success: true };
+  };
+
+  const setAcademicStatus = (tier: AcademicTier, id: string, status: 'active' | 'inactive'): AcademicResult => {
+    if (role !== 'admin') return academicFailure('เฉพาะผู้ดูแลระบบเท่านั้น');
+    if (!academicState[tier].some((r) => r.id === id)) return academicFailure('ไม่พบข้อมูล');
+    setAcademicState({ ...academicState, [tier]: academicState[tier].map((r) =>
+      r.id === id ? { ...r, status, updatedAt: new Date().toISOString() } : r) });
+    showToast(status === 'active' ? 'เปิดใช้งานแล้ว' : 'ปิดใช้งานแล้ว', 'ข้อมูลนักศึกษาเดิมยังคงอยู่', 'success');
+    return { success: true };
+  };
+
+  const assignStudentsToClassGroup = (studentIds: string[], groupId: string): AcademicResult => {
+    if (role !== 'admin') return academicFailure('เฉพาะผู้ดูแลระบบเท่านั้น');
+    const error = bulkAssignmentError(academicState, students, studentIds, groupId);
+    if (error) return academicFailure(error);
+    setStudents((current) => current.map((student) => studentIds.includes(student.id)
+      ? { ...student, ...studentAcademicFields(academicState, { ...student, classGroupId: groupId }) } : student));
+    setCurrentStudent((current) => current && studentIds.includes(current.id)
+      ? { ...current, ...studentAcademicFields(academicState, { ...current, classGroupId: groupId }) } : current);
+    showToast('กำหนดกลุ่มเรียนสำเร็จ', `กำหนดกลุ่มให้ ${new Set(studentIds).size} คนแล้ว`, 'success');
+    return { success: true };
+  };
+
   // Student CRUD
   const addStudent = (newStd: Omit<Student, 'id'>) => {
-    const id = `std_${String(students.length + 1).padStart(4, '0')}`;
-    const created: Student = { ...newStd, id };
+    if (newStd.classGroupId && !isAcademicPathActive(academicState, 'classGroups', newStd.classGroupId)) {
+      showToast('ไม่สามารถเพิ่มนักศึกษาได้', 'กรุณาเลือกกลุ่มเรียนที่เปิดใช้งาน', 'error');
+      return false;
+    }
+    const id = crypto.randomUUID();
+    const created: Student = { ...newStd, ...studentAcademicFields(academicState, { ...newStd, id }), id };
     setStudents(prev => [created, ...prev]);
     showToast('เพิ่มนักศึกษาสำเร็จ', `ลงทะเบียน ${created.fullName} (${created.studentCode}) เรียบร้อยแล้ว`, 'success');
+    return true;
   };
 
   const updateStudent = (id: string, updates: Partial<Student>) => {
+    const existing = students.find((student) => student.id === id);
+    if (!existing) return false;
+    if (updates.classGroupId && updates.classGroupId !== existing.classGroupId &&
+      !isAcademicPathActive(academicState, 'classGroups', updates.classGroupId)) {
+      showToast('ไม่สามารถย้ายกลุ่มได้', 'กลุ่มเรียนหรือต้นสังกัดถูกปิดใช้งาน', 'error');
+      return false;
+    }
+    updates = { ...updates, ...studentAcademicFields(academicState, { ...existing, ...updates }) };
     setStudents(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
     if (currentStudent?.id === id) {
       setCurrentStudent(prev => prev ? { ...prev, ...updates } : null);
     }
     showToast('อัปเดตข้อมูลนักศึกษาแล้ว', 'บันทึกข้อมูลเรียบร้อยแล้ว', 'success');
+    return true;
   };
 
   const deleteStudent = (id: string): boolean => {
@@ -717,7 +836,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const resetToMockDefaults = () => {
     localStorage.clear();
-    setStudents(initialStudents);
+    const academicDefaults = createInitialAcademicState();
+    setAcademicState(academicDefaults);
+    setStudents(migrateAcademicStudents(initialStudents, academicDefaults));
     setTeachers(initialTeachers);
     setAdmins(initialAdmins);
     setRooms(initialRooms);
@@ -739,6 +860,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   return (
     <AppContext.Provider
       value={{
+        academicState,
+        saveAcademicRecord,
+        deleteAcademicRecord,
+        setAcademicStatus,
+        assignStudentsToClassGroup,
         language,
         setLanguage,
         toggleLanguage,

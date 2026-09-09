@@ -30,9 +30,9 @@ export interface Student {
   lastNameEn?: string;
   email: string;
   faculty: string;
+  facultyId?: string;
   department: string;
   year: number;
-  facultyId?: string;
   departmentId?: string;
   programId?: string;
   program?: string;
@@ -40,6 +40,7 @@ export interface Student {
   classGroupId?: string;
   classGroup?: string;
   yearLevel?: number;
+  yearLevelId?: string;
   faceReferenceStatus?: 'available' | 'missing';
   faceReferenceUrl: string;
   accountStatus: AccountStatus;
