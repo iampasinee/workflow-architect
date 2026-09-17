@@ -61,6 +61,8 @@ export const CourseExamSessionManager: React.FC = () => {
   ]);
 
   const [newRuleText, setNewRuleText] = useState('');
+  const selectedCourseSections = courses.find((course) => course.id === courseId)?.sections
+    .filter((section) => section.status !== 'inactive') || [];
 
   // Conflict detection
   const checkRoomConflict = () => {
@@ -79,8 +81,9 @@ export const CourseExamSessionManager: React.FC = () => {
 
   const openCreateModal = () => {
     setEditingExam(null);
-    setCourseId(courses[0]?.id || '');
-    setSectionNo('1');
+    const firstCourse = courses.find((course) => course.status !== 'inactive' && course.sections.some((section) => section.status !== 'inactive'));
+    setCourseId(firstCourse?.id || '');
+    setSectionNo(firstCourse?.sections.find((section) => section.status !== 'inactive')?.sectionNo || '');
     setExamDate('2026-09-28');
     setStartTime('09:00');
     setDurationMinutes(120);
@@ -371,10 +374,15 @@ export const CourseExamSessionManager: React.FC = () => {
               </label>
               <select
                 value={courseId}
-                onChange={(e) => setCourseId(e.target.value)}
+                onChange={(e) => {
+                  const nextCourseId = e.target.value;
+                  setCourseId(nextCourseId);
+                  setSectionNo(courses.find((course) => course.id === nextCourseId)?.sections
+                    .find((section) => section.status !== 'inactive')?.sectionNo || '');
+                }}
                 className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs focus:ring-2 focus:ring-blue-500"
               >
-                {courses.map((c) => (
+                {courses.filter((course) => course.status !== 'inactive' && course.sections.some((section) => section.status !== 'inactive')).map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.courseCode}: {c.courseName}
                   </option>
@@ -387,13 +395,19 @@ export const CourseExamSessionManager: React.FC = () => {
               <label className="block text-xs font-semibold text-gray-700 mb-1">
                 {isThai ? 'ตอนเรียน (Section)' : 'Section No.'}
               </label>
-              <input
-                type="text"
+              <select
                 required
                 value={sectionNo}
                 onChange={(e) => setSectionNo(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs focus:ring-2 focus:ring-blue-500"
-              />
+              >
+                <option value="" disabled>เลือกตอนเรียน</option>
+                {selectedCourseSections.map((section) => (
+                  <option key={section.id || section.sectionNo} value={section.sectionNo}>
+                    ตอนเรียน {section.sectionNo} · ภาคเรียน {section.semester} / {section.academicYear}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* Date */}

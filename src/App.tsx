@@ -31,9 +31,9 @@ import { TeacherProfile } from './components/teacher/TeacherProfile';
 // Admin screens
 import { AdminSidebar } from './components/admin/AdminSidebar';
 import { FacultiesAndGroupsPage } from './components/admin/FacultiesAndGroupsPage';
+import { CoursesAndSectionsPage } from './components/admin/CoursesAndSectionsPage';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { UserRoleManager } from './components/admin/UserRoleManager';
-import { RolePermissions } from './components/admin/RolePermissions';
 import { RoomComputerSetup } from './components/admin/RoomComputerSetup';
 import { BiometricReferenceManager } from './components/admin/BiometricReferenceManager';
 import { CheatDetectionConfig } from './components/admin/CheatDetectionConfig';
@@ -189,8 +189,8 @@ const MainRouter: React.FC = () => {
               {isUserManagementRoute(activeAdminRoute) && (
                 <UserRoleManager view={getUserManagementView(activeAdminRoute)} />
               )}
-              {activeAdminRoute === 'A3' && <RolePermissions />}
               {activeAdminRoute === 'ACADEMIC' && <FacultiesAndGroupsPage />}
+              {activeAdminRoute === 'COURSES' && <CoursesAndSectionsPage />}
               {(activeAdminRoute === 'A4' || activeAdminRoute === 'A5') && (
                 <RoomComputerSetup />
               )}

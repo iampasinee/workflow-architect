@@ -1,3 +1,4 @@
+import { calculateStudentYearLevel } from '../../utils/academicYear';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
@@ -135,7 +136,8 @@ const GeneralUserRoleManager: React.FC<UserRoleManagerProps> = ({ view }) => {
       status: teacher.accountStatus,
       icitProfileStatus: teacher.icitProfileStatus,
       assignedCourses: courses
-        .filter((course) => course.sections.some((section) => section.teacherId === teacher.id))
+        .filter((course) => course.sections.some((section) =>
+          (section.primaryTeacherId || section.teacherId) === teacher.id || section.coTeacherIds?.includes(teacher.id)))
         .map((course) => course.courseCode),
     })),
     ...admins.map((admin) => ({
@@ -256,14 +258,14 @@ const GeneralUserRoleManager: React.FC<UserRoleManagerProps> = ({ view }) => {
     event.preventDefault();
     if (!editUser) return;
     if (editUser.role === 'student') {
-      updateStudent(editUser.id, {
+      const accepted = updateStudent(editUser.id, {
         studentCode: editForm.code.trim(),
         fullName: editForm.name.trim(),
         email: editForm.email.trim(),
         faculty: editForm.faculty.trim(),
         department: editForm.department.trim(),
-        year: editForm.year,
       });
+      if (!accepted) return;
     } else if (editUser.role === 'teacher') {
       updateTeacher(editUser.id, {
         teacherCode: editForm.code.trim(),
@@ -322,17 +324,18 @@ const GeneralUserRoleManager: React.FC<UserRoleManagerProps> = ({ view }) => {
     event.preventDefault();
     if (!createRole) return;
     if (createRole === 'student') {
-      addStudent({
+      const accepted = addStudent({
         studentCode: createForm.code.trim(),
         fullName: createForm.name.trim(),
         email: createForm.email.trim(),
         faculty: createForm.faculty.trim(),
         department: createForm.department.trim(),
-        year: createForm.year,
+        year: calculateStudentYearLevel(createForm.code)?.yearLevel || 0,
         faceReferenceUrl: '',
         accountStatus: 'active',
         isFirstTime: true,
       });
+      if (!accepted) return;
     } else if (createRole === 'teacher') {
       addTeacher({
         teacherCode: createForm.code.trim(),
@@ -712,7 +715,7 @@ const GeneralUserRoleManager: React.FC<UserRoleManagerProps> = ({ view }) => {
               [isThai ? 'คณะ' : 'Faculty', viewUser.faculty],
               [isThai ? 'ภาควิชา' : 'Department', viewUser.department],
               [isThai ? 'สถานะบัญชี' : 'Account Status', statusLabel(viewUser.status)],
-              ...(viewUser.role === 'student' ? [[isThai ? 'ชั้นปี' : 'Academic Year', String(viewUser.year || '—')]] : []),
+              ...(viewUser.role === 'student' ? [[isThai ? 'ชั้นปี' : 'Academic Year', calculateStudentYearLevel(viewUser.code)?.formattedYearLevel || '—']] : []),
               ...(viewUser.role === 'teacher' ? [[isThai ? 'รายวิชาที่รับผิดชอบ' : 'Assigned Courses', viewUser.assignedCourses.join(', ') || '—']] : []),
             ].map(([label, value]) => (
               <div key={label} className="flex justify-between gap-4 border-b border-gray-100 pb-2">
@@ -882,12 +885,12 @@ const UserForm: React.FC<UserFormProps> = ({ form, onChange, role, isThai, onSub
     {role === 'student' && (
       <label className="block space-y-1 font-semibold text-gray-700">
         <span>{isThai ? 'ชั้นปี' : 'Academic Year'}</span>
-        <input type="number" min={1} max={8} required value={form.year} onChange={(event) => onChange((current) => ({ ...current, year: Number(event.target.value) }))} className="w-full rounded-xl border border-gray-300 px-3 py-2 font-normal focus:ring-2 focus:ring-blue-500 sm:w-32" />
+        <input readOnly value={calculateStudentYearLevel(form.code)?.formattedYearLevel || '—'} className="w-full rounded-xl border border-gray-300 bg-slate-100 px-3 py-2" />
       </label>
     )}
     <div className="flex justify-end gap-2 border-t border-gray-100 pt-4">
       <button type="button" onClick={onCancel} className="cursor-pointer rounded-xl border border-gray-300 px-4 py-2 font-semibold text-gray-700 hover:bg-gray-50">{isThai ? 'ยกเลิก' : 'Cancel'}</button>
-      <button type="submit" className="cursor-pointer rounded-xl bg-blue-600 px-5 py-2 font-semibold text-white hover:bg-blue-700">{submitLabel}</button>
+      <button type="submit" disabled={role === 'student' && !calculateStudentYearLevel(form.code)?.isValid} className="disabled:opacity-40 cursor-pointer rounded-xl bg-blue-600 px-5 py-2 font-semibold text-white hover:bg-blue-700">{submitLabel}</button>
     </div>
   </form>
 );

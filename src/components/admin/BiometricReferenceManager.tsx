@@ -1,3 +1,4 @@
+import { calculateStudentYearLevel } from '../../utils/academicYear';
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
@@ -219,7 +220,7 @@ export const BiometricReferenceManager: React.FC = () => {
                 <div className="text-gray-600">
                   {isThai ? 'สาขาวิชา: ' : 'Department: '}
                   {selectedStudent.department} • {isThai ? 'ชั้นปีที่ ' : 'Year '}
-                  {selectedStudent.year}
+                  {calculateStudentYearLevel(selectedStudent.studentCode)?.yearLevel || '—'}
                 </div>
                 <div className="pt-2 text-[11px] text-gray-500 border-t border-gray-200">
                   {isThai

@@ -1,4 +1,11 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { useAcademicYear, withCalculatedStudentYear, withoutStudentYear } from '../utils/academicYear';
+import { buildWizardTransaction, SequentialWizardDraft } from '../services/sequentialAcademicWizard';
+import { CourseActionResult, CourseInput, SectionInput } from '../types/course';
+import {
+  courseDeleteError, coursesForStudent, coursesForTeacher, findSection, migrateCourses,
+  saveCourse, saveSection, sectionDeleteError, validateCourseInput, validateSectionInput,
+} from '../services/courseState';
+import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
 import {
   Role,
   AppLanguage,
@@ -22,7 +29,7 @@ import { getTranslation } from '../i18n/translations';
 import { getAdminRouteFromHash } from '../utils/adminRoutes';
 import { AcademicInput, AcademicResult, AcademicState, AcademicTier } from '../types/academic';
 import {
-  academicDeleteError, bulkAssignmentError, createInitialAcademicState, isAcademicPathActive, migrateAcademicStudents,
+  deriveAcademicState, migrateAcademicCohorts, studentGroupError, academicDeleteError, bulkAssignmentError, createInitialAcademicState, isAcademicPathActive, migrateAcademicStudents,
   normalizeAcademicInput, saveAcademicState, studentAcademicFields, validateAcademicInput,
 } from '../services/academicState';
 import {
@@ -89,6 +96,7 @@ interface AppContextType {
   // Collections
   academicState: AcademicState;
   saveAcademicRecord: (tier: AcademicTier, input: AcademicInput, id?: string) => AcademicResult;
+  saveAcademicWizard: (draft: SequentialWizardDraft) => AcademicResult;
   deleteAcademicRecord: (tier: AcademicTier, id: string) => AcademicResult;
   setAcademicStatus: (tier: AcademicTier, id: string, status: 'active' | 'inactive') => AcademicResult;
   assignStudentsToClassGroup: (studentIds: string[], groupId: string) => AcademicResult;
@@ -137,6 +145,10 @@ interface AppContextType {
   addCourse: (course: Omit<Course, 'id'>) => void;
   updateCourse: (id: string, updates: Partial<Course>) => void;
   deleteCourse: (id: string) => boolean;
+  saveCourseRecord: (input: CourseInput, id?: string) => CourseActionResult;
+  saveSectionRecord: (input: SectionInput, id?: string) => CourseActionResult;
+  deleteSectionRecord: (sectionId: string) => CourseActionResult;
+  setSectionStatus: (sectionId: string, status: 'active' | 'inactive') => CourseActionResult;
 
   // Exam Actions
   createExamSession: (exam: Omit<ExamSession, 'id'>) => void;
@@ -207,10 +219,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [activeTeacherRoute, setActiveTeacherRoute] = useState<string>('T1');
   const [activeStudentStep, setActiveStudentStep] = useState<'ST1' | 'ST2A' | 'ST2B' | 'ST2C' | 'ST3' | 'ST4' | 'ST5' | 'ST6' | 'ST7'>('ST1');
 
-  const [academicState, setAcademicState] = useState<AcademicState>(() =>
-    safeParse('securelab_academic_state', createInitialAcademicState()));
+  const [storedAcademicState, setAcademicState] = useState<AcademicState>(() =>
+    migrateAcademicCohorts(safeParse('securelab_academic_state', createInitialAcademicState())));
 
-  const [students, setStudents] = useState<Student[]>(() => {
+  const [storedStudentsState, setStudents] = useState<Student[]>(() => {
     const storedStudents = safeParse('securelab_students', initialStudents);
     const seedMigrationKey = 'securelab_academic_mock_students_v1';
     let mergedStudents = storedStudents;
@@ -228,7 +240,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const facultyMigrationKey = 'securelab_thai_faculty_relation_v2';
     if (localStorage.getItem(facultyMigrationKey) === 'complete' || localStorage.getItem('securelab_academic_state')) {
-      return migrateAcademicStudents(mergedStudents, academicState);
+      return migrateAcademicStudents(mergedStudents, storedAcademicState);
     }
 
     const migratedStudents = mergedStudents.map((student) => {
@@ -254,8 +266,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       };
     });
     localStorage.setItem(facultyMigrationKey, 'complete');
-    return migrateAcademicStudents(migratedStudents, academicState);
+    return migrateAcademicStudents(migratedStudents, storedAcademicState);
   });
+
+  const currentAcademicYear = useAcademicYear();
+  const academicState = useMemo(() => deriveAcademicState(storedAcademicState, storedStudentsState, currentAcademicYear), [storedAcademicState, storedStudentsState, currentAcademicYear]);
+  const students = useMemo(() => storedStudentsState.map((student) => ({
+    ...withCalculatedStudentYear(student, currentAcademicYear), ...studentAcademicFields(academicState, student),
+  })), [storedStudentsState, academicState, currentAcademicYear]);
 
   const [teachers, setTeachers] = useState<Teacher[]>(() => {
     return safeParse('securelab_teachers', initialTeachers);
@@ -269,11 +287,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return safeParse('securelab_rooms', initialRooms);
   });
 
-  const [courses, setCourses] = useState<Course[]>(() => {
-    return safeParse('securelab_courses', initialCourses);
+  const [storedCourses, setCourses] = useState<Course[]>(() => {
+    return migrateCourses(safeParse('securelab_courses', initialCourses), academicState);
   });
 
-  const [examSessions, setExamSessions] = useState<ExamSession[]>(() => {
+  const [storedExamSessions, setExamSessions] = useState<ExamSession[]>(() => {
     return safeParse('securelab_exams', initialExamSessions);
   });
 
@@ -307,13 +325,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Active selected personas
   const [currentStudent, setCurrentStudent] = useState<Student | null>(initialStudents[1]);
+  const derivedCurrentStudent = useMemo(() => currentStudent ? withCalculatedStudentYear(currentStudent, currentAcademicYear) : null, [currentStudent, currentAcademicYear]);
   const [currentTeacher, setCurrentTeacher] = useState<Teacher | null>(initialTeachers[0]);
   const [currentAdmin, setCurrentAdmin] = useState<Admin | null>(initialAdmins[0]);
   const [currentExamId, setCurrentExamId] = useState<string>('exam_0001');
+  const courses = useMemo(() => role === 'teacher' ? coursesForTeacher(storedCourses, currentTeacher?.id)
+    : role === 'student' ? coursesForStudent(storedCourses, currentStudent?.classGroupId) : storedCourses,
+  [role, storedCourses, currentTeacher?.id, currentStudent?.classGroupId]);
+  const examSessions = useMemo(() => role === 'admin' || !role ? storedExamSessions : storedExamSessions.filter((exam) =>
+    courses.some((course) => course.id === exam.courseId && course.sections.some((section) => section.sectionNo === exam.sectionNo))),
+  [role, storedExamSessions, courses]);
+  const visibleStudents = useMemo(() => {
+    if (role === 'student') return students.filter((student) => student.id === currentStudent?.id);
+    if (role !== 'teacher') return students;
+    const groupIds = new Set(courses.flatMap((course) => course.sections.flatMap((section) => section.groupIds || [])));
+    return students.filter((student) => Boolean(student.classGroupId) && groupIds.has(student.classGroupId!));
+  }, [role, students, courses, currentStudent?.id]);
 
   // Sync to localStorage
   useEffect(() => {
-    localStorage.setItem('securelab_academic_state', JSON.stringify(academicState));
+    localStorage.setItem('securelab_academic_state', JSON.stringify({ ...academicState, yearLevels: [], classGroups: academicState.classGroups.map(({ yearLevelId, ...group }) => group) }));
   }, [academicState]);
   useEffect(() => {
     localStorage.removeItem('securelab_role');
@@ -321,7 +352,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('securelab_students', JSON.stringify(students));
+    localStorage.setItem('securelab_students', JSON.stringify(students.map(withoutStudentYear)));
   }, [students]);
 
   useEffect(() => {
@@ -337,12 +368,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [rooms]);
 
   useEffect(() => {
-    localStorage.setItem('securelab_courses', JSON.stringify(courses));
-  }, [courses]);
+    localStorage.setItem('securelab_courses', JSON.stringify(storedCourses));
+  }, [storedCourses]);
 
   useEffect(() => {
-    localStorage.setItem('securelab_exams', JSON.stringify(examSessions));
-  }, [examSessions]);
+    localStorage.setItem('securelab_exams', JSON.stringify(storedExamSessions));
+  }, [storedExamSessions]);
 
   useEffect(() => {
     localStorage.setItem('securelab_seat_assignments', JSON.stringify(seatAssignments));
@@ -378,11 +409,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setAcademicState(next);
     setStudents((current) => current.map((student) => ({ ...student, ...studentAcademicFields(next, student) })));
     setCurrentStudent((current) => current ? { ...current, ...studentAcademicFields(next, current) } : null);
+    setCourses((current) => migrateCourses(current, next));
   };
 
   const saveAcademicRecord = (tier: AcademicTier, rawInput: AcademicInput, id?: string): AcademicResult => {
     if (role !== 'admin') return academicFailure('เฉพาะผู้ดูแลระบบเท่านั้น');
+    if (tier === 'yearLevels') return academicFailure('ชั้นปีคำนวณอัตโนมัติ ไม่สามารถแก้ไขได้');
     const input = normalizeAcademicInput(rawInput);
+    if (tier === 'classGroups' && id) {
+      const members = students.filter((student) => student.classGroupId === id);
+      const admissionYear = input.admissionYear ?? academicState.yearLevels.find((y) => y.id === input.yearLevelId)?.admissionYear;
+      const previous = academicState.classGroups.find((group) => group.id === id);
+      if (members.length && (previous?.admissionYear !== admissionYear || previous?.programId !== input.programId))
+        return academicFailure('กรุณาย้ายนักศึกษาออกจากกลุ่มก่อนเปลี่ยนสาขาวิชาหรือปีการศึกษาที่เข้า');
+    }
     const error = validateAcademicInput(academicState, tier, input, id);
     if (error) return academicFailure(error);
     commitAcademicState(saveAcademicState(academicState, tier, input, id));
@@ -390,9 +430,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return { success: true };
   };
 
+  const saveAcademicWizard = (draft: SequentialWizardDraft): AcademicResult => {
+    if (role !== 'admin') return academicFailure('เฉพาะผู้ดูแลระบบเท่านั้น');
+    const result = buildWizardTransaction(academicState, draft);
+    if (!result.state) return academicFailure(result.error || 'ข้อมูลไม่ครบถ้วน');
+    commitAcademicState(result.state);
+    showToast('เพิ่มข้อมูลคณะและกลุ่มเรียนสำเร็จ', undefined, 'success');
+    return { success: true };
+  };
+
   const deleteAcademicRecord = (tier: AcademicTier, id: string): AcademicResult => {
     if (role !== 'admin') return academicFailure('เฉพาะผู้ดูแลระบบเท่านั้น');
+    if (tier === 'yearLevels') return academicFailure('ชั้นปีคำนวณอัตโนมัติ ไม่สามารถแก้ไขได้');
     if (!academicState[tier].some((r) => r.id === id)) return academicFailure('ไม่พบข้อมูลที่ต้องการลบ');
+    if (tier === 'faculties' && storedCourses.some((course) => course.facultyId === id))
+      return academicFailure('ไม่สามารถลบคณะนี้ได้ เนื่องจากมีรายวิชาอ้างอิงอยู่ กรุณาปิดใช้งานแทน');
+    if (tier === 'departments' && storedCourses.some((course) => course.departmentId === id))
+      return academicFailure('ไม่สามารถลบภาควิชานี้ได้ เนื่องจากมีรายวิชาอ้างอิงอยู่ กรุณาปิดใช้งานแทน');
+    if (tier === 'classGroups' && storedCourses.some((course) =>
+      course.sections.some((section) => section.groupIds?.includes(id))))
+      return academicFailure('ไม่สามารถลบกลุ่มเรียนนี้ได้ เนื่องจากมีตอนเรียนอ้างอิงอยู่ กรุณาปิดใช้งานแทน');
     const error = academicDeleteError(academicState, students, tier, id);
     if (error) return academicFailure(error);
     setAcademicState({ ...academicState, [tier]: academicState[tier].filter((r) => r.id !== id) });
@@ -402,6 +459,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const setAcademicStatus = (tier: AcademicTier, id: string, status: 'active' | 'inactive'): AcademicResult => {
     if (role !== 'admin') return academicFailure('เฉพาะผู้ดูแลระบบเท่านั้น');
+    if (tier === 'yearLevels') return academicFailure('ชั้นปีคำนวณอัตโนมัติ ไม่สามารถแก้ไขได้');
     if (!academicState[tier].some((r) => r.id === id)) return academicFailure('ไม่พบข้อมูล');
     setAcademicState({ ...academicState, [tier]: academicState[tier].map((r) =>
       r.id === id ? { ...r, status, updatedAt: new Date().toISOString() } : r) });
@@ -423,6 +481,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Student CRUD
   const addStudent = (newStd: Omit<Student, 'id'>) => {
+    const validationError = studentGroupError(academicState, { ...newStd, id: '' });
+    if (validationError) { showToast('ไม่สามารถเพิ่มนักศึกษาได้', validationError, 'error'); return false; }
     if (newStd.classGroupId && !isAcademicPathActive(academicState, 'classGroups', newStd.classGroupId)) {
       showToast('ไม่สามารถเพิ่มนักศึกษาได้', 'กรุณาเลือกกลุ่มเรียนที่เปิดใช้งาน', 'error');
       return false;
@@ -441,6 +501,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       !isAcademicPathActive(academicState, 'classGroups', updates.classGroupId)) {
       showToast('ไม่สามารถย้ายกลุ่มได้', 'กลุ่มเรียนหรือต้นสังกัดถูกปิดใช้งาน', 'error');
       return false;
+    }
+    if (updates.studentCode !== undefined || updates.classGroupId !== undefined) {
+      const validationError = studentGroupError(academicState, { ...existing, ...updates });
+      if (validationError) { showToast('ไม่สามารถบันทึกนักศึกษาได้', validationError, 'error'); return false; }
     }
     updates = { ...updates, ...studentAcademicFields(academicState, { ...existing, ...updates }) };
     setStudents(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
@@ -493,7 +557,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const deleteTeacher = (id: string): boolean => {
-    const hasAssignedSection = courses.some(c => c.sections.some(s => s.teacherId === id));
+    const hasAssignedSection = storedCourses.some(c => c.sections.some(s => s.teacherId === id || s.coTeacherIds?.includes(id)));
     if (hasAssignedSection) {
       showToast('ไม่สามารถลบอาจารย์ได้', 'อาจารย์ยังรับผิดชอบรายวิชาที่เปิดใช้งาน กรุณาเปลี่ยนอาจารย์ผู้รับผิดชอบก่อน', 'error');
       return false;
@@ -573,7 +637,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Course CRUD
   const addCourse = (newCourse: Omit<Course, 'id'>) => {
-    const id = `crs_${String(courses.length + 1).padStart(4, '0')}`;
+    const id = `crs_${String(storedCourses.length + 1).padStart(4, '0')}`;
     const created: Course = { ...newCourse, id };
     setCourses(prev => [created, ...prev]);
     showToast('สร้างรายวิชาแล้ว', `เพิ่ม ${created.courseCode} ในรายการรายวิชาเรียบร้อยแล้ว`, 'success');
@@ -585,9 +649,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const deleteCourse = (id: string): boolean => {
-    const hasExams = examSessions.some(e => e.courseId === id);
-    if (hasExams) {
-      showToast('ไม่สามารถลบรายวิชาได้', 'รายวิชานี้เชื่อมโยงกับรอบการสอบอยู่', 'error');
+    const course = storedCourses.find((item) => item.id === id);
+    const error = course && courseDeleteError(course, examSessions);
+    if (!course || error) {
+      showToast('ไม่สามารถลบรายวิชาได้', error || 'ไม่พบรายวิชา', 'error');
       return false;
     }
     setCourses(prev => prev.filter(c => c.id !== id));
@@ -595,15 +660,75 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return true;
   };
 
+  const saveCourseRecord = (input: CourseInput, id?: string): CourseActionResult => {
+    if (role !== 'admin') return { success: false, error: 'เฉพาะผู้ดูแลระบบเท่านั้น' };
+    const error = validateCourseInput(storedCourses, academicState, input, id);
+    if (error) return { success: false, error };
+    const next = saveCourse(storedCourses, academicState, input, id);
+    const courseId = id || next[0].id;
+    setCourses(next);
+    showToast(id ? 'อัปเดตรายวิชาแล้ว' : 'เพิ่มรายวิชาแล้ว', 'บันทึกข้อมูลรายวิชาเรียบร้อยแล้ว', 'success');
+    return { success: true, courseId };
+  };
+
+  const saveSectionRecord = (input: SectionInput, id?: string): CourseActionResult => {
+    if (role !== 'admin') return { success: false, error: 'เฉพาะผู้ดูแลระบบเท่านั้น' };
+    const error = validateSectionInput(storedCourses, academicState, teachers, input, id);
+    if (error) return { success: false, error };
+    const next = saveSection(storedCourses, input, id);
+    const sectionId = id || next.find((course) => course.id === input.courseId)!.sections.at(-1)!.id;
+    setCourses(next);
+    showToast(id ? 'อัปเดตตอนเรียนแล้ว' : 'เปิดตอนเรียนใหม่แล้ว', 'บันทึกข้อมูลตอนเรียนเรียบร้อยแล้ว', 'success');
+    return { success: true, sectionId };
+  };
+
+  const deleteSectionRecord = (sectionId: string): CourseActionResult => {
+    if (role !== 'admin') return { success: false, error: 'เฉพาะผู้ดูแลระบบเท่านั้น' };
+    const located = findSection(storedCourses, sectionId);
+    const error = located && sectionDeleteError(located.course, located.section, examSessions);
+    if (!located || error) return { success: false, error: error || 'ไม่พบตอนเรียน' };
+    setCourses((current) => current.map((course) => ({ ...course, sections: course.sections.filter((section) => section.id !== sectionId) })));
+    showToast('ลบตอนเรียนแล้ว', undefined, 'info');
+    return { success: true };
+  };
+
+  const setSectionStatus = (sectionId: string, status: 'active' | 'inactive'): CourseActionResult => {
+    if (role !== 'admin') return { success: false, error: 'เฉพาะผู้ดูแลระบบเท่านั้น' };
+    const located = findSection(storedCourses, sectionId);
+    if (!located) return { success: false, error: 'ไม่พบตอนเรียน' };
+    if (status === 'active' && located.course.status !== 'active') {
+      const error = 'ไม่สามารถเปิดใช้งานตอนเรียนภายใต้รายวิชาที่ปิดใช้งานได้';
+      showToast('ไม่สามารถเปลี่ยนสถานะได้', error, 'error');
+      return { success: false, error };
+    }
+    setCourses((current) => current.map((course) => ({ ...course, sections: course.sections.map((section) =>
+      section.id === sectionId ? { ...section, status, updatedAt: new Date().toISOString() } : section) })));
+    showToast(status === 'active' ? 'เปิดใช้งานตอนเรียนแล้ว' : 'ปิดใช้งานตอนเรียนแล้ว', undefined, 'success');
+    return { success: true };
+  };
+
   // Exam Sessions
   const createExamSession = (newExam: Omit<ExamSession, 'id'>) => {
-    const id = `exam_${String(examSessions.length + 1).padStart(4, '0')}`;
+    const course = courses.find((item) => item.id === newExam.courseId);
+    const section = course?.sections.find((item) => item.sectionNo === newExam.sectionNo);
+    if (!course || course.status !== 'active' || !section || section.status === 'inactive') {
+      showToast('ไม่สามารถสร้างรอบการสอบได้', 'กรุณาเลือกตอนเรียนที่เปิดใช้งานและได้รับมอบหมายให้คุณ', 'error');
+      return;
+    }
+    const id = crypto.randomUUID();
     const created: ExamSession = { ...newExam, id };
     setExamSessions(prev => [created, ...prev]);
     showToast('สร้างรอบการสอบแล้ว', `กำหนดสอบวันที่ ${created.examDate} เวลา ${created.startTime}`, 'success');
   };
 
   const updateExamSession = (id: string, updates: Partial<ExamSession>) => {
+    const existing = storedExamSessions.find((exam) => exam.id === id);
+    const course = courses.find((item) => item.id === (updates.courseId || existing?.courseId));
+    const section = course?.sections.find((item) => item.sectionNo === (updates.sectionNo || existing?.sectionNo));
+    if (!existing || !course || course.status !== 'active' || !section || section.status === 'inactive') {
+      showToast('ไม่สามารถอัปเดตรอบการสอบได้', 'ตอนเรียนถูกปิดใช้งานหรือคุณไม่ได้รับมอบหมาย', 'error');
+      return;
+    }
     setExamSessions(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
     showToast('อัปเดตรอบการสอบแล้ว', 'บันทึกการเปลี่ยนแปลงเรียบร้อยแล้ว', 'success');
   };
@@ -678,6 +803,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Seat Assignments
   const assignSeat = (examId: string, seatNo: string, studentId: string) => {
+    const exam = storedExamSessions.find((item) => item.id === examId);
+    const section = storedCourses.find((course) => course.id === exam?.courseId)?.sections
+      .find((item) => item.sectionNo === exam?.sectionNo);
+    const student = students.find((item) => item.id === studentId);
+    if (!student?.classGroupId || !section?.groupIds?.includes(student.classGroupId)) {
+      showToast('ไม่สามารถจัดที่นั่งได้', 'นักศึกษาไม่ได้อยู่ในกลุ่มเรียนของตอนเรียนนี้', 'error');
+      return;
+    }
     setSeatAssignments(prev => {
       const filtered = prev.filter(sa => !(sa.examId === examId && (sa.seatNo === seatNo || sa.studentId === studentId)));
       return [...filtered, { examId, seatNo, studentId }];
@@ -694,7 +827,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     // Filter available seats (online, not damaged, not disabled)
     const availableSeats = room.seats.filter(s => s.status === 'online' && !s.disabled);
-    const activeStudents = students.filter(s => s.accountStatus === 'active');
+    const exam = storedExamSessions.find((item) => item.id === examId);
+    const section = storedCourses.find((course) => course.id === exam?.courseId)?.sections
+      .find((item) => item.sectionNo === exam?.sectionNo);
+    const groupIds = new Set(section?.groupIds || []);
+    const activeStudents = students.filter((student) =>
+      student.accountStatus === 'active' && Boolean(student.classGroupId && groupIds.has(student.classGroupId)));
 
     const newAssignments: SeatAssignment[] = [];
     const minCount = Math.min(availableSeats.length, activeStudents.length);
@@ -842,7 +980,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setTeachers(initialTeachers);
     setAdmins(initialAdmins);
     setRooms(initialRooms);
-    setCourses(initialCourses);
+    setCourses(migrateCourses(initialCourses, academicDefaults));
     setExamSessions(initialExamSessions);
     setSeatAssignments(initialSeatAssignments);
     setSubmissions(initialSubmissions);
@@ -862,6 +1000,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       value={{
         academicState,
         saveAcademicRecord,
+        saveAcademicWizard,
         deleteAcademicRecord,
         setAcademicStatus,
         assignStudentsToClassGroup,
@@ -879,7 +1018,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         activeStudentStep,
         setActiveStudentStep,
 
-        currentStudent,
+        currentStudent: derivedCurrentStudent,
         setCurrentStudent,
         currentTeacher,
         setCurrentTeacher,
@@ -895,7 +1034,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         securityRules,
         updateSecurityRules,
 
-        students,
+        students: visibleStudents,
         teachers,
         admins,
         rooms,
@@ -934,6 +1073,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         addCourse,
         updateCourse,
         deleteCourse,
+        saveCourseRecord,
+        saveSectionRecord,
+        deleteSectionRecord,
+        setSectionStatus,
 
         createExamSession,
         updateExamSession,

@@ -1,4 +1,6 @@
+import { academicSettings, calculateStudentYearLevel } from '../../utils/academicYear';
 import React from 'react';
+import { Calculator } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { AcademicState, AcademicTier } from '../../types/academic';
 import { isAcademicPathActive } from '../../services/academicState';
@@ -19,18 +21,22 @@ interface Props {
   value: AcademicSelection;
   onChange: (value: AcademicSelection) => void;
   depth?: number;
+  studentCode?: string;
+  admissionYearMode?: boolean;
   activeOnly?: boolean;
   retained?: AcademicSelection;
   excludeGroupId?: string;
 }
 
-export const AcademicCascade: React.FC<Props> = ({ value, onChange, depth = 5, activeOnly = true, retained, excludeGroupId }) => {
+export const AcademicCascade: React.FC<Props> = ({ value, onChange, depth = 5, activeOnly = true, retained, excludeGroupId, studentCode, admissionYearMode }) => {
   const { academicState: state } = useApp();
+  const calculation = studentCode !== undefined ? calculateStudentYearLevel(studentCode) : null;
+  if (studentCode !== undefined) value = { ...value, yearLevelId: state.yearLevels.find((y) => y.programId === value.programId && y.admissionYear === calculation?.admissionYear)?.id || '' };
   const rows: { key: keyof AcademicSelection; tier: AcademicTier; label: string; options: { id: string; label: string; status: string }[] }[] = [
     { key: 'facultyId', tier: 'faculties', label: 'คณะ', options: state.faculties.map((r) => ({ ...r, label: r.name })) },
     { key: 'departmentId', tier: 'departments', label: 'ภาควิชา', options: state.departments.filter((r) => r.facultyId === value.facultyId).map((r) => ({ ...r, label: r.name })) },
     { key: 'programId', tier: 'programs', label: 'สาขาวิชา', options: state.programs.filter((r) => r.departmentId === value.departmentId).map((r) => ({ ...r, label: `[${r.code}] ${r.name}` })) },
-    { key: 'yearLevelId', tier: 'yearLevels', label: 'ชั้นปี', options: state.yearLevels.filter((r) => r.programId === value.programId).sort((a, b) => a.level - b.level).map((r) => ({ ...r, label: r.name })) },
+    { key: 'yearLevelId', tier: 'yearLevels', label: admissionYearMode ? 'ปีการศึกษาที่เข้า' : 'ชั้นปี', options: state.yearLevels.filter((r) => r.programId === value.programId).sort((a, b) => a.level - b.level).map((r) => ({ ...r, label: admissionYearMode ? `ปีการศึกษา ${r.admissionYear} — ${r.name}` : r.name })) },
     { key: 'groupId', tier: 'classGroups', label: 'กลุ่มเรียน', options: state.classGroups.filter((r) => r.programId === value.programId && r.yearLevelId === value.yearLevelId && r.id !== excludeGroupId).map((r) => ({ ...r, label: r.code })) },
   ];
   return (
@@ -38,13 +44,19 @@ export const AcademicCascade: React.FC<Props> = ({ value, onChange, depth = 5, a
       {rows.slice(0, depth).map(({ key, tier, label, options }, index) => (
         <label key={key} className="min-w-0 space-y-1.5 text-xs font-semibold text-slate-700">
           <span>{index + 1}. {label}</span>
-          <select
+          {key === 'yearLevelId' && studentCode !== undefined ? <div>
+            <div className="relative"><Calculator aria-hidden="true" className="absolute left-3 top-3 h-4 w-4 text-slate-500" /><input aria-label="ชั้นปีที่ระบบคำนวณ" readOnly value={calculation?.formattedYearLevel || '—'} className="h-10 w-full rounded-xl border border-slate-200 bg-slate-100 pl-9 pr-3" /></div>
+            <p className="mt-2 text-xs font-normal text-slate-500">{calculation?.isValid ? `คำนวณจากรหัสนักศึกษา: เข้าปีการศึกษา ${calculation.admissionYear} ปัจจุบันอยู่ชั้นปีที่ ${calculation.yearLevel} (ปีการศึกษาปัจจุบัน ${academicSettings.currentAcademicYear})` : calculation?.errorMessage || 'กรุณากรอกรหัสนักศึกษาเพื่อคำนวณชั้นปี'}</p>
+          </div> : <select
             aria-label={label}
             value={value[key]}
             disabled={index > 0 && !value[rows[index - 1].key]}
             onChange={(event) => {
               const next = { ...value, [key]: event.target.value };
               rows.slice(index + 1).forEach((child) => { next[child.key] = ''; });
+              if (studentCode !== undefined) {
+                next.yearLevelId = state.yearLevels.find((y) => y.programId === next.programId && y.admissionYear === calculation?.admissionYear)?.id || '';
+              }
               onChange(next);
             }}
             className="h-10 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 text-xs font-normal disabled:bg-slate-100 disabled:text-slate-400 focus:outline-blue-600"
@@ -55,7 +67,7 @@ export const AcademicCascade: React.FC<Props> = ({ value, onChange, depth = 5, a
                 {option.label}{!isAcademicPathActive(state, tier, option.id) ? ' (ปิดใช้งาน)' : ''}
               </option>
             ))}
-          </select>
+          </select>}
         </label>
       ))}
     </div>

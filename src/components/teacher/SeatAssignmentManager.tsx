@@ -1,3 +1,4 @@
+import { calculateStudentYearLevel } from '../../utils/academicYear';
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
@@ -18,6 +19,7 @@ import { Badge, MachineStatusBadge } from '../common/Badge';
 export const SeatAssignmentManager: React.FC = () => {
   const {
     examSessions,
+    courses,
     rooms,
     students,
     seatAssignments,
@@ -32,6 +34,10 @@ export const SeatAssignmentManager: React.FC = () => {
 
   const activeExam = examSessions[0];
   const room = rooms.find((r) => r.id === activeExam?.roomId) || rooms[0];
+  const activeSection = courses.find((course) => course.id === activeExam?.courseId)?.sections
+    .find((section) => section.sectionNo === activeExam?.sectionNo);
+  const activeGroupIds = new Set(activeSection?.groupIds || []);
+  const eligibleStudents = students.filter((student) => Boolean(student.classGroupId && activeGroupIds.has(student.classGroupId)));
 
   const [selectedSeatNo, setSelectedSeatNo] = useState<string | null>(null);
   const [draggedStudentId, setDraggedStudentId] = useState<string | null>(null);
@@ -42,14 +48,14 @@ export const SeatAssignmentManager: React.FC = () => {
       (sa) => sa.examId === activeExam?.id && sa.seatNo === seatNo
     );
     if (!assignment) return null;
-    return students.find((s) => s.id === assignment.studentId);
+    return eligibleStudents.find((s) => s.id === assignment.studentId);
   };
 
   // Get list of unassigned students
   const assignedStudentIds = new Set(
     seatAssignments.filter((sa) => sa.examId === activeExam?.id).map((sa) => sa.studentId)
   );
-  const unassignedStudents = students.filter(
+  const unassignedStudents = eligibleStudents.filter(
     (s) => s.accountStatus === 'active' && !assignedStudentIds.has(s.id)
   );
 
@@ -318,7 +324,7 @@ export const SeatAssignmentManager: React.FC = () => {
                   <div className="font-semibold text-gray-900">{std.fullName}</div>
                   <div className="text-[11px] font-mono text-gray-500 mt-0.5">
                     {std.studentCode} • {isThai ? 'ชั้นปี ' : 'Year '}
-                    {std.year}
+                    {calculateStudentYearLevel(std.studentCode)?.yearLevel || '—'}
                   </div>
 
                   {selectedSeatNo ? (

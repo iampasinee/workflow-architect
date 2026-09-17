@@ -1,3 +1,4 @@
+import { calculateStudentYearLevel } from '../../utils/academicYear';
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
@@ -25,6 +26,7 @@ interface ImportedRow {
   year: number;
   isValid: boolean;
   errorReason?: string;
+  warning?: string;
 }
 
 export const StudentGroupManager: React.FC = () => {
@@ -51,7 +53,7 @@ export const StudentGroupManager: React.FC = () => {
   const [newEmail, setNewEmail] = useState('');
   const [newFaculty, setNewFaculty] = useState('Faculty of Engineering');
   const [newDept, setNewDept] = useState('Computer Engineering');
-  const [newYear, setNewYear] = useState(3);
+  const newYear = calculateStudentYearLevel(newCode);
 
   // Excel Import state
   const [importRows, setImportRows] = useState<ImportedRow[]>([]);
@@ -61,18 +63,19 @@ export const StudentGroupManager: React.FC = () => {
     e.preventDefault();
     if (!newCode || !newName) return;
 
-    addStudent({
+    const accepted = addStudent({
       studentCode: newCode,
       fullName: newName,
       email: newEmail || `${newCode}@icit.university.ac.th`,
       faculty: newFaculty,
       department: newDept,
-      year: Number(newYear),
+      year: newYear?.yearLevel || 0,
       faceReferenceUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80',
       accountStatus: 'active',
       isFirstTime: false,
     });
 
+    if (!accepted) return;
     setIsAddModalOpen(false);
     setNewCode('');
     setNewName('');
@@ -130,7 +133,13 @@ export const StudentGroupManager: React.FC = () => {
         isValid: true,
       },
     ];
-    setImportRows(mockParsed);
+    setImportRows(mockParsed.map((row, index) => {
+      const result = calculateStudentYearLevel(row.studentCode);
+      return { ...row, year: result?.yearLevel || 0, isValid: row.isValid && Boolean(result?.isValid),
+        errorReason: !result?.isValid ? `แถวที่ ${index + 1}: ${result?.errorMessage || 'กรุณากรอกรหัสนักศึกษา'}` : row.errorReason,
+        warning: result?.isValid && row.year !== result.yearLevel ? `ข้อมูลชั้นปีในไฟล์ไม่ตรงกับรหัสนักศึกษา ระบบปรับเป็นชั้นปีที่ ${result.yearLevel} อัตโนมัติ` : undefined,
+      };
+    }));
   };
 
   const confirmValidImportRows = () => {
@@ -160,18 +169,21 @@ export const StudentGroupManager: React.FC = () => {
     setImportRows([]);
   };
 
-  const term = searchTerm.toLowerCase();
-  const filteredStudents = students.filter(
-    (s) =>
-      (s.studentCode || '').toLowerCase().includes(term) ||
-      (s.fullName || '').toLowerCase().includes(term) ||
-      (s.department || '').toLowerCase().includes(term)
-  );
-
   const rosterExam =
     examSessions.find((exam) => exam.status === 'in_progress') ||
     examSessions.find((exam) => exam.status === 'upcoming') ||
     examSessions[0];
+  const rosterSection = courses.find((course) => course.id === rosterExam?.courseId)?.sections
+    .find((section) => section.sectionNo === rosterExam?.sectionNo);
+  const rosterGroupIds = new Set(rosterSection?.groupIds || []);
+  const term = searchTerm.toLowerCase();
+  const filteredStudents = students.filter(
+    (s) =>
+      Boolean(s.classGroupId && rosterGroupIds.has(s.classGroupId)) &&
+      ((s.studentCode || '').toLowerCase().includes(term) ||
+        (s.fullName || '').toLowerCase().includes(term) ||
+        (s.department || '').toLowerCase().includes(term))
+  );
 
   const renderExamStatus = (student: Student) => {
     if (student.accountStatus !== 'active') {
@@ -310,7 +322,7 @@ export const StudentGroupManager: React.FC = () => {
                   </td>
 
                   <td className="px-4 py-3.5 text-gray-600">
-                    {std.department} ({isThai ? 'ปี ' : 'Year '}{std.year})
+                    {std.department} ({isThai ? 'ปี ' : 'Year '}{calculateStudentYearLevel(std.studentCode)?.yearLevel || '—'})
                   </td>
 
                   <td className="px-4 py-3.5 font-mono text-gray-500">
@@ -416,11 +428,8 @@ export const StudentGroupManager: React.FC = () => {
                 {isThai ? 'ชั้นปี' : 'Year Level'}
               </label>
               <input
-                type="number"
-                min="1"
-                max="6"
-                value={newYear}
-                onChange={(e) => setNewYear(Number(e.target.value))}
+                readOnly
+                value={newYear?.formattedYearLevel || '—'}
                 className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -482,7 +491,7 @@ export const StudentGroupManager: React.FC = () => {
                 {importRows.map((row, idx) => (
                   <tr key={idx} className={row.isValid ? 'bg-white' : 'bg-red-50/50'}>
                     <td className="px-3 py-2 font-mono">{row.studentCode}</td>
-                    <td className="px-3 py-2 font-medium">{row.fullName}</td>
+                    <td className="px-3 py-2 font-medium">{row.fullName}{row.warning && <p className="mt-1 text-xs text-amber-700">{row.warning}</p>}</td>
                     <td className="px-3 py-2 text-gray-500">{row.department}</td>
                     <td className="px-3 py-2">
                       {row.isValid ? (

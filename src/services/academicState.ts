@@ -1,3 +1,4 @@
+import { academicSettings, initialAcademicYear, calculateStudentYearLevel, withCalculatedStudentYear } from '../utils/academicYear';
 import { Student } from '../types';
 import { AcademicInput, AcademicRecord, AcademicState, AcademicTier } from '../types/academic';
 import { academicStructure, AcademicFaculty, legacyStudentAcademicAssignments, resolveAcademicGroupId } from '../data/academicStructure';
@@ -20,12 +21,12 @@ export const createInitialAcademicState = (): AcademicState => {
           state.yearLevels.push({ ...common, id: `year_${program.id}_${level}`, programId: program.id, level, name: `ชั้นปีที่ ${level}` });
         }
         for (const group of program.classGroups) {
-          state.classGroups.push({ ...common, id: group.id, code: group.code, programId: program.id, yearLevelId: `year_${program.id}_${group.yearLevel}` });
+          state.classGroups.push({ ...common, id: group.id, code: group.code, programId: program.id, yearLevelId: `year_${program.id}_${group.yearLevel}`, admissionYear: initialAcademicYear - group.yearLevel + 1 });
         }
       }
     }
   }
-  return state;
+  return deriveAcademicState(state, []);
 };
 
 export const academicPath = (state: AcademicState, tier: AcademicTier, id: string) => {
@@ -74,7 +75,8 @@ export const studentAcademicFields = (state: AcademicState, student: Student): P
     ...(faculty && { facultyId: faculty.id, faculty: faculty.name }),
     ...(department && { departmentId: department.id, department: department.name }),
     ...(program && { programId: program.id, programCode: program.code, program: program.name }),
-    ...(year && { yearLevelId: year.id, yearLevel: year.level, year: year.level }),
+    ...withCalculatedStudentYear({ studentCode: student.studentCode }),
+    yearLevelId: state.yearLevels.find((y) => y.programId === program?.id && y.level === calculateStudentYearLevel(student.studentCode)?.yearLevel)?.id || '',
     ...(group && { classGroupId: group.id, classGroup: group.code }),
   };
 };
@@ -84,8 +86,11 @@ export const migrateAcademicStudents = (students: Student[], state: AcademicStat
     // An explicit empty group represents an unassigned student, never a seed fallback.
     const groupId = resolveAcademicGroupId(student.classGroupId === undefined
       ? legacyStudentAcademicAssignments[student.id] : student.classGroupId);
-    const group = state.classGroups.find((g) => g.id === groupId) ||
-      (student.classGroupId === undefined ? state.classGroups.find((g) => g.code.toLowerCase() === student.classGroup?.toLowerCase()) : undefined);
+    const matchingGroups = student.classGroupId === undefined ? state.classGroups.filter((g) =>
+      g.code.toLowerCase() === student.classGroup?.toLowerCase() &&
+      (!student.programId || g.programId === student.programId) &&
+      g.admissionYear === calculateStudentYearLevel(student.studentCode)?.admissionYear) : [];
+    const group = state.classGroups.find((g) => g.id === groupId) || (matchingGroups.length === 1 ? matchingGroups[0] : undefined);
     const program = state.programs.find((p) => p.id === student.programId || (student.programId === 'prog_001' && p.id === 'program_inet'));
     const department = state.departments.find((d) => d.id === student.departmentId || (student.departmentId === 'dep_001' && d.id === 'department_it'));
     const faculty = state.faculties.find((f) => f.id === student.facultyId || f.name === student.faculty);
@@ -113,10 +118,11 @@ export const studentsInAcademicRecord = (state: AcademicState, students: Student
   });
 
 export const academicDeleteError = (state: AcademicState, students: Student[], tier: AcademicTier, id: string): string | undefined => {
+  if (tier === 'yearLevels') return 'ชั้นปีคำนวณอัตโนมัติ ไม่สามารถลบได้';
   const hasChildren = tier === 'faculties' ? state.departments.some((d) => d.facultyId === id)
     : tier === 'departments' ? state.programs.some((p) => p.departmentId === id)
-      : tier === 'programs' ? state.yearLevels.some((y) => y.programId === id) || state.classGroups.some((g) => g.programId === id)
-        : tier === 'yearLevels' ? state.classGroups.some((g) => g.yearLevelId === id) : false;
+      : tier === 'programs' ? state.classGroups.some((g) => g.programId === id)
+        : false;
   if (hasChildren) return `ไม่สามารถลบ${academicLabels[tier]}นี้ได้ เนื่องจากยังมีข้อมูลภายใน กรุณาลบหรือย้ายข้อมูลที่เกี่ยวข้องก่อน หรือเลือกปิดใช้งาน`;
   if (studentsInAcademicRecord(state, students, tier, id).length) {
     return `ไม่สามารถลบ${academicLabels[tier]}นี้ได้ เนื่องจากยังมีนักศึกษาอยู่ กรุณาย้ายนักศึกษาไปยังกลุ่มอื่นก่อน หรือเลือกปิดใช้งาน`;
@@ -128,6 +134,7 @@ export const normalizeAcademicInput = (input: AcademicInput): AcademicInput => (
 });
 
 export const validateAcademicInput = (state: AcademicState, tier: AcademicTier, input: AcademicInput, id?: string): string | undefined => {
+  if (String(tier) === 'yearLevels') return 'ชั้นปีคำนวณอัตโนมัติ ไม่สามารถแก้ไขได้';
   const existing = state[tier].find((r) => r.id === id);
   if (id && !existing) return 'ไม่พบข้อมูลที่ต้องการแก้ไข';
   if (input.status !== 'active' && input.status !== 'inactive') return 'สถานะไม่ถูกต้อง';
@@ -136,39 +143,38 @@ export const validateAcademicInput = (state: AcademicState, tier: AcademicTier, 
   if (tier === 'programs' && !/^[A-Z0-9]+$/.test(input.code)) return 'รหัสสาขาวิชาต้องเป็นอักษรอังกฤษ A–Z หรือตัวเลข 0–9';
   if (tier === 'classGroups' && (!/^[A-Z0-9_-]+$/.test(input.code) || input.code.length > 100)) return 'รหัสกลุ่มเรียนต้องเป็นอักษรอังกฤษ ตัวเลข ขีดกลาง หรือขีดล่าง ไม่เกิน 100 ตัวอักษร';
   if (tier === 'yearLevels' && (!Number.isSafeInteger(input.level) || input.level < 1)) return 'ลำดับชั้นปีต้องเป็นจำนวนเต็มบวก';
-  const parentTier: AcademicTier | undefined = { faculties: undefined, departments: 'faculties', programs: 'departments', yearLevels: 'programs', classGroups: 'yearLevels' }[tier] as AcademicTier | undefined;
-  const parentId = { faculties: '', departments: input.facultyId, programs: input.departmentId, yearLevels: input.programId, classGroups: input.yearLevelId }[tier];
+  const admissionYear = input.admissionYear ?? state.yearLevels.find((y) => y.id === input.yearLevelId)?.admissionYear;
+  if (tier === 'classGroups' && (!Number.isSafeInteger(admissionYear) || admissionYear! < 2500 || admissionYear! > academicSettings.currentAcademicYear))
+    return 'กรุณาเลือกปีการศึกษาที่เข้าที่ถูกต้อง';
+  const parentTier: AcademicTier | undefined = { faculties: undefined, departments: 'faculties', programs: 'departments', yearLevels: 'programs', classGroups: 'programs' }[tier] as AcademicTier | undefined;
+  const parentId = { faculties: '', departments: input.facultyId, programs: input.departmentId, yearLevels: input.programId, classGroups: input.programId }[tier];
   if (parentTier && !state[parentTier].some((r) => r.id === parentId)) return 'กรุณาเลือกข้อมูลต้นสังกัดให้ครบถ้วน';
-  if (tier === 'classGroups' && state.yearLevels.find((y) => y.id === input.yearLevelId)?.programId !== input.programId) return 'ชั้นปีไม่ตรงกับสาขาวิชาที่เลือก';
+  if (tier === 'classGroups' && input.admissionYear === undefined && state.yearLevels.find((y) => y.id === input.yearLevelId)?.programId !== input.programId) return 'ชั้นปีไม่ตรงกับสาขาวิชาที่เลือก';
   if (parentTier && !isAcademicPathActive(state, parentTier, parentId)) {
     const oldPath = id ? academicPath(state, tier, id) : undefined;
-    const previousParent = { faculties: '', departments: oldPath?.faculty?.id, programs: oldPath?.department?.id, yearLevels: oldPath?.program?.id, classGroups: oldPath?.year?.id }[tier];
+    const previousParent = { faculties: '', departments: oldPath?.faculty?.id, programs: oldPath?.department?.id, yearLevels: oldPath?.program?.id, classGroups: oldPath?.program?.id }[tier];
     if (!existing || previousParent !== parentId) return 'ข้อมูลต้นสังกัดถูกปิดใช้งาน กรุณาเลือกต้นสังกัดที่เปิดใช้งาน';
   }
   const duplicates = tier === 'faculties' ? state.faculties.some((r) => r.id !== id && r.name.toLowerCase() === name.toLowerCase())
     : tier === 'departments' ? state.departments.some((r) => r.id !== id && r.facultyId === input.facultyId && r.name.toLowerCase() === name.toLowerCase())
-      : tier === 'programs' ? state.programs.some((r) => r.id !== id && r.code.toUpperCase() === input.code)
+      : tier === 'programs' ? state.programs.some((r) => r.id !== id && (r.code.toUpperCase() === input.code || (r.departmentId === input.departmentId && r.name.trim().toLowerCase() === name.toLowerCase())))
         : tier === 'yearLevels' ? state.yearLevels.some((r) => r.id !== id && r.programId === input.programId && r.level === input.level)
-          : state.classGroups.some((r) => r.id !== id && r.code.toUpperCase() === input.code);
+          : state.classGroups.some((r) => r.id !== id && r.programId === input.programId && r.admissionYear === admissionYear && r.code.trim().toUpperCase() === input.code);
   if (duplicates) return `มี${academicLabels[tier]}นี้อยู่แล้ว กรุณาใช้ชื่อหรือรหัสอื่น`;
   if (tier === 'yearLevels' && existing && 'programId' in existing && existing.programId !== input.programId &&
     state.classGroups.some((g) => g.yearLevelId === id)) return 'ไม่สามารถย้ายชั้นปีที่มีกลุ่มเรียนอยู่ กรุณาย้ายกลุ่มเรียนก่อน';
 };
 
 export const saveAcademicState = (state: AcademicState, tier: AcademicTier, input: AcademicInput, id?: string): AcademicState => {
+  if (String(tier) === 'yearLevels') return state;
   const common = { id: id || crypto.randomUUID(), status: input.status, updatedAt: new Date().toISOString() };
   const record: AcademicRecord = tier === 'faculties' ? { ...common, name: input.name }
     : tier === 'departments' ? { ...common, name: input.name, facultyId: input.facultyId }
       : tier === 'programs' ? { ...common, name: input.name, code: input.code, departmentId: input.departmentId }
         : tier === 'yearLevels' ? { ...common, name: input.name || `ชั้นปีที่ ${input.level}`, level: input.level, programId: input.programId }
-          : { ...common, code: input.code, programId: input.programId, yearLevelId: input.yearLevelId };
+          : { ...common, code: input.code, programId: input.programId, yearLevelId: input.yearLevelId, admissionYear: input.admissionYear ?? state.yearLevels.find((y) => y.id === input.yearLevelId)?.admissionYear };
   const next = { ...state, [tier]: id ? state[tier].map((r) => r.id === id ? record : r) : [...state[tier], record] };
-  if (tier === 'programs' && !id) {
-    next.yearLevels = [...state.yearLevels, ...[1, 2, 3, 4].map((level) => ({
-      ...common, id: crypto.randomUUID(), programId: record.id, level, name: `ชั้นปีที่ ${level}`,
-    }))];
-  }
-  return next;
+  return deriveAcademicState(next, []);
 };
 
 export const bulkAssignmentError = (state: AcademicState, students: Student[], studentIds: string[], groupId: string): string | undefined => {
@@ -184,6 +190,45 @@ export const bulkAssignmentError = (state: AcademicState, students: Student[], s
       (fields.programId && fields.programId !== group.programId) ||
       (fields.departmentId && fields.departmentId !== pathFields.departmentId) ||
       (fields.facultyId && fields.facultyId !== pathFields.facultyId) ||
-      ((fields.yearLevel || fields.year) && (fields.yearLevel || fields.year) !== year.level));
+      (!calculateStudentYearLevel(student.studentCode)?.isValid || calculateStudentYearLevel(student.studentCode)?.admissionYear !== group.admissionYear));
   })) return 'นักศึกษาต้องยังไม่มีกลุ่มเรียน และคณะ ภาควิชา สาขาวิชาและชั้นปีต้องตรงกับกลุ่มปลายทาง';
+};
+
+/** Migrate legacy group links once; subsequent views derive levels from admission cohorts. */
+export const migrateAcademicCohorts = (state: AcademicState): AcademicState => ({
+  ...state,
+  classGroups: state.classGroups.map((group) => ({
+    ...group,
+    admissionYear: group.admissionYear ?? academicSettings.currentAcademicYear -
+      (state.yearLevels.find((year) => year.id === group.yearLevelId)?.level || 1) + 1,
+  })),
+});
+
+/** Year rows are disposable summaries, not manually maintained entities. */
+export const deriveAcademicState = (stored: AcademicState, students: Student[], currentYear = academicSettings.currentAcademicYear): AcademicState => {
+  const state = migrateAcademicCohorts(stored);
+  const yearLevels = state.programs.flatMap((program) => {
+    const admissions = new Set([0, 1, 2, 3].map((offset) => currentYear - offset));
+    state.classGroups.filter((g) => g.programId === program.id).forEach((g) => admissions.add(g.admissionYear!));
+    students.filter((s) => s.programId === program.id).forEach((student) => {
+      const result = calculateStudentYearLevel(student.studentCode, currentYear);
+      if (result?.isValid) admissions.add(result.admissionYear);
+    });
+    return [...admissions].filter((admission) => admission <= currentYear).sort((a, b) => b - a).map((admissionYear) => ({
+      id: `cohort_${program.id}_${admissionYear}`, programId: program.id, admissionYear,
+      level: currentYear - admissionYear + 1, name: `ชั้นปีที่ ${currentYear - admissionYear + 1}`,
+      status: 'active' as const, updatedAt: program.updatedAt,
+    }));
+  });
+  return { ...state, yearLevels, classGroups: state.classGroups.map((group) => ({
+    ...group, yearLevelId: `cohort_${group.programId}_${group.admissionYear}`,
+  })) };
+};
+
+export const studentGroupError = (state: AcademicState, student: Student): string | undefined => {
+  const result = calculateStudentYearLevel(student.studentCode);
+  if (!result?.isValid) return result?.errorMessage || 'กรุณากรอกรหัสนักศึกษา';
+  const group = state.classGroups.find((g) => g.id === student.classGroupId);
+  if (student.classGroupId && (!group || group.admissionYear !== result.admissionYear))
+    return 'ชั้นปีที่คำนวณใหม่ไม่ตรงกับกลุ่มเรียนเดิม กรุณาเลือกกลุ่มเรียนใหม่';
 };

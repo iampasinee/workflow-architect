@@ -16,6 +16,7 @@ import {
   GraduationCap,
   BriefcaseBusiness,
   ShieldCheck,
+  BookOpen,
 } from 'lucide-react';
 import { isUserManagementRoute } from '../../utils/adminRoutes';
 
@@ -43,8 +44,8 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ collapsed, onToggle,
     { id: 'A2_ADMINS', label: 'ผู้ดูแลระบบ', icon: ShieldCheck },
   ];
   const menuItems = [
-    { id: 'A3', label: 'บทบาทและสิทธิ์', icon: Shield },
     { id: 'ACADEMIC', label: 'จัดการคณะและกลุ่มเรียน', icon: Network },
+    { id: 'COURSES', label: 'จัดการรายวิชาและตอนเรียน', icon: BookOpen },
     { id: 'A4', label: 'ห้องสอบและเครื่องคอมพิวเตอร์', icon: Monitor },
     { id: 'A6', label: 'จัดการข้อมูลใบหน้าอ้างอิง', icon: ScanFace },
     {

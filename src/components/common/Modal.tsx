@@ -7,7 +7,8 @@ interface ModalProps {
   title: string;
   children: React.ReactNode;
   footer?: React.ReactNode;
-  maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '4xl' | '640';
+  headerContent?: React.ReactNode;
+  maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '4xl' | '640' | 'wide';
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -16,6 +17,7 @@ export const Modal: React.FC<ModalProps> = ({
   title,
   children,
   footer,
+  headerContent,
   maxWidth = 'lg',
 }) => {
   useEffect(() => {
@@ -38,6 +40,7 @@ export const Modal: React.FC<ModalProps> = ({
     '2xl': 'max-w-2xl',
     '4xl': 'max-w-4xl',
     '640': 'max-w-[640px]',
+    wide: 'max-w-[1400px]',
   }[maxWidth];
 
   return (
@@ -51,19 +54,21 @@ export const Modal: React.FC<ModalProps> = ({
       {/* Modal Card */}
       <div className="flex min-h-full items-center justify-center p-4 text-center">
         <div
-          className={`relative w-full ${maxWidthClass} transform overflow-hidden rounded-2xl bg-white text-left shadow-2xl transition-all border border-gray-100 flex flex-col max-h-[90vh]`}
+          className={`relative w-full ${maxWidthClass} transform overflow-hidden rounded-2xl bg-white text-left shadow-2xl transition-all border border-gray-100 flex flex-col ${maxWidth === 'wide' ? 'max-h-[calc(100vh-32px)]' : 'max-h-[90vh]'}`}
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
-          <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+          <div className="flex shrink-0 items-center justify-between border-b border-gray-100 px-6 py-4">
             <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
             <button
               onClick={onClose}
+              aria-label="ปิดหน้าต่าง"
               className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
+          {headerContent && <div className="shrink-0">{headerContent}</div>}
 
           {/* Body */}
           <div className="overflow-y-auto px-6 py-4 flex-1">
@@ -72,7 +77,7 @@ export const Modal: React.FC<ModalProps> = ({
 
           {/* Footer */}
           {footer && (
-            <div className="border-t border-gray-100 bg-gray-50 px-6 py-3 flex items-center justify-end gap-3 rounded-b-2xl">
+            <div className="shrink-0 border-t border-gray-100 bg-gray-50 px-6 py-3 flex flex-wrap items-center justify-end gap-3 rounded-b-2xl">
               {footer}
             </div>
           )}

@@ -2,17 +2,19 @@
 
 ## Project Structure & Module Organization
 
-This React 19, TypeScript, Vite 6, and Tailwind CSS 4 prototype starts in `src/main.tsx`; `src/App.tsx` selects login and role flows. Put role UI in `src/components/student/`, `teacher/`, or `admin/`, shared primitives in `common/`, and demo controls in `simulation/`. State and migrations live in `src/context/AppContext.tsx`; models and seeds are in `src/types.ts` and `src/data/`. IndexedDB staging uses `src/types/stagedUpload.ts` and `src/services/stagedUploadStorage.ts`. Global styles belong in `src/index.css`; static assets go in `public/`.
+This React 19, TypeScript, Vite 6, and Tailwind CSS 4 prototype starts in `src/main.tsx`; `src/App.tsx` selects role flows. Put role UI in `src/components/student/`, `teacher/`, or `admin/`, shared primitives in `common/`, and demo controls in `simulation/`. State and migrations live in `src/context/AppContext.tsx`; models and seeds are in `src/types.ts` and `src/data/`. Global styles belong in `src/index.css`; assets go in `public/`.
 
 ## Build, Test, and Development Commands
 
 - `npm install`: install locked dependencies.
 - `npm run dev`: start Vite on port 3000 and expose it on the LAN.
 - `npm run lint`: run `tsc --noEmit`.
+- `npm run test:academic`: test academic hierarchy and cohort integrity.
+- `npm run test:courses`: test course/section migration, validation, and portal assignments.
 - `npm run build`: create production files in `dist/`.
 - `npm run preview`: serve the production bundle locally.
 
-Use `npm.cmd` in PowerShell if script policy blocks npm. `npm run clean` uses Unix `rm`; do not rely on it in plain PowerShell.
+Use `npm.cmd` in PowerShell if script policy blocks npm.
 
 ## Coding Style & Naming Conventions
 
@@ -20,18 +22,20 @@ Use two-space indentation, semicolons, single quotes, and multiline trailing com
 
 ## Domain and Persistence Conventions
 
-Academic definitions live in Context's `academicState` with stable internal IDs; Thai names are display values. Use `src/services/academicState.ts` for validation, migration, and relationship checks. Selectors cascade Faculty → Department → Program → Year → Class Group. Exclude inactive ancestors from new assignments and block deletion of referenced records.
+Academic records use stable IDs. Use `src/services/academicState.ts` for relationships and `src/utils/academicYear.ts` for derived student years—never the calendar. Selectors cascade Faculty → Department → Program → Year → Class Group. Exclude inactive ancestors from assignments and block deletion of referenced records.
 
-For staged uploads, identify records by `uploadId` and validate raw `sizeBytes`. Preserve `originalName`; rename changes only `submissionName`. Keep `uploadSequence`, blobs, progress, and status intact. IndexedDB schema changes require forward migrations that preserve drafts.
+Course and section rules live in `src/services/courseState.ts`; the admin UI is `src/components/admin/CoursesAndSectionsPage.tsx`. Preserve foreign keys, enforce composite uniqueness and cohort collisions, and derive portal access from section assignments.
+
+For staged uploads, identify records by `uploadId` and validate raw `sizeBytes`. Rename changes only `submissionName`; preserve `originalName`, sequence, blob, progress, and status. IndexedDB changes require forward migrations.
 
 ## Testing Guidelines
 
-Run `npm run test:academic` for Node tests covering migration and academic integrity, plus `npm run lint`, `npm run build`, and `git diff --check`. Manually check cascades, CRUD, bulk assignment, CSV, and affected exam flows. No coverage threshold is configured.
+Run both domain tests, lint, build, and `git diff --check`. Manually check cascades, CRUD, CSV, and affected role flows. No coverage threshold is configured.
 
 ## Commit & Pull Request Guidelines
 
-History uses short imperative subjects such as `feat: add academic structure`. PRs should describe visible changes, verification performed, related issues, screenshots for UI work, and any localStorage or IndexedDB migration.
+Use short imperative subjects, optionally prefixed with `feat:` or `fix:`. PRs should describe visible changes, verification, issues, screenshots, and storage migrations.
 
 ## Security & Configuration
 
-No API key is required. Never commit secrets or populated environment files, and never log biometric, authentication, or exam data. Browser storage is mock persistence, not a production backup.
+Never commit secrets or log biometric, authentication, or exam data. Browser storage is mock persistence, not a production backup.

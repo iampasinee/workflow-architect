@@ -1,3 +1,4 @@
+import { academicSettings, calculateStudentYearLevel } from '../../utils/academicYear';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
@@ -99,7 +100,7 @@ const resolveStudent = (student: Student, isThai: boolean, hierarchy: AcademicFa
     programName: path ? (isThai ? path.program.nameTh : path.program.nameEn) : student.program || '—',
     programCode: path?.program.code || student.programCode || '—',
     classGroup: path?.group.code || 'ยังไม่มีกลุ่มเรียน',
-    yearLevel: student.yearLevel || path?.group.yearLevel || student.year,
+    yearLevel: calculateStudentYearLevel(student.studentCode)?.yearLevel || 0,
   };
 };
 
@@ -427,8 +428,8 @@ export const StudentManagement: React.FC = () => {
       program: path.program.nameTh,
       programCode: path.program.code,
       classGroup: path.group.code,
-      year: path.group.yearLevel,
-      yearLevel: path.group.yearLevel,
+      year: calculateStudentYearLevel(values.studentCode)?.yearLevel || 0,
+      yearLevel: calculateStudentYearLevel(values.studentCode)?.yearLevel || 0,
       faceReferenceUrl: values.faceReferenceUrl.trim(),
       faceReferenceStatus: values.faceReferenceUrl.trim() ? 'available' as const : 'missing' as const,
       accountStatus: values.accountStatus,
@@ -468,8 +469,6 @@ export const StudentManagement: React.FC = () => {
       program: path.program.nameTh,
       programCode: path.program.code,
       classGroup: path.group.code,
-      year: path.group.yearLevel,
-      yearLevel: path.group.yearLevel,
     });
     if (!updated) return;
     setTransferTarget(null);
@@ -694,7 +693,7 @@ export const StudentManagement: React.FC = () => {
         {transferTarget && !transferConfirm && (
           <form onSubmit={(event) => { event.preventDefault(); setTransferConfirm(true); }} className="space-y-4 text-xs">
             <div className="rounded-xl bg-blue-50 p-4"><strong>{transferTarget.student.fullName}</strong><div className="mt-1 text-blue-700">{isThai ? 'กลุ่มปัจจุบัน' : 'Current group'}: {transferTarget.classGroup}</div></div>
-            <TransferSelectors selection={transfer} setSelection={setTransfer} isThai={isThai} currentGroupId={transferTarget.path?.group.id} />
+            <TransferSelectors selection={transfer} setSelection={setTransfer} isThai={isThai} studentCode={transferTarget.student.studentCode} currentGroupId={transferTarget.path?.group.id} />
             <label className="block space-y-1 font-semibold text-gray-700"><span>{isThai ? 'เหตุผลในการย้าย' : 'Transfer reason'}</span><textarea required value={transferReason} onChange={(event) => setTransferReason(event.target.value)} rows={3} className="w-full rounded-xl border border-gray-300 px-3 py-2 font-normal" /></label>
             <ModalActions isThai={isThai} onCancel={() => setTransferTarget(null)} submitLabel={isThai ? 'ตรวจสอบและยืนยัน' : 'Review Transfer'} disabled={!transfer.groupId || transfer.groupId === transferTarget.path?.group.id || !transferReason.trim()} />
           </form>
@@ -806,7 +805,7 @@ const StudentTable: React.FC<StudentTableProps> = ({ rows, grouped, selectable =
                 <td className="px-4 py-3 font-mono text-[10px] text-slate-500">{row.student.email}</td>
                 {!grouped && <td className="px-4 py-3"><div className="font-medium text-slate-800">{row.path?.department.nameTh || row.student.department}</div><div className="text-[10px] text-slate-400">{row.path?.faculty.name || row.student.faculty}</div></td>}
                 {!grouped && <td className="px-4 py-3"><Badge variant={row.path ? 'default' : 'neutral'}>{row.classGroup}</Badge></td>}
-                <td className="px-4 py-3 text-center font-semibold">ปี {row.yearLevel}</td>
+                <td className="px-4 py-3 text-center font-semibold">{calculateStudentYearLevel(row.student.studentCode)?.formattedYearLevel || '—'}</td>
                 <td className="px-4 py-3"><div className="flex items-center gap-2">{row.student.faceReferenceUrl ? <img src={row.student.faceReferenceUrl} alt="" className="h-7 w-7 rounded-full border border-violet-300 object-cover" /> : <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-400">?</span>}<Badge variant={row.student.faceReferenceUrl ? 'purple' : 'warning'}>{row.student.faceReferenceUrl ? 'มีข้อมูล' : 'ยังไม่มีข้อมูล'}</Badge></div></td>
                 <td className="px-4 py-3"><AccountStatusBadge status={row.student.accountStatus} /></td>
                 <td className="px-4 py-3"><div className="flex justify-end gap-0.5"><ActionButton title="ดูรายละเอียดนักศึกษา" onClick={() => onView(row)} icon={Eye} /><ActionButton title="ย้ายกลุ่มเรียน" onClick={() => onTransfer?.(row)} icon={ArrowRightLeft} color="text-blue-600" /><ActionButton title="แก้ไขข้อมูล" onClick={() => onEdit(row)} icon={Pencil} /><ActionButton title={row.student.accountStatus === 'active' ? 'ระงับบัญชี' : 'เปิดใช้งานบัญชี'} onClick={() => onStatus(row)} icon={row.student.accountStatus === 'active' ? AlertTriangle : UserCheck} color="text-amber-600" /><ActionButton title="ลบนักศึกษา" onClick={() => onDelete(row)} icon={Trash2} color="text-red-600" /></div></td>
@@ -824,13 +823,22 @@ const ActionButton: React.FC<{ title: string; onClick: () => void; icon: React.E
 
 const Pagination: React.FC<{ page: number; totalPages: number; count: number; pageSize: number; isThai: boolean; onChange: (page: number) => void }> = ({ page, totalPages, count, pageSize, isThai, onChange }) => <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-4 py-3 text-xs"><span className="text-gray-500">{isThai ? `แสดง ${(page - 1) * pageSize + 1} - ${Math.min(page * pageSize, count)} จากทั้งหมด ${count} รายการ` : `Showing ${(page - 1) * pageSize + 1}-${Math.min(page * pageSize, count)} of ${count}`}</span><div className="flex items-center gap-2"><button type="button" disabled={page === 1} onClick={() => onChange(page - 1)} className="rounded-lg border border-gray-200 p-1.5 disabled:opacity-40"><ChevronLeft className="h-4 w-4" /></button><span>{page} / {totalPages}</span><button type="button" disabled={page === totalPages} onClick={() => onChange(page + 1)} className="rounded-lg border border-gray-200 p-1.5 disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button></div></div>;
 
-const StudentDetails: React.FC<{ row: ResolvedStudent; isThai: boolean }> = ({ row, isThai }) => <div className="space-y-3 text-xs">{[[isThai ? 'รหัสนักศึกษา' : 'Student Code', row.student.studentCode], [isThai ? 'ชื่อ-นามสกุล' : 'Full Name', row.student.fullName], [isThai ? 'อีเมลมหาวิทยาลัย' : 'University Email', row.student.email], [isThai ? 'คณะ' : 'Faculty', row.path?.faculty.name || row.student.faculty], [isThai ? 'ภาควิชา' : 'Department', row.path ? (isThai ? row.path.department.nameTh : row.path.department.nameEn) : row.student.department], [isThai ? 'สาขาวิชา' : 'Program', `${row.programName} (${row.programCode})`], [isThai ? 'กลุ่มเรียน' : 'Class Group', row.classGroup], [isThai ? 'ชั้นปี' : 'Year Level', String(row.yearLevel)]].map(([title, value]) => <div key={title} className="flex justify-between gap-4 border-b border-gray-100 pb-2"><span className="text-gray-500">{title}</span><strong className="text-right text-gray-900">{value}</strong></div>)}</div>;
+const StudentDetails: React.FC<{ row: ResolvedStudent; isThai: boolean }> = ({ row, isThai }) => <div className="space-y-3 text-xs">{[[isThai ? 'รหัสนักศึกษา' : 'Student Code', row.student.studentCode], [isThai ? 'ชื่อ-นามสกุล' : 'Full Name', row.student.fullName], [isThai ? 'อีเมลมหาวิทยาลัย' : 'University Email', row.student.email], [isThai ? 'คณะ' : 'Faculty', row.path?.faculty.name || row.student.faculty], [isThai ? 'ภาควิชา' : 'Department', row.path ? (isThai ? row.path.department.nameTh : row.path.department.nameEn) : row.student.department], [isThai ? 'สาขาวิชา' : 'Program', `${row.programName} (${row.programCode})`], [isThai ? 'กลุ่มเรียน' : 'Class Group', row.classGroup], ['ปีการศึกษาที่เข้า', String(calculateStudentYearLevel(row.student.studentCode)?.admissionYear || '—')], ['ชั้นปีปัจจุบัน', calculateStudentYearLevel(row.student.studentCode)?.formattedYearLevel || '—'], ['คำนวณจากปีการศึกษาปัจจุบัน', String(academicSettings.currentAcademicYear)]].map(([title, value]) => <div key={title} className="flex justify-between gap-4 border-b border-gray-100 pb-2"><span className="text-gray-500">{title}</span><strong className="text-right text-gray-900">{value}</strong></div>)}</div>;
 
 const StudentForm: React.FC<{ existingStudent: Student | null; form: StudentFormState; setForm: React.Dispatch<React.SetStateAction<StudentFormState>>; isThai: boolean; onSubmit: (event: React.FormEvent) => void; onCancel: () => void }> = ({ existingStudent, form, setForm, isThai, onSubmit, onCancel }) => {
   const { academicState, setActiveAdminRoute } = useApp();
+  const calculation = calculateStudentYearLevel(form.studentCode);
+  const selectedGroup = academicState.classGroups.find((g) => g.id === form.groupId);
+  useEffect(() => {
+    const yearLevel = calculation?.yearLevel || 0;
+    const compatible = !selectedGroup || selectedGroup.admissionYear === calculation?.admissionYear;
+    if (form.yearLevel !== yearLevel || !compatible) setForm((current) => ({
+      ...current, yearLevel, groupId: compatible ? current.groupId : '',
+    }));
+  }, [form.studentCode, form.yearLevel, selectedGroup, calculation?.yearLevel, calculation?.admissionYear, setForm]);
   const selection: AcademicSelection = {
     facultyId: form.facultyId, departmentId: form.departmentId, programId: form.programId,
-    yearLevelId: academicState.yearLevels.find((y) => y.programId === form.programId && y.level === form.yearLevel)?.id || '',
+    yearLevelId: academicState.yearLevels.find((y) => y.programId === form.programId && y.level === calculation?.yearLevel)?.id || '',
     groupId: form.groupId,
   };
   const existingYear = academicState.yearLevels.find((y) => y.programId === existingStudent?.programId && y.level === (existingStudent?.yearLevel || existingStudent?.year));
@@ -838,21 +846,22 @@ const StudentForm: React.FC<{ existingStudent: Student | null; form: StudentForm
     facultyId: existingStudent.facultyId || '', departmentId: existingStudent.departmentId || '', programId: existingStudent.programId || '',
     yearLevelId: existingStudent.yearLevelId || existingYear?.id || '', groupId: existingStudent.classGroupId || '',
   } : undefined;
-  const ready = Boolean(form.groupId && (isAcademicPathActive(academicState, 'classGroups', form.groupId) || form.groupId === existingStudent?.classGroupId));
+  const ready = Boolean(calculation?.isValid && selectedGroup?.admissionYear === calculation.admissionYear && form.groupId && (isAcademicPathActive(academicState, 'classGroups', form.groupId) || form.groupId === existingStudent?.classGroupId));
   const groups = academicState.classGroups.filter((g) => g.yearLevelId === selection.yearLevelId && isAcademicPathActive(academicState, 'classGroups', g.id));
   return (
     <form onSubmit={onSubmit} className="space-y-5 text-xs">
       <FormSection title={isThai ? 'ข้อมูลส่วนบุคคล' : 'Personal Information'}>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <TextField label={isThai ? 'รหัสนักศึกษา' : 'Student Code'} value={form.studentCode} onChange={(studentCode) => setForm((current) => ({ ...current, studentCode }))} />
-          <TextField label={isThai ? 'อีเมลมหาวิทยาลัย' : 'University Email'} value={form.email} type="email" onChange={(email) => setForm((current) => ({ ...current, email }))} />
           <TextField label={isThai ? 'ชื่อ' : 'First Name'} value={form.firstName} onChange={(firstName) => setForm((current) => ({ ...current, firstName }))} />
           <TextField label={isThai ? 'นามสกุล' : 'Last Name'} value={form.lastName} onChange={(lastName) => setForm((current) => ({ ...current, lastName }))} />
+          <TextField label={isThai ? 'อีเมลมหาวิทยาลัย' : 'University Email'} value={form.email} type="email" onChange={(email) => setForm((current) => ({ ...current, email }))} />
         </div>
       </FormSection>
 
       <FormSection title="ข้อมูลการศึกษา">
-        <AcademicCascade value={selection} retained={retained} onChange={(next) => setForm((current) => ({
+        {existingStudent?.classGroupId && academicState.classGroups.find((group) => group.id === existingStudent.classGroupId)?.admissionYear !== calculation?.admissionYear && !form.groupId && <p role="alert" className="mb-3 text-amber-700">ชั้นปีที่คำนวณใหม่ไม่ตรงกับกลุ่มเรียนเดิม กรุณาเลือกกลุ่มเรียนใหม่</p>}
+        <AcademicCascade value={selection} studentCode={form.studentCode} retained={retained} onChange={(next) => setForm((current) => ({
           ...current, facultyId: next.facultyId, departmentId: next.departmentId, programId: next.programId,
           yearLevel: academicState.yearLevels.find((y) => y.id === next.yearLevelId)?.level || 0, groupId: next.groupId,
         }))} />
@@ -883,7 +892,7 @@ const StudentForm: React.FC<{ existingStudent: Student | null; form: StudentForm
           <div className="mt-3"><Badge variant="warning">{isThai ? 'ยังไม่มีข้อมูลภาพใบหน้า' : 'Face reference missing'}</Badge></div>
         )}
       </FormSection>
-      <ModalActions isThai={isThai} onCancel={onCancel} submitLabel={isThai ? 'บันทึกข้อมูลนักศึกษา' : 'Save Student'} disabled={!ready && !(existingStudent && !existingStudent.classGroupId && form.programId === existingStudent.programId && form.yearLevel === (existingStudent.yearLevel || existingStudent.year))} />
+      <ModalActions isThai={isThai} onCancel={onCancel} submitLabel={isThai ? 'บันทึกข้อมูลนักศึกษา' : 'Save Student'} disabled={!calculation?.isValid || (!ready && !(existingStudent && !existingStudent.classGroupId && form.programId === existingStudent.programId && form.yearLevel === (existingStudent.yearLevel || existingStudent.year)))} />
     </form>
   );
 };
@@ -892,13 +901,13 @@ const FormSection: React.FC<{ title: string; children: React.ReactNode }> = ({ t
 const TextField: React.FC<{ label: string; value: string; onChange: (value: string) => void; type?: string; required?: boolean }> = ({ label, value, onChange, type = 'text', required = true }) => <label className="space-y-1.5 font-semibold text-gray-700"><span>{label}</span><input type={type} required={required} value={value} onChange={(event) => onChange(event.target.value)} className="w-full rounded-xl border border-gray-200 px-3 py-2 font-normal" /></label>;
 const ModalActions: React.FC<{ isThai: boolean; onCancel: () => void; submitLabel: string; disabled?: boolean }> = ({ isThai, onCancel, submitLabel, disabled }) => <div className="flex justify-end gap-2 border-t border-gray-100 pt-4"><button type="button" onClick={onCancel} className="rounded-xl border border-gray-300 px-4 py-2 font-semibold">{isThai ? 'ยกเลิก' : 'Cancel'}</button><button type="submit" disabled={disabled} className="rounded-xl bg-blue-600 px-5 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">{submitLabel}</button></div>;
 
-const TransferSelectors: React.FC<{ selection: HierarchySelection; setSelection: React.Dispatch<React.SetStateAction<HierarchySelection>>; isThai: boolean; currentGroupId?: string }> = ({ selection, setSelection, currentGroupId }) => {
+const TransferSelectors: React.FC<{ selection: HierarchySelection; setSelection: React.Dispatch<React.SetStateAction<HierarchySelection>>; isThai: boolean; studentCode: string; currentGroupId?: string }> = ({ selection, setSelection, currentGroupId, studentCode }) => {
   const { academicState, setActiveAdminRoute } = useApp();
-  const yearLevelId = academicState.yearLevels.find((y) => y.programId === selection.programId && y.level === Number(selection.yearLevel))?.id || '';
+  const yearLevelId = academicState.yearLevels.find((y) => y.programId === selection.programId && y.level === calculateStudentYearLevel(studentCode)?.yearLevel)?.id || '';
   const value = { ...selection, yearLevelId };
   const groups = academicState.classGroups.filter((g) => g.yearLevelId === yearLevelId && g.id !== currentGroupId && isAcademicPathActive(academicState, 'classGroups', g.id));
   return <div className="space-y-3">
-    <AcademicCascade value={value} excludeGroupId={currentGroupId} onChange={(next) => setSelection({
+    <AcademicCascade value={value} studentCode={studentCode} excludeGroupId={currentGroupId} onChange={(next) => setSelection({
       facultyId: next.facultyId, departmentId: next.departmentId, programId: next.programId,
       yearLevel: String(academicState.yearLevels.find((y) => y.id === next.yearLevelId)?.level || ''), groupId: next.groupId,
     })} />

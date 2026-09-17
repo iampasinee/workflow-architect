@@ -9,8 +9,8 @@ interface AcademicRecordBase {
 export interface FacultyRecord extends AcademicRecordBase { name: string; }
 export interface DepartmentRecord extends AcademicRecordBase { facultyId: string; name: string; }
 export interface ProgramRecord extends AcademicRecordBase { departmentId: string; code: string; name: string; }
-export interface YearLevelRecord extends AcademicRecordBase { programId: string; level: number; name: string; }
-export interface ClassGroupRecord extends AcademicRecordBase { programId: string; yearLevelId: string; code: string; }
+export interface YearLevelRecord extends AcademicRecordBase { programId: string; level: number; name: string; admissionYear?: number; }
+export interface ClassGroupRecord extends AcademicRecordBase { programId: string; yearLevelId: string; code: string; admissionYear?: number; }
 
 export interface AcademicState {
   faculties: FacultyRecord[];
@@ -23,6 +23,7 @@ export interface AcademicState {
 export type AcademicTier = keyof AcademicState;
 export type AcademicRecord = AcademicState[AcademicTier][number];
 export interface AcademicInput {
+  admissionYear?: number;
   name: string;
   code: string;
   facultyId: string;

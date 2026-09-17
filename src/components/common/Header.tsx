@@ -1,3 +1,4 @@
+import { calculateStudentYearLevel } from '../../utils/academicYear';
 import React from 'react';
 import { useApp } from '../../context/AppContext';
 import { ShieldCheck, LogOut, Bell, ChevronRight, Menu } from 'lucide-react';
@@ -44,7 +45,7 @@ export const Header: React.FC<HeaderProps> = ({ onAdminMenuToggle }) => {
       name: currentStudent?.fullName || (isThai ? 'นักศึกษา' : 'Student'),
       email: currentStudent?.email || 'student@icit.university.ac.th',
       roleLabel: currentStudent
-        ? `${currentStudent.studentCode} • ${isThai ? `ชั้นปีที่ ${currentStudent.year}` : `Year ${currentStudent.year}`}`
+        ? `${currentStudent.studentCode} • ${isThai ? `ชั้นปีที่ ${calculateStudentYearLevel(currentStudent.studentCode)?.yearLevel || '—'}` : `Year ${calculateStudentYearLevel(currentStudent.studentCode)?.yearLevel || '—'}`}`
         : (isThai ? 'เข้าสู่ระบบแล้ว' : 'Signed In'),
       badge: isThai ? 'ผู้เข้าสอบ' : 'Examinee',
     };

@@ -91,10 +91,19 @@ export interface Room {
 }
 
 export interface Section {
+  id?: string;
+  courseId?: string;
   sectionNo: string;
-  semester: number;
+  sectionNumber?: number;
+  semester: 1 | 2 | 'summer' | number | string;
   academicYear: number;
   teacherId: string;
+  primaryTeacherId?: string;
+  coTeacherIds?: string[];
+  groupIds?: string[];
+  status?: 'active' | 'inactive';
+  createdAt?: string;
+  updatedAt?: string;
   studentCount?: number;
 }
 
@@ -102,9 +111,15 @@ export interface Course {
   id: string;
   courseCode: string;
   courseName: string;
+  code?: string;
+  name?: string;
   faculty: string;
+  facultyId?: string;
   department: string;
+  departmentId?: string;
   status: 'active' | 'inactive';
+  createdAt?: string;
+  updatedAt?: string;
   sections: Section[];
 }
 
