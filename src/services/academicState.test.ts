@@ -1,245 +1,401 @@
-import { academicSettings, calculateStudentYearLevel, withCalculatedStudentYear, withoutStudentYear } from '../utils/academicYear';
-import { deriveAcademicState, migrateAcademicCohorts, studentGroupError } from './academicState';
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import test from 'node:test';
 import { initialStudents } from '../data/initialData';
-import { AcademicInput, AcademicState, AcademicTier } from '../types/academic';
 import {
-  academicDeleteError, bulkAssignmentError, createInitialAcademicState, isAcademicPathActive,
-  migrateAcademicStudents, normalizeAcademicInput, saveAcademicState, studentAcademicFields,
-  studentsInAcademicRecord, toAcademicHierarchy, validateAcademicInput,
+  academicDeleteError,
+  academicPath,
+  classGroupsForCohort,
+  createInitialAcademicState,
+  generatedClassGroupCode,
+  isAcademicPathActive,
+  legacyGroupToCohort,
+  migrateAcademicState,
+  migrateAcademicStudents,
+  migrateAcademicTeachers,
+  normalizeAcademicInput,
+  saveAcademicState,
+  studentAcademicFields,
+  studentsInAcademicRecord,
+  validateAcademicInput,
+  validateStudentClassGroup,
+  validateTeacherAffiliation,
 } from './academicState';
-import { getAdminHashForRoute, getAdminRouteFromHash } from '../utils/adminRoutes';
-import { buildWizardTransaction, createWizardDraft } from './sequentialAcademicWizard';
+import {
+  academicSettings,
+  calculateYearLevelFromAdmissionYear,
+  getAdmissionCode,
+  inferAdmissionYearFromStudentId,
+  suggestAdmissionYearFromStudentId,
+  withCalculatedStudentYear,
+} from '../utils/academicYear';
+import {
+  buildAcademicStructureTransaction,
+  createAcademicStructureWizardDraft,
+} from './academicStructureWizard';
 
-const input = (values: Partial<AcademicInput> = {}): AcademicInput => ({
-  name: 'ตัวอย่าง', code: '', facultyId: 'faculty-001', departmentId: 'department_it',
-  programId: 'program_inet', yearLevelId: 'cohort_program_inet_2567', level: 3, status: 'active', ...values,
-});
-const mutate = (state: AcademicState, tier: AcademicTier, values: Partial<AcademicInput>, id?: string) =>
-  saveAcademicState(state, tier, normalizeAcademicInput(input(values)), id);
+const activeInput = {
+  name: 'สาขาวิชาทดสอบ',
+  code: 'TEST',
+  facultyId: 'faculty-001',
+  departmentId: 'department_it',
+  status: 'active' as const,
+};
 
-test('wizard builds an entire chain atomically and preserves requested statuses', () => {
-  const source = createInitialAcademicState();
-  const snapshot = JSON.stringify(source);
-  const draft = { ...createWizardDraft(source), facultyMode: 'new' as const, newFacultyName: 'คณะตัวอย่าง', facultyStatus: 'inactive' as const,
-    departmentMode: 'new' as const, newDepartmentName: 'ภาควิชาตัวอย่าง', programMode: 'new' as const,
-    newProgramName: 'สาขาตัวอย่าง', newProgramCode: ' demo ', admissionYear: 2567,
-    groups: [{ tempId: 'one', code: ' demo-ra ', status: 'active' as const }, { tempId: 'two', code: 'DEMO-RB', status: 'inactive' as const }],
-  };
-  for (let step = 1; step < 5; step++) assert.equal(buildWizardTransaction(source, draft, step).state, undefined);
-  const result = buildWizardTransaction(source, draft).state!;
-  assert.equal(JSON.stringify(source), snapshot);
-  assert.equal(result.faculties.length, source.faculties.length + 1);
-  assert.equal(result.classGroups.length, source.classGroups.length + 2);
-  const faculty = result.faculties.at(-1)!;
-  const department = result.departments.at(-1)!;
-  const program = result.programs.at(-1)!;
-  assert.equal(faculty.status, 'inactive');
-  assert.equal(department.facultyId, faculty.id);
-  assert.equal(program.departmentId, department.id);
-  assert.equal(program.code, 'DEMO');
-  assert.equal(result.classGroups.at(-2)!.code, 'DEMO-RA');
-  assert.ok(result.classGroups.slice(-2).every((g) => g.programId === program.id && g.admissionYear === 2567));
-  assert.equal(new Set(result.classGroups.map((g) => g.id)).size, result.classGroups.length);
-});
-
-test('wizard rejects invalid or duplicated batches without partial records', () => {
+test('canonical hierarchy remains Faculty → Department → Major with lightweight Class Groups', () => {
   const state = createInitialAcademicState();
-  const snapshot = JSON.stringify(state);
-  const draft = { ...createWizardDraft(state), selectedDepartmentId: 'department_it', selectedProgramId: 'program_inet', admissionYear: 2567,
-    groups: [{ tempId: 'a', code: 'NEW', status: 'active' as const }, { tempId: 'b', code: ' new ', status: 'active' as const }],
-  };
-  assert.equal(buildWizardTransaction(state, draft).step, 5);
-  assert.equal(buildWizardTransaction(state, { ...draft, groups: [] }).step, 5);
-  assert.equal(buildWizardTransaction(state, { ...draft, admissionYear: 2570 }).step, 4);
-  assert.equal(buildWizardTransaction(state, { ...draft, selectedDepartmentId: 'dep_003' }).step, 3);
-  assert.equal(JSON.stringify(state), snapshot);
+  assert.ok(state.faculties.length > 0);
+  assert.ok(state.departments.every((department) => state.faculties.some((faculty) => faculty.id === department.facultyId)));
+  assert.ok(state.majors.every((major) => state.departments.some((department) => department.id === major.departmentId)));
+  assert.equal('yearLevels' in state, false);
+  assert.ok(state.classGroups.length > 0);
+  assert.ok(state.classGroups.every((group) => state.majors.some((major) => major.id === group.majorId)));
+  assert.ok(state.classGroups.every((group) => !('facultyId' in group) && !('departmentId' in group) && !('yearLevel' in group)));
 });
 
-test('group codes are unique within a program and admission year for wizard and standalone CRUD', () => {
-  const state = createInitialAcademicState();
-  const draft = { ...createWizardDraft(state), selectedDepartmentId: 'department_it', selectedProgramId: 'program_inet', admissionYear: 2568,
-    groups: [{ tempId: 'a', code: 'INET-DE-RA', status: 'active' as const }],
-  };
-  assert.ok(buildWizardTransaction(state, draft).state);
-  assert.equal(buildWizardTransaction(state, { ...draft, admissionYear: 2567 }).step, 5);
-  assert.equal(validateAcademicInput(state, 'classGroups', input({ code: 'INET-DE-RA', admissionYear: 2568 })), undefined);
-  assert.equal(validateAcademicInput(state, 'classGroups', input({ code: 'INET-DE-RA', programId: 'program_ine', admissionYear: 2567 })), undefined);
-  assert.ok(validateAcademicInput(state, 'programs', input({ code: 'UNIQUE', name: state.programs[0].name })));
+test('legacy Program records migrate to canonical Major records without changing stable IDs', () => {
+  const state = migrateAcademicState({
+    faculties: [{ id: 'f1', name: 'คณะทดสอบ', status: 'active' }],
+    departments: [{ id: 'd1', facultyId: 'f1', name: 'ภาควิชาทดสอบ', status: 'active' }],
+    programs: [{ id: 'legacy-program', departmentId: 'd1', code: 'IT', name: 'สาขาวิชาทดสอบ', status: 'active' }],
+    yearLevels: [{ id: 'year-old', programId: 'legacy-program', level: 3 }],
+    classGroups: [{ id: 'group-old', programId: 'legacy-program', yearLevelId: 'year-old', code: 'RA' }],
+  });
+  assert.equal(state.majors[0].id, 'legacy-program');
+  assert.deepEqual(Object.keys(state).sort(), ['classGroupSequenceCounters', 'classGroups', 'departments', 'faculties', 'majors']);
+  assert.deepEqual(state.classGroups.map(({ majorId, admissionYear, sequence, code }) => ({ majorId, admissionYear, sequence, code })), [
+    { majorId: 'legacy-program', admissionYear: 2567, sequence: 1, code: 'IT-RA' },
+  ]);
 });
 
-test('seed preserves every original student group and adds years 1–4 to every program', () => {
+test('legacy group migration produces majorId + admissionYear before group data is discarded', () => {
   const state = createInitialAcademicState();
-  const students = migrateAcademicStudents(initialStudents, state);
-  assert.equal(state.faculties.length, 1);
-  assert.equal(students.length, initialStudents.length);
-  assert.ok(students.every((s) => state.classGroups.some((g) => g.id === s.classGroupId)));
-  assert.ok(students.every((s) => s.facultyId === 'faculty-001'));
-  assert.equal(studentsInAcademicRecord(state, students, 'faculties', 'faculty-001').length, students.length);
-  for (const program of state.programs) {
-    assert.deepEqual(state.yearLevels.filter((y) => y.programId === program.id).map((y) => y.level), [1, 2, 3, 4]);
-  }
-});
-
-test('legacy migration maps old groups, preserves status and biometrics, and is idempotent', () => {
-  const state = createInitialAcademicState();
-  const legacy = [{ ...initialStudents[0], classGroupId: 'group_003', year: 1, yearLevel: 1, statusReason: 'preserve me' }];
-  const migrated = migrateAcademicStudents(legacy, state);
+  const cohort = legacyGroupToCohort('group_003', state);
+  assert.deepEqual(cohort, { majorId: 'program_inet', admissionYear: 2567 });
+  const migrated = migrateAcademicStudents([{ ...initialStudents[0], majorId: undefined, admissionYear: undefined }], state);
+  assert.equal(migrated[0].majorId, 'program_inet');
+  assert.equal(migrated[0].admissionYear, 2567);
   assert.equal(migrated[0].classGroupId, 'group_inet_de_ra');
-  assert.equal(migrated[0].year, 6);
-  assert.equal(migrated[0].faceReferenceUrl, legacy[0].faceReferenceUrl);
-  assert.equal(migrated[0].accountStatus, legacy[0].accountStatus);
-  assert.equal(migrated[0].statusReason, 'preserve me');
-  assert.deepEqual(migrateAcademicStudents(migrated, state), migrated);
 });
 
-test('explicit unassigned students never regain a seed group after reload', () => {
+test('migration upgrades short Class Group codes and reconstructs sequence counters', () => {
+  const initial = createInitialAcademicState();
+  const migrated = migrateAcademicState({
+    faculties: initial.faculties,
+    departments: initial.departments,
+    majors: initial.majors,
+    classGroups: initial.classGroups.map(({ sequence: _sequence, ...group }) => ({
+      ...group,
+      code: group.code.split('-').at(-1),
+    })),
+  });
+  assert.equal(migrated.classGroups.find((group) => group.id === 'group_inet_de_ra')?.code, 'INET-DE-RA');
+  assert.equal(generatedClassGroupCode(migrated, 'program_inet', 2567), 'INET-DE-RC');
+});
+
+test('migration does not guess a Major when legacy evidence is ambiguous or absent', () => {
   const state = createInitialAcademicState();
-  const migrated = migrateAcademicStudents([{ ...initialStudents[0], classGroupId: '', classGroup: '' }], state);
-  assert.equal(migrated[0].classGroupId, '');
-  assert.equal(migrated[0].classGroup, '');
-  assert.equal(migrated[0].programId, 'program_inet');
-  assert.deepEqual(migrateAcademicStudents(migrated, state), migrated);
+  const legacy = {
+    ...initialStudents[0],
+    id: 'unmapped',
+    studentCode: '6700000000',
+    majorId: undefined,
+    programId: undefined,
+    program: undefined,
+    programCode: undefined,
+    classGroupId: '',
+  };
+  const migrated = migrateAcademicStudents([legacy], state)[0];
+  assert.equal(migrated.majorId, undefined);
+  assert.equal(migrated.admissionYear, 2567);
 });
 
-test('case insensitive and scoped uniqueness, trimming, codes and year validation', () => {
+test('Faculty and Department are derived from selected Major', () => {
   const state = createInitialAcademicState();
-  assert.ok(validateAcademicInput(state, 'faculties', normalizeAcademicInput(input({ name: `  ${state.faculties[0].name}  ` }))));
-  assert.ok(validateAcademicInput(state, 'programs', normalizeAcademicInput(input({ code: ' inet ' }))));
-  assert.ok(validateAcademicInput(state, 'classGroups', normalizeAcademicInput(input({ code: ' inet-de-ra ' }))));
-  assert.ok(validateAcademicInput(state, 'yearLevels', input({ level: 3 })));
-  for (const level of [0, -1, 1.5, NaN]) assert.ok(validateAcademicInput(state, 'yearLevels', input({ level })));
-  assert.ok(validateAcademicInput(state, 'faculties', input({ name: 'x'.repeat(151) })));
-  assert.ok(validateAcademicInput(state, 'programs', input({ code: 'BAD-CODE' })));
-  assert.equal(validateAcademicInput(state, 'departments', input({ name: state.departments[0].name }), state.departments[0].id), undefined);
-  assert.ok(validateAcademicInput(state, 'classGroups', input({ code: 'NEW', programId: 'program_ine' })));
+  const student = { ...initialStudents[0], majorId: 'program_inet', admissionYear: 2567 };
+  const fields = studentAcademicFields(state, student);
+  const path = academicPath(state, 'majors', 'program_inet');
+  assert.equal(fields.departmentId, path.department?.id);
+  assert.equal(fields.facultyId, path.faculty?.id);
+  assert.equal(fields.programCode, path.major?.code);
 });
 
-test('all five tiers block deletion for children or assigned students, including inactive links', () => {
-  const state = createInitialAcademicState();
-  const students = migrateAcademicStudents(initialStudents, state);
-  const nodes: [AcademicTier, string][] = [
-    ['faculties', 'faculty-001'], ['departments', 'department_it'], ['programs', 'program_inet'],
-    ['yearLevels', 'year_program_inet_3'], ['classGroups', 'group_inet_de_ra'],
-  ];
-  for (const [tier, id] of nodes) assert.ok(academicDeleteError(state, students, tier, id));
-  assert.ok(academicDeleteError(state, [], 'programs', 'program_ine'), 'groups prevent deletion');
-  assert.equal(academicDeleteError(state, students, 'classGroups', 'group_005'), undefined);
-});
-
-test('inactive ancestors remove all descendants from assignment selectors but keep associations', () => {
-  const state = createInitialAcademicState();
-  const students = migrateAcademicStudents(initialStudents, state);
-  const disabled = { ...state, faculties: state.faculties.map((f) => ({ ...f, status: 'inactive' as const })) };
-  assert.equal(isAcademicPathActive(disabled, 'classGroups', 'group_inet_de_ra'), false);
-  assert.equal(toAcademicHierarchy(disabled, true).length, 0);
-  assert.equal(toAcademicHierarchy(disabled).length, 1);
-  assert.deepEqual(migrateAcademicStudents(students, disabled), students);
-  assert.ok(validateAcademicInput(disabled, 'departments', input()));
-  assert.equal(validateAcademicInput(disabled, 'departments', input(), 'department_it'), undefined);
-});
-
-test('editing hierarchy synchronizes names and moved-parent relationships without changing student identity', () => {
-  let state = createInitialAcademicState();
-  const student = migrateAcademicStudents(initialStudents, state)[0];
-  state = mutate(state, 'faculties', { name: 'คณะตัวอย่าง' }, 'faculty-001');
-  state = mutate(state, 'programs', { name: 'สาขาใหม่', code: 'NEW' }, 'program_inet');
-  state = mutate(state, 'classGroups', { code: 'NEW-RA' }, 'group_inet_de_ra');
-  const changed = { ...student, ...studentAcademicFields(state, student) };
-  assert.equal(changed.id, student.id);
-  assert.equal(changed.faculty, 'คณะตัวอย่าง');
-  assert.equal(changed.programCode, 'NEW');
-  assert.equal(changed.classGroup, 'NEW-RA');
-  assert.equal(changed.faceReferenceUrl, student.faceReferenceUrl);
-  assert.equal(changed.accountStatus, student.accountStatus);
-});
-
-test('new program creates configured years and prevents moving occupied years to another program', () => {
-  const state = mutate(createInitialAcademicState(), 'programs', { code: 'NEW', name: 'สาขาใหม่' });
-  const program = state.programs.find((p) => p.code === 'NEW')!;
-  assert.deepEqual(state.yearLevels.filter((y) => y.programId === program.id).map((y) => y.level), [1, 2, 3, 4]);
-  assert.ok(validateAcademicInput(state, 'yearLevels', input({ programId: program.id, level: 5 }), 'year_program_inet_3'));
-});
-
-test('bulk assignment rejects a mixed invalid batch and only accepts matching unassigned students', () => {
-  const state = createInitialAcademicState();
-  const unassigned = migrateAcademicStudents(initialStudents.slice(0, 2).map((s, index) => ({ ...s, studentCode: `671012345${index}`, classGroupId: '', classGroup: '' })), state);
-  const ids = unassigned.map((s) => s.id);
-  assert.equal(bulkAssignmentError(state, unassigned, ids, 'group_inet_de_ra'), undefined);
-  assert.ok(bulkAssignmentError(state, unassigned, ids, 'group_ine_de_ra'));
-  assert.ok(bulkAssignmentError(state, unassigned, [...ids, 'nonexistent'], 'group_inet_de_ra'));
-  const assigned = migrateAcademicStudents(initialStudents.slice(0, 2), state);
-  assert.ok(bulkAssignmentError(state, assigned, ids, 'group_inet_de_ra'));
-  const mixedYears = [...unassigned, { ...unassigned[0], id: 'wrong-year', studentCode: '6910123456', yearLevel: 1, year: 1 }];
-  assert.ok(bulkAssignmentError(state, mixedYears, mixedYears.map((s) => s.id), 'group_inet_de_ra'));
-});
-
-test('academic hash route survives serialization and unknown hashes return to dashboard', () => {
-  assert.equal(getAdminRouteFromHash(getAdminHashForRoute('ACADEMIC')), 'ACADEMIC');
-  assert.equal(getAdminRouteFromHash('#/admin/roles-permissions'), 'A1');
-  assert.equal(getAdminHashForRoute('A3'), '#/admin/dashboard');
-  assert.equal(getAdminRouteFromHash('#/admin/does-not-exist'), 'A1');
-});
-test('calculation handles dashed IDs, whitespace, extended cohorts and invalid values', () => {
-  for (const [prefix, expected] of [['69', 1], ['68', 2], ['67', 3], ['66', 4], ['65', 5]] as const) {
-    const result = calculateStudentYearLevel(`${prefix}10123456`, 2569)!;
-    assert.equal(result.yearLevel, expected);
-    assert.equal(result.isExtended, expected > 4);
-  }
-  assert.equal(calculateStudentYearLevel(' 67-060225-1011-1 ', 2569)?.admissionYear, 2567);
-  assert.equal(calculateStudentYearLevel('6710123456', 2570)?.yearLevel, 4);
-  for (const code of ['ABC', 'กข', '7', '7010123456']) {
-    const result = calculateStudentYearLevel(code, 2569)!;
-    assert.equal(result.isValid, false);
-    assert.equal(result.yearLevel, 0);
-  }
-  assert.equal(calculateStudentYearLevel('   '), null);
-  for (const invalid of [NaN, Infinity, -1, 2569.5]) assert.equal(calculateStudentYearLevel('67', invalid)?.isValid, false);
-});
-
-test('academic year rollover derives student and group years without changing cohort or status', () => {
-  const state = createInitialAcademicState();
-  const student = { ...initialStudents[0], studentCode: '6710123456', year: 99, yearLevel: 99 };
-  const before = JSON.stringify(state.classGroups);
+test('admission code and derived year use stored admissionYear and central academic year', () => {
+  const previous = academicSettings.currentAcademicYear;
   try {
+    academicSettings.currentAcademicYear = 2569;
+    assert.equal(getAdmissionCode(2567), '67');
+    assert.equal(calculateYearLevelFromAdmissionYear(2567).yearLevel, 3);
+    assert.equal(withCalculatedStudentYear({ studentCode: '9900000000', admissionYear: 2567 }).yearLevel, 3);
     academicSettings.currentAcademicYear = 2570;
-    const next = deriveAcademicState(state, [student]);
-    assert.equal(withCalculatedStudentYear(student).year, 4);
-    assert.equal(next.yearLevels.find((y) => y.id === 'cohort_program_inet_2567')?.level, 4);
-    assert.equal(next.classGroups[0].admissionYear, 2567);
-    assert.equal(JSON.stringify(state.classGroups), before);
-    assert.equal(withCalculatedStudentYear(student).accountStatus, student.accountStatus);
-  } finally { academicSettings.currentAcademicYear = 2569; }
+    assert.equal(calculateYearLevelFromAdmissionYear(2567).yearLevel, 4);
+  } finally {
+    academicSettings.currentAcademicYear = previous;
+  }
 });
 
-test('storage excludes derived student years and group migration is idempotent', () => {
-  const stored = withoutStudentYear({ ...initialStudents[0], year: 99, yearLevel: 99, yearLevelId: 'legacy' });
-  assert.equal('year' in stored, false);
-  assert.equal('yearLevel' in stored, false);
-  assert.equal('yearLevelId' in stored, false);
-  const legacy = createInitialAcademicState();
-  const migrated = migrateAcademicCohorts(legacy);
-  assert.deepEqual(migrateAcademicCohorts(migrated), migrated);
+test('future admission year is invalid and student ID only provides an editable suggestion', () => {
+  assert.equal(calculateYearLevelFromAdmissionYear(2570, 2569).isValid, false);
+  assert.equal(inferAdmissionYearFromStudentId('6706022510158'), 2567);
+  assert.equal(inferAdmissionYearFromStudentId('6806022510158'), 2568);
+  assert.equal(inferAdmissionYearFromStudentId('67'), null);
+  assert.equal(inferAdmissionYearFromStudentId('INVALID'), null);
+  assert.equal(suggestAdmissionYearFromStudentId('6706022510158'), 2567);
+  assert.equal(suggestAdmissionYearFromStudentId('INVALID'), undefined);
 });
 
-test('student identity overrides stale years and incompatible group assignments are rejected', () => {
+test('stored admissionYear remains canonical when Student ID suggests another year', () => {
   const state = createInitialAcademicState();
-  const student = { ...initialStudents[0], studentCode: '6910123456', year: 3, yearLevel: 3, classGroupId: 'group_inet_de_ra' };
-  assert.equal(studentAcademicFields(state, student).year, 1);
-  assert.ok(studentGroupError(state, student));
-  assert.equal(studentGroupError(state, { ...student, studentCode: '6710123456' }), undefined);
-  assert.ok(studentGroupError(state, { ...student, studentCode: 'bad', classGroupId: '' }));
+  const stored = { ...initialStudents[0], id: 'stored-year', studentCode: '6806022510158', admissionYear: 2567, classGroupId: undefined };
+  const migrated = migrateAcademicStudents([stored], state)[0];
+  assert.equal(inferAdmissionYearFromStudentId(stored.studentCode), 2568);
+  assert.equal(migrated.admissionYear, 2567);
 });
 
-test('computed year rows are immutable; group admission supports extended cohorts', () => {
+test('cascading path activity rejects inactive ancestors', () => {
   const state = createInitialAcademicState();
-  assert.ok(validateAcademicInput(state, 'yearLevels', input({ level: 8 })));
-  assert.equal(saveAcademicState(state, 'yearLevels', input({ level: 8 })), state);
-  const values = input({ code: 'EXTENDED', admissionYear: 2565 });
-  assert.equal(validateAcademicInput(state, 'classGroups', values), undefined);
-  const next = saveAcademicState(state, 'classGroups', values);
-  const group = next.classGroups.find((g) => g.code === 'EXTENDED')!;
-  assert.equal(group.admissionYear, 2565);
-  assert.equal(next.yearLevels.find((y) => y.id === group.yearLevelId)?.level, 5);
+  const inactive = {
+    ...state,
+    faculties: state.faculties.map((faculty) => faculty.id === 'faculty-001' ? { ...faculty, status: 'inactive' as const } : faculty),
+  };
+  assert.equal(isAcademicPathActive(inactive, 'departments', 'department_it'), false);
+  assert.equal(isAcademicPathActive(inactive, 'majors', 'program_inet'), false);
+});
+
+test('academic CRUD enforces scoped uniqueness and stable parent IDs', () => {
+  const state = createInitialAcademicState();
+  const input = normalizeAcademicInput({ ...activeInput, code: ' test ' });
+  assert.equal(validateAcademicInput(state, 'majors', input), undefined);
+  const next = saveAcademicState(state, 'majors', input);
+  const created = next.majors.at(-1)!;
+  assert.equal(created.departmentId, 'department_it');
+  assert.equal(created.code, 'TEST');
+  assert.ok(validateAcademicInput(next, 'majors', input));
+});
+
+test('Class Group code generation issues RA, RB and RC per Major + admissionYear', () => {
+  let state = createInitialAcademicState();
+  const input = normalizeAcademicInput({
+    name: 'กลุ่มทดสอบ',
+    code: '',
+    facultyId: '',
+    departmentId: '',
+    majorId: 'program_inet',
+    admissionYear: 2568,
+    status: 'active',
+  });
+  assert.equal(generatedClassGroupCode(state, input.majorId, input.admissionYear), 'INET-DE-RA');
+  assert.equal(validateAcademicInput(state, 'classGroups', input), undefined);
+  state = saveAcademicState(state, 'classGroups', input);
+  assert.equal(generatedClassGroupCode(state, input.majorId, input.admissionYear), 'INET-DE-RB');
+  state = saveAcademicState(state, 'classGroups', input);
+  assert.equal(generatedClassGroupCode(state, input.majorId, input.admissionYear), 'INET-DE-RC');
+  state = saveAcademicState(state, 'classGroups', input);
+  assert.deepEqual(classGroupsForCohort(state, 'program_inet', 2568).map((group) => group.code), ['INET-DE-RA', 'INET-DE-RB', 'INET-DE-RC']);
+});
+
+test('Class Group sequence is not reused after inactive or deleted historical groups', () => {
+  let state = createInitialAcademicState();
+  const input = normalizeAcademicInput({ name: '', code: '', facultyId: '', departmentId: '', majorId: 'program_inet', admissionYear: 2568, status: 'active' });
+  state = saveAcademicState(state, 'classGroups', input);
+  state = saveAcademicState(state, 'classGroups', input);
+  const second = classGroupsForCohort(state, 'program_inet', 2568)[1];
+  state = {
+    ...state,
+    classGroups: state.classGroups.filter((group) => group.id !== second.id).map((group) => ({ ...group, status: 'inactive' as const })),
+  };
+  assert.equal(generatedClassGroupCode(state, 'program_inet', 2568), 'INET-DE-RC');
+});
+
+test('Class Group code uniqueness is scoped by admission year and duplicate persisted codes are rejected', () => {
+  const state = createInitialAcademicState();
+  const first2567 = state.classGroups.find((group) => group.majorId === 'program_inet' && group.admissionYear === 2567)!;
+  const input2568 = normalizeAcademicInput({ name: '', code: '', facultyId: '', departmentId: '', majorId: 'program_inet', admissionYear: 2568, status: 'active' });
+  const next = saveAcademicState(state, 'classGroups', input2568);
+  const first2568 = next.classGroups.find((group) => group.majorId === 'program_inet' && group.admissionYear === 2568)!;
+  assert.equal(first2567.code, first2568.code);
+  const corrupted = { ...next, classGroups: [...next.classGroups, { ...first2568, id: 'duplicate-group' }] };
+  assert.match(validateAcademicInput(corrupted, 'classGroups', input2568, first2568.id) || '', /มี.*กลุ่มเรียน/);
+});
+
+test('student Class Group assignment rejects Major and admission-year mismatches', () => {
+  const state = createInitialAcademicState();
+  const group = state.classGroups.find((item) => item.majorId === 'program_inet' && item.admissionYear === 2567)!;
+  assert.equal(validateStudentClassGroup(state, { majorId: group.majorId, admissionYear: group.admissionYear, classGroupId: group.id }), undefined);
+  assert.match(validateStudentClassGroup(state, { majorId: 'program_ine', admissionYear: group.admissionYear, classGroupId: group.id }) || '', /ตรงกับ/);
+  assert.match(validateStudentClassGroup(state, { majorId: group.majorId, admissionYear: 2568, classGroupId: group.id }) || '', /ตรงกับ/);
+});
+
+test('student reassignment keeps exactly one primary Class Group', () => {
+  const state = createInitialAcademicState();
+  const groups = classGroupsForCohort(state, 'program_inet', 2567, true);
+  assert.ok(groups.length >= 2);
+  const student = { ...initialStudents[0], majorId: 'program_inet', admissionYear: 2567, classGroupId: groups[0].id };
+  const reassigned = { ...student, classGroupId: groups[1].id };
+  assert.equal(validateStudentClassGroup(state, reassigned), undefined);
+  assert.equal(reassigned.classGroupId, groups[1].id);
+  assert.equal(Array.isArray(reassigned.classGroupId), false);
+});
+
+test('inactive Class Groups cannot receive new students but remain readable', () => {
+  const state = createInitialAcademicState();
+  const group = state.classGroups.find((item) => item.majorId === 'program_inet' && item.admissionYear === 2567)!;
+  const inactive = { ...state, classGroups: state.classGroups.map((item) => item.id === group.id ? { ...item, status: 'inactive' as const } : item) };
+  const student = { majorId: group.majorId, admissionYear: group.admissionYear, classGroupId: group.id };
+  assert.match(validateStudentClassGroup(inactive, student) || '', /ปิดใช้งาน/);
+  assert.equal(validateStudentClassGroup(inactive, student, false), undefined);
+});
+
+test('deletion guards block parents with children and Majors referenced by students', () => {
+  const state = createInitialAcademicState();
+  const students = migrateAcademicStudents(initialStudents, state);
+  assert.ok(academicDeleteError(state, students, 'faculties', 'faculty-001'));
+  assert.ok(academicDeleteError(state, students, 'departments', 'department_it'));
+  assert.ok(academicDeleteError(state, students, 'majors', 'program_inet'));
+  assert.ok(studentsInAcademicRecord(state, students, 'majors', 'program_inet').length > 0);
+  const assignedGroup = students.find((student) => student.classGroupId)?.classGroupId;
+  assert.ok(assignedGroup);
+  assert.ok(academicDeleteError(state, students, 'classGroups', assignedGroup!));
+});
+
+test('academic structure wizard creates a complete new hierarchy atomically', () => {
+  const state = createInitialAcademicState();
+  const draft = createAcademicStructureWizardDraft();
+  draft.faculty = { mode: 'new', existingId: '', code: 'SCI', name: 'คณะวิทยาศาสตร์', status: 'active' };
+  draft.department = { mode: 'new', existingId: '', code: 'CS', name: 'ภาควิชาวิทยาการคอมพิวเตอร์', status: 'active' };
+  draft.major = { mode: 'new', existingId: '', code: 'CS-DE', name: 'สาขาวิชาวิทยาการคอมพิวเตอร์', status: 'active' };
+  draft.admissionYear = 2569;
+  draft.groupCount = 2;
+
+  const result = buildAcademicStructureTransaction(state, draft);
+  assert.equal(result.error, undefined);
+  assert.deepEqual(result.groupCodes, ['CS-DE-RA', 'CS-DE-RB']);
+  assert.equal(result.state?.faculties.length, state.faculties.length + 1);
+  assert.equal(result.state?.departments.at(-1)?.facultyId, result.faculty?.id);
+  assert.equal(result.state?.majors.at(-1)?.departmentId, result.department?.id);
+  assert.ok(result.state?.classGroups.slice(-2).every((group) => group.majorId === result.major?.id));
+  assert.equal(state.faculties.some((faculty) => faculty.code === 'SCI'), false);
+});
+
+test('academic structure wizard supports existing parents mixed with new records', () => {
+  const state = createInitialAcademicState();
+  const faculty = state.faculties.find((item) => item.status === 'active')!;
+  const draft = createAcademicStructureWizardDraft();
+  draft.faculty.existingId = faculty.id;
+  draft.department = { mode: 'new', existingId: '', code: 'NEW-DEPT', name: 'ภาควิชาใหม่', status: 'active' };
+  draft.major = { mode: 'new', existingId: '', code: 'NEW-MAJOR', name: 'สาขาวิชาใหม่', status: 'active' };
+  draft.admissionYear = 2569;
+  draft.groupCount = 1;
+
+  const result = buildAcademicStructureTransaction(state, draft);
+  assert.equal(result.error, undefined);
+  assert.equal(result.faculty?.mode, 'existing');
+  assert.equal(result.department?.mode, 'new');
+  assert.equal(result.major?.mode, 'new');
+  assert.deepEqual(result.groupCodes, ['NEW-MAJOR-RA']);
+});
+
+test('academic structure wizard continues the persistent Class Group sequence', () => {
+  const state = createInitialAcademicState();
+  const major = state.majors.find((item) => item.id === 'program_inet')!;
+  const department = state.departments.find((item) => item.id === major.departmentId)!;
+  const draft = createAcademicStructureWizardDraft();
+  draft.faculty.existingId = department.facultyId;
+  draft.department.existingId = department.id;
+  draft.major.existingId = major.id;
+  draft.admissionYear = 2567;
+  draft.groupCount = 2;
+
+  const result = buildAcademicStructureTransaction(state, draft);
+  assert.equal(result.error, undefined);
+  assert.deepEqual(result.groupCodes, ['INET-DE-RC', 'INET-DE-RD']);
+});
+
+test('academic structure wizard rejects duplicate records, invalid parents and group counts', () => {
+  const state = createInitialAcademicState();
+  const faculty = state.faculties.find((item) => item.status === 'active')!;
+  const existingDepartment = state.departments.find((item) => item.facultyId === faculty.id)!;
+  const duplicate = createAcademicStructureWizardDraft();
+  duplicate.faculty.existingId = faculty.id;
+  duplicate.department = { mode: 'new', existingId: '', code: existingDepartment.code, name: 'ชื่อใหม่', status: 'active' };
+  assert.equal(buildAcademicStructureTransaction(state, duplicate, 2).step, 2);
+
+  const invalidParent = createAcademicStructureWizardDraft();
+  invalidParent.faculty.existingId = faculty.id;
+  invalidParent.department.existingId = 'missing-department';
+  assert.equal(buildAcademicStructureTransaction(state, invalidParent, 2).step, 2);
+
+  const invalidCount = createAcademicStructureWizardDraft();
+  invalidCount.faculty.existingId = faculty.id;
+  invalidCount.department.existingId = existingDepartment.id;
+  invalidCount.major.existingId = state.majors.find((item) => item.departmentId === existingDepartment.id)!.id;
+  invalidCount.groupCount = 0;
+  assert.match(buildAcademicStructureTransaction(state, invalidCount, 4).error || '', /1 ถึง 20/);
+});
+
+test('Teacher affiliation accepts a valid Faculty and Department pair', () => {
+  const state = createInitialAcademicState();
+  const department = state.departments.find((item) => item.id === 'department_it')!;
+  assert.equal(validateTeacherAffiliation(state, {
+    facultyId: department.facultyId,
+    departmentId: department.id,
+  }), undefined);
+});
+
+test('Teacher affiliation rejects a Department outside the selected Faculty', () => {
+  const state = createInitialAcademicState();
+  const extraFaculty = {
+    id: 'faculty-other',
+    code: 'OTHER',
+    name: 'คณะอื่น',
+    status: 'active' as const,
+    updatedAt: new Date().toISOString(),
+  };
+  const extended = { ...state, faculties: [...state.faculties, extraFaculty] };
+  assert.match(validateTeacherAffiliation(extended, {
+    facultyId: extraFaculty.id,
+    departmentId: 'department_it',
+  }) || '', /ไม่ได้อยู่ในคณะ/);
+});
+
+test('inactive Teacher affiliation is blocked for new assignment but remains readable when unchanged', () => {
+  const state = createInitialAcademicState();
+  const inactive = {
+    ...state,
+    departments: state.departments.map((department) =>
+      department.id === 'department_it' ? { ...department, status: 'inactive' as const } : department),
+  };
+  const affiliation = { facultyId: 'faculty-001', departmentId: 'department_it' };
+  assert.match(validateTeacherAffiliation(inactive, affiliation) || '', /ปิดใช้งาน/);
+  assert.equal(validateTeacherAffiliation(inactive, affiliation, affiliation), undefined);
+});
+
+test('legacy Teacher affiliation migrates only when an academic record is unambiguous', () => {
+  const state = createInitialAcademicState();
+  const migrated = migrateAcademicTeachers([{
+    id: 'teacher-legacy-mapped',
+    teacherCode: 'T9001',
+    fullName: 'อาจารย์ทดสอบ',
+    email: 'teacher@example.ac.th',
+    faculty: 'คณะเทคโนโลยีและการจัดการอุตสาหกรรม',
+    department: 'ภาควิชาวิทยาการคอมพิวเตอร์',
+    role: 'teacher',
+    icitProfileStatus: 'confirmed',
+    accountStatus: 'active',
+  }, {
+    id: 'teacher-legacy-unmapped',
+    teacherCode: 'T9002',
+    fullName: 'อาจารย์ข้อมูลเดิม',
+    email: 'legacy@example.ac.th',
+    faculty: 'Unknown Faculty',
+    department: 'Unknown Department',
+    role: 'teacher',
+    icitProfileStatus: 'pending',
+    accountStatus: 'active',
+  }], state);
+  assert.equal(migrated[0].facultyId, 'faculty-001');
+  assert.equal(migrated[0].departmentId, 'dep_003');
+  assert.equal(migrated[0].department, 'ภาควิชาวิทยาการคอมพิวเตอร์');
+  assert.equal(migrated[1].facultyId, undefined);
+  assert.equal(migrated[1].departmentId, undefined);
+  assert.equal(migrated[1].department, 'Unknown Department');
 });

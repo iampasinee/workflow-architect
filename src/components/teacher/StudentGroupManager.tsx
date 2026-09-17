@@ -1,4 +1,5 @@
-import { calculateStudentYearLevel } from '../../utils/academicYear';
+import { calculateYearLevelFromAdmissionYear, suggestAdmissionYearFromStudentId } from '../../utils/academicYear';
+import { studentMatchesSection } from '../../services/courseState';
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
@@ -41,6 +42,13 @@ export const StudentGroupManager: React.FC = () => {
     language,
   } = useApp();
   const isThai = language === 'th';
+  const rosterExam =
+    examSessions.find((exam) => exam.status === 'in_progress') ||
+    examSessions.find((exam) => exam.status === 'upcoming') ||
+    examSessions[0];
+  const rosterSection = courses.find((course) => course.id === rosterExam?.courseId)?.sections
+    .find((section) => section.sectionNo === rosterExam?.sectionNo);
+  const defaultCohort = rosterSection?.cohorts?.[0];
 
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedGroup, setSelectedGroup] = useState('cs301_sec1');
@@ -53,7 +61,8 @@ export const StudentGroupManager: React.FC = () => {
   const [newEmail, setNewEmail] = useState('');
   const [newFaculty, setNewFaculty] = useState('Faculty of Engineering');
   const [newDept, setNewDept] = useState('Computer Engineering');
-  const newYear = calculateStudentYearLevel(newCode);
+  const suggestedAdmissionYear = suggestAdmissionYearFromStudentId(newCode);
+  const newYear = suggestedAdmissionYear ? calculateYearLevelFromAdmissionYear(suggestedAdmissionYear) : undefined;
 
   // Excel Import state
   const [importRows, setImportRows] = useState<ImportedRow[]>([]);
@@ -67,6 +76,8 @@ export const StudentGroupManager: React.FC = () => {
       studentCode: newCode,
       fullName: newName,
       email: newEmail || `${newCode}@icit.university.ac.th`,
+      majorId: defaultCohort?.majorId,
+      admissionYear: defaultCohort?.admissionYear || suggestedAdmissionYear,
       faculty: newFaculty,
       department: newDept,
       year: newYear?.yearLevel || 0,
@@ -134,7 +145,8 @@ export const StudentGroupManager: React.FC = () => {
       },
     ];
     setImportRows(mockParsed.map((row, index) => {
-      const result = calculateStudentYearLevel(row.studentCode);
+      const admissionYear = suggestAdmissionYearFromStudentId(row.studentCode);
+      const result = admissionYear ? calculateYearLevelFromAdmissionYear(admissionYear) : undefined;
       return { ...row, year: result?.yearLevel || 0, isValid: row.isValid && Boolean(result?.isValid),
         errorReason: !result?.isValid ? `แถวที่ ${index + 1}: ${result?.errorMessage || 'กรุณากรอกรหัสนักศึกษา'}` : row.errorReason,
         warning: result?.isValid && row.year !== result.yearLevel ? `ข้อมูลชั้นปีในไฟล์ไม่ตรงกับรหัสนักศึกษา ระบบปรับเป็นชั้นปีที่ ${result.yearLevel} อัตโนมัติ` : undefined,
@@ -149,6 +161,8 @@ export const StudentGroupManager: React.FC = () => {
         studentCode: row.studentCode,
         fullName: row.fullName,
         email: row.email,
+        majorId: defaultCohort?.majorId,
+        admissionYear: defaultCohort?.admissionYear || suggestAdmissionYearFromStudentId(row.studentCode),
         faculty: 'Faculty of Engineering',
         department: row.department,
         year: row.year,
@@ -169,17 +183,10 @@ export const StudentGroupManager: React.FC = () => {
     setImportRows([]);
   };
 
-  const rosterExam =
-    examSessions.find((exam) => exam.status === 'in_progress') ||
-    examSessions.find((exam) => exam.status === 'upcoming') ||
-    examSessions[0];
-  const rosterSection = courses.find((course) => course.id === rosterExam?.courseId)?.sections
-    .find((section) => section.sectionNo === rosterExam?.sectionNo);
-  const rosterGroupIds = new Set(rosterSection?.groupIds || []);
   const term = searchTerm.toLowerCase();
   const filteredStudents = students.filter(
     (s) =>
-      Boolean(s.classGroupId && rosterGroupIds.has(s.classGroupId)) &&
+      studentMatchesSection(s, rosterSection) &&
       ((s.studentCode || '').toLowerCase().includes(term) ||
         (s.fullName || '').toLowerCase().includes(term) ||
         (s.department || '').toLowerCase().includes(term))
@@ -322,7 +329,7 @@ export const StudentGroupManager: React.FC = () => {
                   </td>
 
                   <td className="px-4 py-3.5 text-gray-600">
-                    {std.department} ({isThai ? 'ปี ' : 'Year '}{calculateStudentYearLevel(std.studentCode)?.yearLevel || '—'})
+                    {std.department} (ชั้นปี {std.admissionYear ? calculateYearLevelFromAdmissionYear(std.admissionYear).yearLevel || '—' : '—'})
                   </td>
 
                   <td className="px-4 py-3.5 font-mono text-gray-500">

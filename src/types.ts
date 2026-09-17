@@ -29,6 +29,11 @@ export interface Student {
   firstNameEn?: string;
   lastNameEn?: string;
   email: string;
+  /** Canonical academic assignment. Parent faculty/department are derived from this ID. */
+  majorId?: string;
+  /** Full Buddhist admission year, for example 2567. */
+  admissionYear?: number;
+  /** Derived/legacy display fields kept temporarily for migration compatibility. */
   faculty: string;
   facultyId?: string;
   department: string;
@@ -48,11 +53,22 @@ export interface Student {
   isFirstTime?: boolean;
 }
 
+export interface SectionCohort {
+  majorId: string;
+  admissionYear: number;
+  /** Empty/undefined targets the whole Major + admissionYear cohort. */
+  classGroupIds?: string[];
+}
+
 export interface Teacher {
   id: string;
   teacherCode: string;
   fullName: string;
   email: string;
+  /** Canonical organizational affiliation. Department must belong to Faculty. */
+  facultyId?: string;
+  departmentId?: string;
+  /** Legacy display fallbacks retained for safe persisted-data migration. */
   faculty: string;
   department: string;
   role: 'teacher';
@@ -100,6 +116,9 @@ export interface Section {
   teacherId: string;
   primaryTeacherId?: string;
   coTeacherIds?: string[];
+  /** Canonical student targeting for a section. */
+  cohorts?: SectionCohort[];
+  /** Legacy persisted relationship; read only by the forward migration. */
   groupIds?: string[];
   status?: 'active' | 'inactive';
   createdAt?: string;

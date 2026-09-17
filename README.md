@@ -1,114 +1,160 @@
 # SecureLab
 
-SecureLab is a Thai-language frontend prototype for secure laboratory exam administration and file submission. It uses React 19, TypeScript, Vite 6, and Tailwind CSS 4. Login, ICIT identity checks, biometric verification, exam monitoring, file transfer, and integrity checks are simulated in the browser; there is no production backend.
+SecureLab เป็น frontend prototype ภาษาไทยสำหรับการจัดสอบในห้องปฏิบัติการ การจัดการผู้ใช้งาน/รายวิชา และการส่งไฟล์ข้อสอบ ใช้ React 19, TypeScript, Vite 6 และ Tailwind CSS 4 ระบบ Login, ICIT, biometric verification, exam monitoring, file transfer และ integrity checking เป็นการจำลองใน browser และยังไม่มี production backend
 
-## Run locally
+## เริ่มใช้งาน
 
-Install Node.js and npm, then run:
+ติดตั้ง Node.js และ npm แล้วรัน:
 
 ```sh
 npm install
 npm run dev
 ```
 
-Open <http://localhost:3000>. Vite also prints LAN addresses for testing from another device. The app always starts on the login page; choose a demo persona to enter a Student, Teacher, or Admin flow. In PowerShell, use `npm.cmd` if execution policy blocks `npm.ps1`.
+เปิด <http://localhost:3000> แอปเริ่มที่หน้า Login เสมอ จากนั้นเลือกบัญชีจำลองสำหรับ Student, Teacher หรือ Admin ใน PowerShell ใช้ `npm.cmd` แทน `npm` หาก execution policy ปิดกั้น `npm.ps1`
 
-No API key is currently required. `.env.example` contains inherited placeholders that application source does not use. Never place secrets in client-side environment variables or commit populated `.env` files.
+ไม่ต้องใช้ API key ในการรันปัจจุบัน ห้ามใส่ secret ใน client-side environment variables หรือ commit ไฟล์ `.env` ที่มีข้อมูลจริง
 
-## Development commands
+## คำสั่งพัฒนา
 
-| Command | Purpose |
+| คำสั่ง | การทำงาน |
 | --- | --- |
-| `npm install` | Install dependencies from `package-lock.json`. |
-| `npm run dev` | Start Vite on port 3000 and expose it on the LAN. |
-| `npm run lint` | Run TypeScript validation with `tsc --noEmit`. |
-| `npm run test:academic` | Test academic migration, relationships, validation, and bulk assignment with Node/tsx. |
-| `npm run test:courses` | Test course/section migration, uniqueness, assignments, deletion guards, and portal projections. |
-| `npm run build` | Create the production bundle in `dist/`. |
-| `npm run preview` | Serve the production bundle locally. |
-| `npm run clean` | Remove `dist/` and `server.js`; requires a Unix-compatible shell. |
+| `npm install` | ติดตั้ง dependencies จาก lockfile |
+| `npm run dev` | เปิด Vite ที่ port 3000 และ LAN |
+| `npm run lint` | ตรวจ TypeScript ด้วย `tsc --noEmit` |
+| `npm run test:academic` | ทดสอบ academic model, migration, Class Group, Teacher affiliation และ validation |
+| `npm run test:courses` | ทดสอบ Course/Section, teacher assignment, cohort collision และ portal eligibility |
+| `npm run build` | สร้าง production bundle ใน `dist/` |
+| `npm run preview` | เปิด production bundleในเครื่อง |
+| `git diff --check` | ตรวจ whitespace errors |
 
-## Project structure
+## โครงสร้างโครงการ
 
-- `src/main.tsx` and `src/App.tsx`: startup, login-first behavior, and role flow selection.
-- `src/components/student/`: identity confirmation, exam rules, progress stepper, staged uploads, and submission confirmation.
-- `src/components/teacher/`: course, exam, monitoring, integrity, and reopening workflows.
-- `src/components/admin/`: dashboard, user, academic, course/section, room, biometric, security, audit, and profile screens.
-- `src/components/common/` and `src/components/simulation/`: shared UI and demo controls.
-- `src/context/AppContext.tsx`: application state, permissions, CRUD actions, and localStorage migrations.
-- `src/data/initialData.ts` and `src/data/academicStructure.ts`: mock records and academic hierarchy.
-- `src/types.ts` and `src/types/stagedUpload.ts`: shared domain models.
-- `src/services/stagedUploadStorage.ts`: IndexedDB staged-file and sequence persistence.
-- `src/types/academic.ts`, `src/services/academicState.ts`: normalized academic records, migration, and integrity validation.
-- `src/types/course.ts`, `src/services/courseState.ts`: course/section inputs, migration, validation, assignments, and access projections.
-- `src/components/admin/FacultiesAndGroupsPage.tsx` and `AcademicCascade.tsx`: academic administration and shared assignment selectors.
-- `src/utils/`: route, translation, and file-size helpers.
+- `src/main.tsx`, `src/App.tsx`: startup, login-first และ role-based flow
+- `src/components/student/`: identity, exam rules, progress stepper, staged upload และ submission
+- `src/components/teacher/`: courses, exams, monitoring, integrity และ reopening
+- `src/components/admin/`: dashboard, users, academic structure, Course/Section, rooms, biometric, security, audit และ profile
+- `src/components/common/`, `src/components/simulation/`: shared UI และเครื่องมือจำลอง
+- `src/context/AppContext.tsx`: state, CRUD, persistence และ forward migration
+- `src/types.ts`, `src/types/`: domain models
+- `src/data/`: mock/seed data
+- `src/services/academicState.ts`: academic relationships, migration, selectors และ validation
+- `src/services/academicStructureWizard.ts`: atomic-like academic structure wizard transaction
+- `src/services/courseState.ts`: Course/Section migration, validation และ portal projections
+- `src/services/stagedUploadStorage.ts`: IndexedDB staged-file persistence
+- `src/utils/academicYear.ts`: current academic year, admission code และ derived year level
 
-## Current role workflows
+## ภาษาและ Navigation
 
-The interface is fixed to Thai. `AppContext` retains the language API for compatibility but always stores and returns `th`.
+UI ปัจจุบันบังคับภาษาไทยทั้งระบบ แต่ Context ยังเก็บ language API เพื่อ compatibility Admin ใช้ hash routes เช่น `#/admin/users/students`, `#/admin/faculties-and-groups` และ `#/admin/courses` การ refresh ยังคงเริ่มที่ Login แล้วเปิด Admin route จาก hash หลังเข้าสู่ระบบ
 
-Admin navigation uses hash routes such as `#/admin/users/students` and `#/admin/faculties-and-groups`. User Management has separate Student, Teacher, and Administrator views. Student Management supports search, sorting, pagination, status actions, browser-generated UTF-8 CSV exports, list and class-group views, and create/edit/transfer/delete workflows. Student, Teacher, and Administrator remain fixed internal roles; there is no role-management screen.
+Sidebar ผู้ดูแลระบบไม่มีหน้าจัดการบทบาทแบบกำหนดเอง บทบาท `student`, `teacher` และ `admin` เป็นบทบาทคงที่ และ Student/Teacher/Admin flows ยังคงแยกกัน
 
-Course and Section Management is available at `#/admin/courses`. Courses belong to a faculty and department; sections use stable IDs and record a Buddhist academic year, semester, positive section number, exactly one active primary teacher, optional active co-teachers, and assigned class groups. Course codes are case-insensitively unique. Section identity is unique by course, year, semester, and section number. A class group cannot be assigned to two sections of the same course in the same term. Referenced records cannot be deleted and should be deactivated instead. Teacher and student portal data is projected from these section assignments, so group transfers and instructor changes take effect without duplicating rosters.
+## การจัดการผู้ใช้งาน
 
-The course page uses separate Thai tabs for รายวิชา and ตอนเรียน, live summary cards, responsive search/filter cards, paginated tables, and icon actions. The เพิ่มรายวิชาใหม่ and เปิดตอนเรียนใหม่ dialogs use wide responsive forms: course fields are full-width, section fields cascade from course to academic offering, teacher assignment supports primary/co-instructors, and cohort selection shows admission year, current year, and active headcount. Section forms require at least one cohort and display conflict validation before saving.
+เมนูจัดการผู้ใช้งานมีหน้าภาพรวม นักศึกษา อาจารย์ และผู้ดูแลระบบ พร้อม search, filters, sorting, pagination, status actions และ CRUD ตามข้อจำกัดเดิม
 
-The initial faculty is `คณะเทคโนโลยีและการจัดการอุตสาหกรรม`. Administrators can configure additional faculties, departments, programs, and class groups at `#/admin/faculties-and-groups`. The page has four editable management tabs and one read-only year/cohort summary, live metrics, search, parent/status filters, sorting, pagination, and confirmed status/deletion actions. Academic relationships use stable internal IDs; Thai names and group/program codes are display values. Academic selection is a five-level cascade:
+Workflow “เพิ่มผู้ใช้งาน” เริ่มจากเลือกประเภทบัญชี เมื่อเข้าฟอร์มนักศึกษา อาจารย์ หรือผู้ดูแลระบบ ปุ่ม `ย้อนกลับ` จะกลับไปหน้าประเภทบัญชีโดยไม่ปิด modal และล้าง draft ของบทบาทนั้น ปุ่ม `X` ปิด workflow ทั้งหมด ฟอร์มนักศึกษาใช้ validation และ academic selectors ชุดเดียวกับ Student Management
+
+Teacher affiliation ใช้ stable `facultyId` และ `departmentId` ตามโครงสร้างวิชาการเดียวกับนักศึกษา โดย selector cascade เป็น `คณะ → ภาควิชา` ฟิลด์ข้อความเดิมคงไว้เฉพาะ fallback ของ persisted legacy data รายวิชา/ตอนเรียนที่อาจารย์สอนยังมาจาก Primary Teacher และ Co-Teacher assignment ไม่ได้มาจาก profile affiliation
+
+## โครงสร้างวิชาการ
+
+Canonical hierarchy คือ:
 
 ```text
-คณะ → ภาควิชา → สาขาวิชา → ชั้นปี → กลุ่มเรียน
+คณะ (Faculty)
+└── ภาควิชา (Department)
+    └── สาขาวิชา (Major)
 ```
 
-Changing a parent clears all dependent selections. INET, INE, and all other existing programs/groups are preserved. Years 1–4 and any extended cohorts are derived per program from the current academic year, student admission prefixes, and class-group admission years. Group lists/cards are filtered by program and year. Inactive records and their descendants are excluded from new assignments; existing student associations remain visible. Deletion is blocked whenever children or students reference a record.
+Student academic identity ใช้:
 
-Student Management consumes the same state. It supports an unassigned-student filter and confirmed bulk assignment into an active group matching each selected student's affiliation and year. CSV still exports all filtered rows, independently of checkbox selection.
+```ts
+{
+  majorId: string;
+  admissionYear: number;
+  classGroupId?: string;
+}
+```
 
-Legacy group IDs are migrated to their current INET groups while preserving profile, account, and biometric data. Normalization retains `facultyId` and synchronizes legacy display fields. `year`, `yearLevel`, and `yearLevelId` are derived compatibility fields and are omitted from persisted student records. An explicitly empty group remains unassigned across refreshes. Existing program/group IDs are retained; the separate normalized store is persisted as `securelab_academic_state`.
+คณะและภาควิชาของนักศึกษาถูก derive จาก `majorId` ส่วน `classGroupId` เป็นกลุ่มประจำแบบ lightweight เช่น RA/RB ไม่ใช่ parent ระดับที่สี่ของ hierarchy และนักศึกษามีกลุ่มประจำได้ไม่เกินหนึ่งกลุ่ม
 
-## Automatic student year levels
+หน้า `จัดการคณะและกลุ่มเรียน` มีสี่แท็บ:
 
-The academic page header also offers “เพิ่มข้อมูลแบบลำดับ”: a six-step wizard for faculty, department, program, admission year, batch class groups, and review. Existing active entities can be reused or new entities drafted. Back preserves draft values; ancestor changes reset dependent selections, and closing a dirty draft requires confirmation. Nothing enters Context/localStorage before the final, fully validated transaction. Standalone tab forms remain available; the year tab stays read-only.
+```text
+[ คณะ ] [ ภาควิชา ] [ สาขาวิชา ] [ กลุ่มเรียน ]
+```
 
-Class-group codes are case-insensitively unique within `(programId, admissionYear)`, not globally. The wizard and standalone forms share this rule. Program codes remain globally unique; program names are unique within their department. New inactive ancestors retain their status and keep their descendants unavailable for student assignments.
+Class Group ผูกกับ `majorId + admissionYear` และเก็บ sequence ภายใน กลุ่มใหม่สร้างรหัสอัตโนมัติ เช่น `INET-DE-RA`, `INET-DE-RB`, `INET-DE-RC` ลำดับที่เคยใช้แล้วจะไม่ถูกนำกลับมาใช้แม้กลุ่มถูกปิดใช้งานหรือลบอย่างปลอดภัย การลบถูกป้องกันเมื่อยังมีนักศึกษาหรือ Section อ้างอิง
 
-`src/utils/academicYear.ts` defines the authoritative `academicSettings.currentAcademicYear` (initially 2569 BE). Never infer it from the computer's calendar. The setting is observable: changing it rerenders all Context consumers without rewriting admission years.
+ปุ่ม `เพิ่มโครงสร้างการศึกษา` เปิด Wizard 5 ขั้น:
 
-`calculateStudentYearLevel(studentCode)` reads the first two digits, including dashed IDs, and calculates `currentAcademicYear - (2500 + prefix) + 1`. Prefixes 69/68/67/66/65 yield years 1/2/3/4/5 in academic year 2569. Extended students retain their account status; invalid or future prefixes cannot be saved.
+```text
+คณะ → ภาควิชา → สาขาวิชา → ปีเข้าและกลุ่มเรียน → ตรวจสอบและบันทึก
+```
 
-Student forms show a read-only computed year and restrict groups to the same admission cohort. Changing a prefix clears an incompatible form selection. Transfer and bulk-assignment actions validate the cohort again. The simulated spreadsheet import overrides conflicting year values with a warning and rejects invalid IDs.
+แต่ละขั้นเลือกข้อมูลเดิมหรือสร้างใหม่ได้ Wizard แสดง preview ของรหัสกลุ่ม ตรวจข้อมูลทั้งหมดบน state ชั่วคราว และ commit ครั้งเดียวเมื่อยืนยัน รายการที่ไม่ผ่าน validation จะไม่ถูกบันทึกบางส่วน
 
-Groups persist `admissionYear`; legacy year links are migrated once. Year-summary rows and group year links are derived, not persisted. Existing group memberships are preserved during migration even if their historic year conflicts with a student's prefix; editing such a student requires selecting a compatible group. The year summary includes extended cohorts, student status totals, and group counts. Changing a populated group's program or admission year requires moving its members first.
+## ปีเข้าและชั้นปี
 
-## Staged upload workflow
+`admissionYear` เก็บเป็นปีพุทธศักราชเต็ม เช่น `2567` และแสดงเป็น `ปีเข้า 67` ใน UI ห้ามใช้คำว่า `รุ่น` ชั้นปีไม่ใช่ master data และคำนวณจาก:
 
-At desktop widths, the Student Exam File Submission page uses two columns: rules on the left and a compact drop zone followed immediately by staged files on the right. Below 1024px, these sections stack vertically.
+```text
+yearLevel = currentAcademicYear - admissionYear + 1
+```
 
-Selecting or dropping a file immediately stores its blob in browser-local IndexedDB and simulates upload progress. Drafts survive refreshes, and interrupted simulated transfers resume when the upload page mounts. Each new file receives a stable `uploadId` and a persistent, non-reusable `uploadSequence` shared across file types for that exam and student.
+`academicSettings.currentAcademicYear` ใน `src/utils/academicYear.ts` เป็นแหล่งปีการศึกษากลาง ห้ามคำนวณจากปีปฏิทินของอุปกรณ์ Student ID ใช้แนะนำปีเข้าในฟอร์มได้ แต่ `admissionYear` ที่บันทึกแยกต่างหากยังเป็น canonical source
 
-The default generated submission name is:
+Student Management มีโหมด `นักศึกษาทั้งหมด` สำหรับค้นหาเร็ว และ `แยกตามปีเข้า` สำหรับกรองคณะ ภาควิชา สาขาวิชา ปีเข้า ชั้นปี และกลุ่มเรียน ตารางแสดงกลุ่มที่กำหนดหรือ `ยังไม่กำหนด` และ CSV ส่งออกรายการทั้งหมดที่ผ่านตัวกรอง
+
+## Course และ Section
+
+Course ผูกกับคณะและภาควิชาด้วย stable IDs ส่วน Section ระบุปีการศึกษา ภาคเรียน หมายเลขตอนเรียน Primary Teacher, Co-Teachers และ cohorts
+
+```ts
+type SectionCohort = {
+  majorId: string;
+  admissionYear: number;
+  classGroupIds?: string[];
+};
+```
+
+`classGroupIds` ว่างหมายถึงทั้ง cohort สาขาวิชา+ปีเข้า และสามารถเลือก RA, RB หรือ RA+RB ใน Section เดียวได้ Class Group กับ Section เป็นคนละแนวคิด ระบบตรวจ overlap/collision ของนักศึกษาระหว่าง Section ในรายวิชาและภาคการศึกษาเดียวกัน Teacher Portal และ Student eligibility ถูก project จาก Section assignment โดยใช้ stable IDs
+
+## การส่งไฟล์ข้อสอบ
+
+หน้า Student Exam File Submission ใช้ layout สองคอลัมน์บน desktop: กติกาด้านซ้าย และ Drop Zone ตามด้วยไฟล์ที่เตรียมส่งด้านขวา ต่ำกว่า 1024px จะเรียงแนวตั้ง
+
+ไฟล์ที่เลือกถูกเก็บใน IndexedDB ทันที แต่ละไฟล์มี `uploadId` และ `uploadSequence` คงที่ ชื่อส่งเริ่มต้นคือ:
 
 ```text
 {studentId}_{firstName}_{lastName}_{uploadSequence}.{extension}
 6410123457_somying_rakrian_1.py
 ```
 
-The exam can override this through `fileRequirements.automaticFilenamePattern`. Profile name parts are lowercased, spaces and hyphens become underscores, and unsupported characters are stripped. The original machine filename remains in `originalName`; the final filename is stored separately as `submissionName`.
+Rename เปลี่ยนเฉพาะ `submissionName` โดยคง `originalName`, extension, sequence, blob, progress และ upload identity การตรวจไฟล์ใช้ `File.size` เป็น bytes และปฏิเสธเฉพาะไฟล์ 0 bytes จึงรองรับไฟล์ต่ำกว่า 1 KB
 
-Rename updates only `submissionName` and never changes the binary, `uploadId`, sequence, progress, or status. Rename accepts a 1–100 character base name matching `^[A-Za-z0-9_-]+$`, preserves the extension, and rejects case-insensitive duplicates.
+การส่งด้วยตนเองมี confirmation dialog เมื่อหมดเวลา ระบบส่งไฟล์พร้อมใช้โดยอัตโนมัติและให้ grace period 10 วินาทีแก่ไฟล์ที่กำลังอัปโหลด หากไม่มีไฟล์พร้อมส่งจะแสดงสถานะไม่พบไฟล์ Teachers สามารถ reopen submission ตาม flow เดิม
 
-File validation uses raw `File.size` bytes. Only `file.size === 0` is considered empty, so valid files smaller than 1 KB are accepted and displayed in bytes. Allowed extensions, maximum size, and minimum ready-file count come from the exam configuration.
+## Persistence และข้อจำกัด
 
-Manual submission opens a confirmation dialog and locks file actions after success. When time expires, ready files are submitted automatically; active uploads receive a 10-second grace period. If no valid file is ready, the result is “No files submitted.” Teachers may reopen a finalized submission for a limited duration.
+Application state เก็บใน `localStorage`; staged blobs และ sequence counters เก็บใน IndexedDB `securelab-staged-uploads` browser storage เป็นเพียง mock persistence ไม่ใช่ production database หรือ security boundary
 
-## Persistence and limitations
+Academic, Teacher และ Course data ใช้ forward migration และไม่ล้างข้อมูลเก่าโดยอัตโนมัติ Legacy records จะถูก map เฉพาะเมื่อระบุความสัมพันธ์ได้อย่างไม่กำกวม มิฉะนั้นเก็บข้อความ fallback ไว้ให้ Admin แก้ไข
 
-Application records use `localStorage`. Staged blobs and sequence counters use the `securelab-staged-uploads` IndexedDB database, version 6. Deleting a staged file does not release its sequence number. Storage is local to the current browser and origin—not a server backup—and automatic timeout logic cannot execute while the app is closed.
+## การตรวจสอบก่อนส่งงาน
 
-The simulation reset restores seeded application records but does not clear IndexedDB drafts. Existing localStorage data normally takes precedence over seed data, except when a documented forward migration applies. Authentication, biometric checks, monitoring, upload transfer, and integrity validation are demonstrations and must not be treated as production security controls.
+รัน:
 
-## Verification and contributions
+```sh
+npm run lint
+npm run test:academic
+npm run test:courses
+npm run build
+git diff --check
+```
 
-Run `npm run test:academic`, `npm run test:courses`, `npm run lint`, `npm run build`, and `git diff --check` before handing off changes. Domain tests use Node's test runner through the existing `tsx` dependency; no coverage threshold is configured. Manually regression-test affected Student, Teacher, and Admin flows. Vite may print a non-failing bundle-size advisory during production builds.
+ควร regression-test Student, Teacher และ Admin flows ที่ได้รับผลกระทบ Vite อาจแสดงคำเตือน bundle size ซึ่งไม่ทำให้ build ล้มเหลว
 
-See [AGENTS.md](AGENTS.md) for contributor guidelines.
+อ่านกติกาสำหรับผู้พัฒนาที่ [AGENTS.md](AGENTS.md)

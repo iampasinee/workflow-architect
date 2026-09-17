@@ -173,9 +173,9 @@ const MainRouter: React.FC = () => {
   // 4. Admin Flow (Screens A1 -> A12)
   if (role === 'admin') {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="flex h-screen flex-col overflow-hidden bg-gray-50">
         <Header onAdminMenuToggle={() => setAdminMobileMenuOpen(true)} />
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex min-h-0 flex-1 overflow-hidden">
           <AdminSidebar
             collapsed={adminSidebarCollapsed}
             onToggle={() => setAdminSidebarCollapsed(!adminSidebarCollapsed)}
@@ -183,7 +183,7 @@ const MainRouter: React.FC = () => {
             onMobileClose={() => setAdminMobileMenuOpen(false)}
           />
 
-          <main className="flex-1 overflow-y-auto p-6 md:p-8">
+          <main className="min-w-0 flex-1 overflow-y-auto p-6 md:p-8">
             <div className="max-w-7xl mx-auto">
               {activeAdminRoute === 'A1' && <AdminDashboard />}
               {isUserManagementRoute(activeAdminRoute) && (

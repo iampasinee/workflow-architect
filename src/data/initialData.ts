@@ -344,8 +344,10 @@ export const initialTeachers: Teacher[] = [
     teacherCode: 'T00123',
     fullName: 'Asst. Prof. Dr. Anucha Wichaidee',
     email: 'anucha.w@icit.university.ac.th',
-    faculty: 'Faculty of Engineering',
-    department: 'Computer Engineering',
+    facultyId: 'faculty-001',
+    departmentId: 'department_it',
+    faculty: 'คณะเทคโนโลยีและการจัดการอุตสาหกรรม',
+    department: 'ภาควิชาเทคโนโลยีสารสนเทศ',
     role: 'teacher',
     icitProfileStatus: 'confirmed',
     accountStatus: 'active',
@@ -355,8 +357,10 @@ export const initialTeachers: Teacher[] = [
     teacherCode: 'T00124',
     fullName: 'Dr. Kanchana Ploy',
     email: 'kanchana.p@icit.university.ac.th',
-    faculty: 'Faculty of Science',
-    department: 'Computer Science',
+    facultyId: 'faculty-001',
+    departmentId: 'dep_003',
+    faculty: 'คณะเทคโนโลยีและการจัดการอุตสาหกรรม',
+    department: 'ภาควิชาวิทยาการคอมพิวเตอร์',
     role: 'teacher',
     icitProfileStatus: 'pending', // Test first-time teacher onboarding T0
     accountStatus: 'active',
@@ -454,8 +458,8 @@ export const initialCourses: Course[] = [
     department: 'Computer Engineering',
     status: 'active',
     sections: [
-      { sectionNo: '1', semester: 1, academicYear: 2026, teacherId: 'tch_0001', studentCount: 40 },
-      { sectionNo: '2', semester: 1, academicYear: 2026, teacherId: 'tch_0002', studentCount: 35 },
+      { sectionNo: '1', semester: 1, academicYear: 2026, teacherId: 'tch_0001', cohorts: [{ majorId: 'program_inet', admissionYear: 2567 }], studentCount: 40 },
+      { sectionNo: '2', semester: 1, academicYear: 2026, teacherId: 'tch_0002', cohorts: [{ majorId: 'program_ine', admissionYear: 2567 }], studentCount: 35 },
     ]
   },
   {
@@ -466,7 +470,7 @@ export const initialCourses: Course[] = [
     department: 'Computer Engineering',
     status: 'active',
     sections: [
-      { sectionNo: '1', semester: 1, academicYear: 2026, teacherId: 'tch_0001', studentCount: 38 }
+      { sectionNo: '1', semester: 1, academicYear: 2026, teacherId: 'tch_0001', cohorts: [{ majorId: 'program_inet', admissionYear: 2567 }], studentCount: 38 }
     ]
   },
   {
@@ -477,7 +481,7 @@ export const initialCourses: Course[] = [
     department: 'Computer Engineering',
     status: 'active',
     sections: [
-      { sectionNo: '1', semester: 2, academicYear: 2025, teacherId: 'tch_0001', studentCount: 30 }
+      { sectionNo: '1', semester: 2, academicYear: 2025, teacherId: 'tch_0001', cohorts: [{ majorId: 'program_inet', admissionYear: 2567 }], studentCount: 30 }
     ]
   }
 ];

@@ -6,31 +6,36 @@ interface AcademicRecordBase {
   updatedAt: string;
 }
 
-export interface FacultyRecord extends AcademicRecordBase { name: string; }
-export interface DepartmentRecord extends AcademicRecordBase { facultyId: string; name: string; }
-export interface ProgramRecord extends AcademicRecordBase { departmentId: string; code: string; name: string; }
-export interface YearLevelRecord extends AcademicRecordBase { programId: string; level: number; name: string; admissionYear?: number; }
-export interface ClassGroupRecord extends AcademicRecordBase { programId: string; yearLevelId: string; code: string; admissionYear?: number; }
+export interface FacultyRecord extends AcademicRecordBase { code: string; name: string; }
+export interface DepartmentRecord extends AcademicRecordBase { facultyId: string; code: string; name: string; }
+export interface MajorRecord extends AcademicRecordBase { departmentId: string; code: string; name: string; }
+export interface ClassGroupRecord extends AcademicRecordBase {
+  majorId: string;
+  admissionYear: number;
+  sequence: number;
+  code: string;
+  name: string;
+}
 
 export interface AcademicState {
   faculties: FacultyRecord[];
   departments: DepartmentRecord[];
-  programs: ProgramRecord[];
-  yearLevels: YearLevelRecord[];
+  majors: MajorRecord[];
+  /** Lightweight student grouping; not a fourth canonical hierarchy level. */
   classGroups: ClassGroupRecord[];
+  /** Highest sequence ever issued per Major + admission year, including deleted groups. */
+  classGroupSequenceCounters: Record<string, number>;
 }
 
-export type AcademicTier = keyof AcademicState;
+export type AcademicTier = 'faculties' | 'departments' | 'majors' | 'classGroups';
 export type AcademicRecord = AcademicState[AcademicTier][number];
 export interface AcademicInput {
-  admissionYear?: number;
   name: string;
   code: string;
   facultyId: string;
   departmentId: string;
-  programId: string;
-  yearLevelId: string;
-  level: number;
+  majorId?: string;
+  admissionYear?: number;
   status: AcademicStatus;
 }
 export interface AcademicResult { success: boolean; error?: string; }

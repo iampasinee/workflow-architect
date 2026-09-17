@@ -77,13 +77,13 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ collapsed, onToggle,
     <>
       {mobileOpen && <button type="button" onClick={onMobileClose} className="fixed inset-0 top-16 z-30 bg-slate-950/30 md:hidden" aria-label="ปิดเมนูผู้ดูแลระบบ" />}
     <aside
-      className={`fixed inset-y-0 left-0 top-16 z-40 flex w-60 shrink-0 transform flex-col justify-between border-r border-gray-200 bg-white text-gray-700 transition-[transform,width] duration-200 md:relative md:top-auto md:z-20 md:translate-x-0 ${
+      className={`fixed inset-y-0 left-0 top-16 z-40 flex w-60 shrink-0 transform flex-col overflow-hidden border-r border-gray-200 bg-white text-gray-700 transition-[transform,width] duration-200 md:relative md:inset-auto md:z-20 md:h-full md:min-h-0 md:translate-x-0 ${
         mobileOpen ? 'translate-x-0' : '-translate-x-full'
       } ${
         collapsed ? 'md:w-18' : 'md:w-60'
       }`}
     >
-      <div className="py-4">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-4">
         <div className={`mb-4 flex items-center justify-between px-4 ${collapsed ? 'md:justify-center' : ''}`}>
           <span className={`text-[11px] font-bold uppercase tracking-wider text-gray-400 ${collapsed ? 'md:hidden' : ''}`}>
             {isThai ? 'การจัดการระบบส่วนกลาง' : 'System Administration'}
@@ -200,7 +200,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ collapsed, onToggle,
         </nav>
       </div>
 
-      <div className={`m-3 space-y-1 rounded-xl border border-blue-100 bg-blue-50/70 p-4 text-[11px] text-gray-600 ${collapsed ? 'md:hidden' : ''}`}>
+      <div className={`m-3 shrink-0 space-y-1 rounded-xl border border-blue-100 bg-blue-50/70 p-4 text-[11px] text-gray-600 ${collapsed ? 'md:hidden' : ''}`}>
           <div className="flex items-center gap-1.5 font-semibold text-blue-700">
             <Shield className="h-3.5 w-3.5 text-blue-600" />
             <span>สิทธิ์ผู้ดูแลระบบสูงสุด • Root</span>

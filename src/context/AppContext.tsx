@@ -1,9 +1,8 @@
 import { useAcademicYear, withCalculatedStudentYear, withoutStudentYear } from '../utils/academicYear';
-import { buildWizardTransaction, SequentialWizardDraft } from '../services/sequentialAcademicWizard';
 import { CourseActionResult, CourseInput, SectionInput } from '../types/course';
 import {
   courseDeleteError, coursesForStudent, coursesForTeacher, findSection, migrateCourses,
-  saveCourse, saveSection, sectionDeleteError, validateCourseInput, validateSectionInput,
+  saveCourse, saveSection, sectionDeleteError, studentMatchesSection, validateCourseInput, validateSectionInput,
 } from '../services/courseState';
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
 import {
@@ -29,15 +28,15 @@ import { getTranslation } from '../i18n/translations';
 import { getAdminRouteFromHash } from '../utils/adminRoutes';
 import { AcademicInput, AcademicResult, AcademicState, AcademicTier } from '../types/academic';
 import {
-  deriveAcademicState, migrateAcademicCohorts, studentGroupError, academicDeleteError, bulkAssignmentError, createInitialAcademicState, isAcademicPathActive, migrateAcademicStudents,
-  normalizeAcademicInput, saveAcademicState, studentAcademicFields, validateAcademicInput,
-} from '../services/academicState';
+  AcademicStructureTransactionResult,
+  AcademicStructureWizardDraft,
+  buildAcademicStructureTransaction,
+} from '../services/academicStructureWizard';
 import {
-  findAcademicPathByGroup,
-  legacyStudentAcademicAssignments,
-  OFFICIAL_FACULTY_NAME,
-  resolveAcademicGroupId,
-} from '../data/academicStructure';
+  academicDeleteError, createInitialAcademicState, isAcademicPathActive, migrateAcademicState, migrateAcademicStudents,
+  migrateAcademicTeachers, normalizeAcademicInput, saveAcademicState, studentAcademicFields, teacherAcademicFields,
+  validateAcademicInput, validateStudentClassGroup, validateTeacherAffiliation,
+} from '../services/academicState';
 import {
   initialStudents,
   initialTeachers,
@@ -96,10 +95,10 @@ interface AppContextType {
   // Collections
   academicState: AcademicState;
   saveAcademicRecord: (tier: AcademicTier, input: AcademicInput, id?: string) => AcademicResult;
-  saveAcademicWizard: (draft: SequentialWizardDraft) => AcademicResult;
+  saveAcademicStructure: (draft: AcademicStructureWizardDraft) => AcademicStructureTransactionResult & AcademicResult;
   deleteAcademicRecord: (tier: AcademicTier, id: string) => AcademicResult;
   setAcademicStatus: (tier: AcademicTier, id: string, status: 'active' | 'inactive') => AcademicResult;
-  assignStudentsToClassGroup: (studentIds: string[], groupId: string) => AcademicResult;
+  assignStudentsToClassGroup: (groupId: string, studentIds: string[], allowReassign?: boolean) => AcademicResult;
   students: Student[];
   teachers: Teacher[];
   admins: Admin[];
@@ -124,8 +123,8 @@ interface AppContextType {
   updateFaceReference: (id: string, url: string) => void;
 
   // Teacher Actions
-  addTeacher: (teacher: Omit<Teacher, 'id'>) => void;
-  updateTeacher: (id: string, updates: Partial<Teacher>) => void;
+  addTeacher: (teacher: Omit<Teacher, 'id'>) => boolean;
+  updateTeacher: (id: string, updates: Partial<Teacher>) => boolean;
   deleteTeacher: (id: string) => boolean;
   confirmTeacherProfile: (id: string) => void;
 
@@ -219,8 +218,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [activeTeacherRoute, setActiveTeacherRoute] = useState<string>('T1');
   const [activeStudentStep, setActiveStudentStep] = useState<'ST1' | 'ST2A' | 'ST2B' | 'ST2C' | 'ST3' | 'ST4' | 'ST5' | 'ST6' | 'ST7'>('ST1');
 
+  const [legacyAcademicSnapshot] = useState<unknown>(() =>
+    safeParse('securelab_academic_state', createInitialAcademicState()));
   const [storedAcademicState, setAcademicState] = useState<AcademicState>(() =>
-    migrateAcademicCohorts(safeParse('securelab_academic_state', createInitialAcademicState())));
+    migrateAcademicState(legacyAcademicSnapshot));
 
   const [storedStudentsState, setStudents] = useState<Student[]>(() => {
     const storedStudents = safeParse('securelab_students', initialStudents);
@@ -238,45 +239,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       localStorage.setItem(seedMigrationKey, 'complete');
     }
 
-    const facultyMigrationKey = 'securelab_thai_faculty_relation_v2';
-    if (localStorage.getItem(facultyMigrationKey) === 'complete' || localStorage.getItem('securelab_academic_state')) {
-      return migrateAcademicStudents(mergedStudents, storedAcademicState);
-    }
-
-    const migratedStudents = mergedStudents.map((student) => {
-      const legacyStudent = student as Student & { facultyId?: string };
-      const { facultyId: _removedFacultyId, ...studentWithoutFacultyId } = legacyStudent;
-      const groupId = resolveAcademicGroupId(
-        student.classGroupId || legacyStudentAcademicAssignments[student.id],
-      );
-      const path = findAcademicPathByGroup(groupId);
-
-      return {
-        ...studentWithoutFacultyId,
-        faculty: OFFICIAL_FACULTY_NAME,
-        departmentId: path?.department.id || student.departmentId,
-        programId: path?.program.id || student.programId,
-        classGroupId: path?.group.id || groupId,
-        department: path?.department.nameTh || student.department,
-        program: path?.program.nameTh || student.program,
-        programCode: path?.program.code || student.programCode,
-        classGroup: path?.group.code || student.classGroup,
-        year: path?.group.yearLevel || student.year,
-        yearLevel: path?.group.yearLevel || student.yearLevel || student.year,
-      };
-    });
-    localStorage.setItem(facultyMigrationKey, 'complete');
-    return migrateAcademicStudents(migratedStudents, storedAcademicState);
+    return migrateAcademicStudents(mergedStudents, storedAcademicState, legacyAcademicSnapshot);
   });
 
   const currentAcademicYear = useAcademicYear();
-  const academicState = useMemo(() => deriveAcademicState(storedAcademicState, storedStudentsState, currentAcademicYear), [storedAcademicState, storedStudentsState, currentAcademicYear]);
+  const academicState = storedAcademicState;
   const students = useMemo(() => storedStudentsState.map((student) => ({
     ...withCalculatedStudentYear(student, currentAcademicYear), ...studentAcademicFields(academicState, student),
   })), [storedStudentsState, academicState, currentAcademicYear]);
 
   const [teachers, setTeachers] = useState<Teacher[]>(() => {
-    return safeParse('securelab_teachers', initialTeachers);
+    return migrateAcademicTeachers(safeParse('securelab_teachers', initialTeachers), academicState);
   });
 
   const [admins, setAdmins] = useState<Admin[]>(() => {
@@ -288,7 +261,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   });
 
   const [storedCourses, setCourses] = useState<Course[]>(() => {
-    return migrateCourses(safeParse('securelab_courses', initialCourses), academicState);
+    return migrateCourses(safeParse('securelab_courses', initialCourses), academicState, legacyAcademicSnapshot);
   });
 
   const [storedExamSessions, setExamSessions] = useState<ExamSession[]>(() => {
@@ -324,27 +297,31 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [activeViolationAlert, setActiveViolationAlert] = useState<Violation | null>(null);
 
   // Active selected personas
-  const [currentStudent, setCurrentStudent] = useState<Student | null>(initialStudents[1]);
-  const derivedCurrentStudent = useMemo(() => currentStudent ? withCalculatedStudentYear(currentStudent, currentAcademicYear) : null, [currentStudent, currentAcademicYear]);
-  const [currentTeacher, setCurrentTeacher] = useState<Teacher | null>(initialTeachers[0]);
+  const [currentStudent, setCurrentStudent] = useState<Student | null>(storedStudentsState[1] || null);
+  const derivedCurrentStudent = useMemo(() => currentStudent ? {
+    ...withCalculatedStudentYear(currentStudent, currentAcademicYear),
+    ...studentAcademicFields(academicState, currentStudent),
+  } : null, [currentStudent, currentAcademicYear, academicState]);
+  const [currentTeacher, setCurrentTeacher] = useState<Teacher | null>(teachers[0] || null);
   const [currentAdmin, setCurrentAdmin] = useState<Admin | null>(initialAdmins[0]);
   const [currentExamId, setCurrentExamId] = useState<string>('exam_0001');
   const courses = useMemo(() => role === 'teacher' ? coursesForTeacher(storedCourses, currentTeacher?.id)
-    : role === 'student' ? coursesForStudent(storedCourses, currentStudent?.classGroupId) : storedCourses,
-  [role, storedCourses, currentTeacher?.id, currentStudent?.classGroupId]);
+    : role === 'student' ? coursesForStudent(storedCourses, derivedCurrentStudent) : storedCourses,
+  [role, storedCourses, currentTeacher?.id, derivedCurrentStudent]);
   const examSessions = useMemo(() => role === 'admin' || !role ? storedExamSessions : storedExamSessions.filter((exam) =>
     courses.some((course) => course.id === exam.courseId && course.sections.some((section) => section.sectionNo === exam.sectionNo))),
   [role, storedExamSessions, courses]);
   const visibleStudents = useMemo(() => {
     if (role === 'student') return students.filter((student) => student.id === currentStudent?.id);
     if (role !== 'teacher') return students;
-    const groupIds = new Set(courses.flatMap((course) => course.sections.flatMap((section) => section.groupIds || [])));
-    return students.filter((student) => Boolean(student.classGroupId) && groupIds.has(student.classGroupId!));
+    const sections = courses.flatMap((course) => course.sections);
+    return students.filter((student) => sections.some((section) => studentMatchesSection(student, section)));
   }, [role, students, courses, currentStudent?.id]);
 
   // Sync to localStorage
   useEffect(() => {
-    localStorage.setItem('securelab_academic_state', JSON.stringify({ ...academicState, yearLevels: [], classGroups: academicState.classGroups.map(({ yearLevelId, ...group }) => group) }));
+    localStorage.setItem('securelab_academic_state', JSON.stringify(academicState));
+    localStorage.setItem('securelab_academic_schema_version', '5');
   }, [academicState]);
   useEffect(() => {
     localStorage.removeItem('securelab_role');
@@ -409,46 +386,64 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setAcademicState(next);
     setStudents((current) => current.map((student) => ({ ...student, ...studentAcademicFields(next, student) })));
     setCurrentStudent((current) => current ? { ...current, ...studentAcademicFields(next, current) } : null);
+    setTeachers((current) => current.map((teacher) => ({ ...teacher, ...teacherAcademicFields(next, teacher) })));
+    setCurrentTeacher((current) => current ? { ...current, ...teacherAcademicFields(next, current) } : null);
     setCourses((current) => migrateCourses(current, next));
   };
 
   const saveAcademicRecord = (tier: AcademicTier, rawInput: AcademicInput, id?: string): AcademicResult => {
     if (role !== 'admin') return academicFailure('เฉพาะผู้ดูแลระบบเท่านั้น');
-    if (tier === 'yearLevels') return academicFailure('ชั้นปีคำนวณอัตโนมัติ ไม่สามารถแก้ไขได้');
     const input = normalizeAcademicInput(rawInput);
-    if (tier === 'classGroups' && id) {
-      const members = students.filter((student) => student.classGroupId === id);
-      const admissionYear = input.admissionYear ?? academicState.yearLevels.find((y) => y.id === input.yearLevelId)?.admissionYear;
-      const previous = academicState.classGroups.find((group) => group.id === id);
-      if (members.length && (previous?.admissionYear !== admissionYear || previous?.programId !== input.programId))
-        return academicFailure('กรุณาย้ายนักศึกษาออกจากกลุ่มก่อนเปลี่ยนสาขาวิชาหรือปีการศึกษาที่เข้า');
+    const existingGroup = tier === 'classGroups' && id ? academicState.classGroups.find((group) => group.id === id) : undefined;
+    if (existingGroup && (existingGroup.majorId !== input.majorId || existingGroup.admissionYear !== input.admissionYear) &&
+      (students.some((student) => student.classGroupId === id) || storedCourses.some((course) =>
+        course.sections.some((section) => section.cohorts?.some((cohort) => cohort.classGroupIds?.includes(id)))))) {
+      return academicFailure('ไม่สามารถเปลี่ยนสาขาวิชาหรือปีเข้าของกลุ่มที่มีนักศึกษาหรือตอนเรียนอ้างอิงอยู่');
     }
     const error = validateAcademicInput(academicState, tier, input, id);
     if (error) return academicFailure(error);
     commitAcademicState(saveAcademicState(academicState, tier, input, id));
-    showToast('บันทึกข้อมูลสำเร็จ', 'อัปเดตข้อมูลคณะและกลุ่มเรียนเรียบร้อยแล้ว', 'success');
+    showToast('บันทึกข้อมูลสำเร็จ', 'อัปเดตโครงสร้างการศึกษาเรียบร้อยแล้ว', 'success');
     return { success: true };
   };
 
-  const saveAcademicWizard = (draft: SequentialWizardDraft): AcademicResult => {
-    if (role !== 'admin') return academicFailure('เฉพาะผู้ดูแลระบบเท่านั้น');
-    const result = buildWizardTransaction(academicState, draft);
-    if (!result.state) return academicFailure(result.error || 'ข้อมูลไม่ครบถ้วน');
-    commitAcademicState(result.state);
-    showToast('เพิ่มข้อมูลคณะและกลุ่มเรียนสำเร็จ', undefined, 'success');
-    return { success: true };
+  const saveAcademicStructure = (
+    draft: AcademicStructureWizardDraft,
+  ): AcademicStructureTransactionResult & AcademicResult => {
+    if (role !== 'admin') {
+      const result = academicFailure('เฉพาะผู้ดูแลระบบเท่านั้น');
+      return { ...result, groupCodes: [] };
+    }
+    const transaction = buildAcademicStructureTransaction(academicState, draft);
+    if (!transaction.state || transaction.error) {
+      const result = academicFailure(transaction.error || 'ไม่สามารถตรวจสอบโครงสร้างการศึกษาได้');
+      return { ...transaction, ...result };
+    }
+    commitAcademicState(transaction.state);
+    showToast(
+      'เพิ่มโครงสร้างการศึกษาเรียบร้อยแล้ว',
+      `สร้างกลุ่มเรียน ${transaction.groupCodes.length} กลุ่ม: ${transaction.groupCodes.join(', ')}`,
+      'success',
+    );
+    return { ...transaction, success: true };
   };
 
   const deleteAcademicRecord = (tier: AcademicTier, id: string): AcademicResult => {
     if (role !== 'admin') return academicFailure('เฉพาะผู้ดูแลระบบเท่านั้น');
-    if (tier === 'yearLevels') return academicFailure('ชั้นปีคำนวณอัตโนมัติ ไม่สามารถแก้ไขได้');
     if (!academicState[tier].some((r) => r.id === id)) return academicFailure('ไม่พบข้อมูลที่ต้องการลบ');
     if (tier === 'faculties' && storedCourses.some((course) => course.facultyId === id))
       return academicFailure('ไม่สามารถลบคณะนี้ได้ เนื่องจากมีรายวิชาอ้างอิงอยู่ กรุณาปิดใช้งานแทน');
     if (tier === 'departments' && storedCourses.some((course) => course.departmentId === id))
       return academicFailure('ไม่สามารถลบภาควิชานี้ได้ เนื่องจากมีรายวิชาอ้างอิงอยู่ กรุณาปิดใช้งานแทน');
+    if (tier === 'faculties' && teachers.some((teacher) => teacher.facultyId === id))
+      return academicFailure('ไม่สามารถลบคณะนี้ได้ เนื่องจากมีอาจารย์อ้างอิงอยู่ กรุณาปิดใช้งานแทน');
+    if (tier === 'departments' && teachers.some((teacher) => teacher.departmentId === id))
+      return academicFailure('ไม่สามารถลบภาควิชานี้ได้ เนื่องจากมีอาจารย์อ้างอิงอยู่ กรุณาปิดใช้งานแทน');
+    if (tier === 'majors' && storedCourses.some((course) =>
+      course.sections.some((section) => section.cohorts?.some((cohort) => cohort.majorId === id))))
+      return academicFailure('ไม่สามารถลบสาขาวิชานี้ได้ เนื่องจากมีตอนเรียนอ้างอิงอยู่ กรุณาปิดใช้งานแทน');
     if (tier === 'classGroups' && storedCourses.some((course) =>
-      course.sections.some((section) => section.groupIds?.includes(id))))
+      course.sections.some((section) => section.cohorts?.some((cohort) => cohort.classGroupIds?.includes(id)))))
       return academicFailure('ไม่สามารถลบกลุ่มเรียนนี้ได้ เนื่องจากมีตอนเรียนอ้างอิงอยู่ กรุณาปิดใช้งานแทน');
     const error = academicDeleteError(academicState, students, tier, id);
     if (error) return academicFailure(error);
@@ -459,7 +454,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const setAcademicStatus = (tier: AcademicTier, id: string, status: 'active' | 'inactive'): AcademicResult => {
     if (role !== 'admin') return academicFailure('เฉพาะผู้ดูแลระบบเท่านั้น');
-    if (tier === 'yearLevels') return academicFailure('ชั้นปีคำนวณอัตโนมัติ ไม่สามารถแก้ไขได้');
     if (!academicState[tier].some((r) => r.id === id)) return academicFailure('ไม่พบข้อมูล');
     setAcademicState({ ...academicState, [tier]: academicState[tier].map((r) =>
       r.id === id ? { ...r, status, updatedAt: new Date().toISOString() } : r) });
@@ -467,24 +461,37 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return { success: true };
   };
 
-  const assignStudentsToClassGroup = (studentIds: string[], groupId: string): AcademicResult => {
+  const assignStudentsToClassGroup = (groupId: string, studentIds: string[], allowReassign = false): AcademicResult => {
     if (role !== 'admin') return academicFailure('เฉพาะผู้ดูแลระบบเท่านั้น');
-    const error = bulkAssignmentError(academicState, students, studentIds, groupId);
-    if (error) return academicFailure(error);
-    setStudents((current) => current.map((student) => studentIds.includes(student.id)
-      ? { ...student, ...studentAcademicFields(academicState, { ...student, classGroupId: groupId }) } : student));
-    setCurrentStudent((current) => current && studentIds.includes(current.id)
-      ? { ...current, ...studentAcademicFields(academicState, { ...current, classGroupId: groupId }) } : current);
-    showToast('กำหนดกลุ่มเรียนสำเร็จ', `กำหนดกลุ่มให้ ${new Set(studentIds).size} คนแล้ว`, 'success');
+    const group = academicState.classGroups.find((item) => item.id === groupId);
+    if (!group || !isAcademicPathActive(academicState, 'classGroups', group.id)) return academicFailure('กลุ่มเรียนนี้ไม่พร้อมใช้งาน');
+    const selected = students.filter((student) => studentIds.includes(student.id));
+    if (!selected.length) return academicFailure('กรุณาเลือกนักศึกษาอย่างน้อย 1 คน');
+    if (selected.some((student) => student.majorId !== group.majorId || student.admissionYear !== group.admissionYear)) {
+      return academicFailure('นักศึกษาที่เลือกต้องมีสาขาวิชาและปีเข้าตรงกับกลุ่มเรียน');
+    }
+    const reassignment = selected.filter((student) => student.classGroupId && student.classGroupId !== group.id);
+    if (reassignment.length && !allowReassign) return academicFailure('พบนักศึกษาที่อยู่ในกลุ่มอื่น กรุณายืนยันการย้ายกลุ่ม');
+    const selectedIds = new Set(studentIds);
+    setStudents((current) => current.map((student) => selectedIds.has(student.id) ? { ...student, classGroupId: group.id, classGroup: group.code } : student));
+    setCurrentStudent((current) => current && selectedIds.has(current.id) ? { ...current, classGroupId: group.id, classGroup: group.code } : current);
+    showToast(reassignment.length ? 'ย้ายกลุ่มนักศึกษาสำเร็จ' : 'เพิ่มนักศึกษาเข้ากลุ่มสำเร็จ', `ดำเนินการกับนักศึกษา ${selected.length} คน`, 'success');
     return { success: true };
   };
 
   // Student CRUD
   const addStudent = (newStd: Omit<Student, 'id'>) => {
-    const validationError = studentGroupError(academicState, { ...newStd, id: '' });
-    if (validationError) { showToast('ไม่สามารถเพิ่มนักศึกษาได้', validationError, 'error'); return false; }
-    if (newStd.classGroupId && !isAcademicPathActive(academicState, 'classGroups', newStd.classGroupId)) {
-      showToast('ไม่สามารถเพิ่มนักศึกษาได้', 'กรุณาเลือกกลุ่มเรียนที่เปิดใช้งาน', 'error');
+    if (!newStd.majorId || !isAcademicPathActive(academicState, 'majors', newStd.majorId)) {
+      showToast('ไม่สามารถเพิ่มนักศึกษาได้', 'กรุณาเลือกสาขาวิชาที่เปิดใช้งาน', 'error');
+      return false;
+    }
+    if (!Number.isSafeInteger(newStd.admissionYear) || !newStd.admissionYear || newStd.admissionYear > currentAcademicYear) {
+      showToast('ไม่สามารถเพิ่มนักศึกษาได้', 'กรุณากรอกปีการศึกษาที่เข้าที่ถูกต้อง', 'error');
+      return false;
+    }
+    const groupError = validateStudentClassGroup(academicState, newStd);
+    if (groupError) {
+      showToast('ไม่สามารถเพิ่มนักศึกษาได้', groupError, 'error');
       return false;
     }
     const id = crypto.randomUUID();
@@ -497,16 +504,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const updateStudent = (id: string, updates: Partial<Student>) => {
     const existing = students.find((student) => student.id === id);
     if (!existing) return false;
-    if (updates.classGroupId && updates.classGroupId !== existing.classGroupId &&
-      !isAcademicPathActive(academicState, 'classGroups', updates.classGroupId)) {
-      showToast('ไม่สามารถย้ายกลุ่มได้', 'กลุ่มเรียนหรือต้นสังกัดถูกปิดใช้งาน', 'error');
+    const next = { ...existing, ...updates };
+    if (!next.majorId || (next.majorId !== existing.majorId && !isAcademicPathActive(academicState, 'majors', next.majorId))) {
+      showToast('ไม่สามารถบันทึกนักศึกษาได้', 'กรุณาเลือกสาขาวิชาที่เปิดใช้งาน', 'error');
       return false;
     }
-    if (updates.studentCode !== undefined || updates.classGroupId !== undefined) {
-      const validationError = studentGroupError(academicState, { ...existing, ...updates });
-      if (validationError) { showToast('ไม่สามารถบันทึกนักศึกษาได้', validationError, 'error'); return false; }
+    if (!Number.isSafeInteger(next.admissionYear) || !next.admissionYear || next.admissionYear > currentAcademicYear) {
+      showToast('ไม่สามารถบันทึกนักศึกษาได้', 'กรุณากรอกปีการศึกษาที่เข้าที่ถูกต้อง', 'error');
+      return false;
     }
-    updates = { ...updates, ...studentAcademicFields(academicState, { ...existing, ...updates }) };
+    const groupError = validateStudentClassGroup(academicState, next, next.classGroupId === existing.classGroupId);
+    if (groupError) {
+      showToast('ไม่สามารถบันทึกนักศึกษาได้', groupError, 'error');
+      return false;
+    }
+    updates = { ...updates, ...studentAcademicFields(academicState, next) };
     setStudents(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
     if (currentStudent?.id === id) {
       setCurrentStudent(prev => prev ? { ...prev, ...updates } : null);
@@ -542,18 +554,42 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Teacher CRUD
   const addTeacher = (newTch: Omit<Teacher, 'id'>) => {
+    const affiliationError = validateTeacherAffiliation(academicState, newTch);
+    if (affiliationError) {
+      showToast('ไม่สามารถเพิ่มอาจารย์ได้', affiliationError, 'error');
+      return false;
+    }
     const id = `tch_${String(teachers.length + 1).padStart(4, '0')}`;
-    const created: Teacher = { ...newTch, id };
+    const created: Teacher = { ...newTch, ...teacherAcademicFields(academicState, newTch), id };
     setTeachers(prev => [created, ...prev]);
     showToast('เพิ่มอาจารย์สำเร็จ', `ลงทะเบียน ${created.fullName} เรียบร้อยแล้ว`, 'success');
+    return true;
   };
 
   const updateTeacher = (id: string, updates: Partial<Teacher>) => {
-    setTeachers(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+    const existing = teachers.find((teacher) => teacher.id === id);
+    if (!existing) {
+      showToast('ไม่สามารถอัปเดตข้อมูลอาจารย์ได้', 'ไม่พบข้อมูลอาจารย์', 'error');
+      return false;
+    }
+    const merged = { ...existing, ...updates };
+    const affiliationChanged = updates.facultyId !== undefined || updates.departmentId !== undefined;
+    if (affiliationChanged) {
+      const affiliationError = validateTeacherAffiliation(academicState, merged, existing);
+      if (affiliationError) {
+        showToast('ไม่สามารถอัปเดตข้อมูลอาจารย์ได้', affiliationError, 'error');
+        return false;
+      }
+    }
+    const normalized = affiliationChanged
+      ? { ...merged, ...teacherAcademicFields(academicState, merged) }
+      : merged;
+    setTeachers(prev => prev.map(t => t.id === id ? normalized : t));
     if (currentTeacher?.id === id) {
-      setCurrentTeacher(prev => prev ? { ...prev, ...updates } : null);
+      setCurrentTeacher(normalized);
     }
     showToast('อัปเดตข้อมูลอาจารย์แล้ว', 'บันทึกข้อมูลเรียบร้อยแล้ว', 'success');
+    return true;
   };
 
   const deleteTeacher = (id: string): boolean => {
@@ -807,8 +843,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const section = storedCourses.find((course) => course.id === exam?.courseId)?.sections
       .find((item) => item.sectionNo === exam?.sectionNo);
     const student = students.find((item) => item.id === studentId);
-    if (!student?.classGroupId || !section?.groupIds?.includes(student.classGroupId)) {
-      showToast('ไม่สามารถจัดที่นั่งได้', 'นักศึกษาไม่ได้อยู่ในกลุ่มเรียนของตอนเรียนนี้', 'error');
+    if (!student || !studentMatchesSection(student, section)) {
+      showToast('ไม่สามารถจัดที่นั่งได้', 'นักศึกษาไม่อยู่ในสาขาวิชาและรหัสที่กำหนดสำหรับตอนเรียนนี้', 'error');
       return;
     }
     setSeatAssignments(prev => {
@@ -830,9 +866,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const exam = storedExamSessions.find((item) => item.id === examId);
     const section = storedCourses.find((course) => course.id === exam?.courseId)?.sections
       .find((item) => item.sectionNo === exam?.sectionNo);
-    const groupIds = new Set(section?.groupIds || []);
     const activeStudents = students.filter((student) =>
-      student.accountStatus === 'active' && Boolean(student.classGroupId && groupIds.has(student.classGroupId)));
+      student.accountStatus === 'active' && studentMatchesSection(student, section));
 
     const newAssignments: SeatAssignment[] = [];
     const minCount = Math.min(availableSeats.length, activeStudents.length);
@@ -975,9 +1010,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const resetToMockDefaults = () => {
     localStorage.clear();
     const academicDefaults = createInitialAcademicState();
+    const migratedStudents = migrateAcademicStudents(initialStudents, academicDefaults);
     setAcademicState(academicDefaults);
-    setStudents(migrateAcademicStudents(initialStudents, academicDefaults));
-    setTeachers(initialTeachers);
+    setStudents(migratedStudents);
+    const migratedTeachers = migrateAcademicTeachers(initialTeachers, academicDefaults);
+    setTeachers(migratedTeachers);
     setAdmins(initialAdmins);
     setRooms(initialRooms);
     setCourses(migrateCourses(initialCourses, academicDefaults));
@@ -987,8 +1024,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setViolations(initialViolations);
     setSecurityRules(defaultSecurityRules);
     setAuditLogs([]);
-    setCurrentStudent(initialStudents[1]);
-    setCurrentTeacher(initialTeachers[0]);
+    setCurrentStudent(migratedStudents[1] || null);
+    setCurrentTeacher(migratedTeachers[0]);
     setCurrentAdmin(initialAdmins[0]);
     setCurrentExamId('exam_0001');
     setActiveStudentStep('ST1');
@@ -1000,7 +1037,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       value={{
         academicState,
         saveAcademicRecord,
-        saveAcademicWizard,
+        saveAcademicStructure,
         deleteAcademicRecord,
         setAcademicStatus,
         assignStudentsToClassGroup,

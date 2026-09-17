@@ -1,4 +1,5 @@
-import { calculateStudentYearLevel } from '../../utils/academicYear';
+import { calculateYearLevelFromAdmissionYear } from '../../utils/academicYear';
+import { studentMatchesSection } from '../../services/courseState';
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
@@ -36,8 +37,7 @@ export const SeatAssignmentManager: React.FC = () => {
   const room = rooms.find((r) => r.id === activeExam?.roomId) || rooms[0];
   const activeSection = courses.find((course) => course.id === activeExam?.courseId)?.sections
     .find((section) => section.sectionNo === activeExam?.sectionNo);
-  const activeGroupIds = new Set(activeSection?.groupIds || []);
-  const eligibleStudents = students.filter((student) => Boolean(student.classGroupId && activeGroupIds.has(student.classGroupId)));
+  const eligibleStudents = students.filter((student) => studentMatchesSection(student, activeSection));
 
   const [selectedSeatNo, setSelectedSeatNo] = useState<string | null>(null);
   const [draggedStudentId, setDraggedStudentId] = useState<string | null>(null);
@@ -324,7 +324,7 @@ export const SeatAssignmentManager: React.FC = () => {
                   <div className="font-semibold text-gray-900">{std.fullName}</div>
                   <div className="text-[11px] font-mono text-gray-500 mt-0.5">
                     {std.studentCode} • {isThai ? 'ชั้นปี ' : 'Year '}
-                    {calculateStudentYearLevel(std.studentCode)?.yearLevel || '—'}
+                    {std.admissionYear ? calculateYearLevelFromAdmissionYear(std.admissionYear).yearLevel || '—' : '—'}
                   </div>
 
                   {selectedSeatNo ? (

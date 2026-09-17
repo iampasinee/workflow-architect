@@ -1,234 +1,559 @@
-import { academicSettings, initialAcademicYear, calculateStudentYearLevel, withCalculatedStudentYear } from '../utils/academicYear';
-import { Student } from '../types';
+import { academicStructure, findAcademicPathByGroup, legacyStudentAcademicAssignments, resolveAcademicGroupId } from '../data/academicStructure';
+import { Student, Teacher } from '../types';
 import { AcademicInput, AcademicRecord, AcademicState, AcademicTier } from '../types/academic';
-import { academicStructure, AcademicFaculty, legacyStudentAcademicAssignments, resolveAcademicGroupId } from '../data/academicStructure';
+import {
+  academicSettings,
+  calculateYearLevelFromAdmissionYear,
+  suggestAdmissionYearFromStudentId,
+  withCalculatedStudentYear,
+} from '../utils/academicYear';
 
 export const academicLabels: Record<AcademicTier, string> = {
-  faculties: 'คณะ', departments: 'ภาควิชา', programs: 'สาขาวิชา', yearLevels: 'ชั้นปี', classGroups: 'กลุ่มเรียน',
+  faculties: 'คณะ',
+  departments: 'ภาควิชา',
+  majors: 'สาขาวิชา',
+  classGroups: 'กลุ่มเรียน',
 };
 
-// Preserve existing program and group IDs; only the faculty receives a new internal key.
-export const createInitialAcademicState = (): AcademicState => {
-  const state: AcademicState = { faculties: [], departments: [], programs: [], yearLevels: [], classGroups: [] };
-  const common = { status: 'active' as const, updatedAt: '2026-09-09T00:00:00.000Z' };
-  for (const faculty of academicStructure) {
-    state.faculties.push({ ...common, id: faculty.id, name: faculty.name });
-    for (const department of faculty.departments) {
-      state.departments.push({ ...common, id: department.id, facultyId: faculty.id, name: department.nameTh });
-      for (const program of department.programs) {
-        state.programs.push({ ...common, id: program.id, departmentId: department.id, code: program.code, name: program.nameTh });
-        for (const level of new Set([1, 2, 3, 4, ...program.classGroups.map((group) => group.yearLevel)])) {
-          state.yearLevels.push({ ...common, id: `year_${program.id}_${level}`, programId: program.id, level, name: `ชั้นปีที่ ${level}` });
-        }
-        for (const group of program.classGroups) {
-          state.classGroups.push({ ...common, id: group.id, code: group.code, programId: program.id, yearLevelId: `year_${program.id}_${group.yearLevel}`, admissionYear: initialAcademicYear - group.yearLevel + 1 });
-        }
-      }
-    }
+type LegacyAcademicState = {
+  faculties?: Array<{ id: string; code?: string; name: string; status?: 'active' | 'inactive'; updatedAt?: string }>;
+  departments?: Array<{ id: string; facultyId: string; code?: string; name: string; status?: 'active' | 'inactive'; updatedAt?: string }>;
+  programs?: Array<{ id: string; departmentId: string; code: string; name: string; status?: 'active' | 'inactive'; updatedAt?: string }>;
+  majors?: AcademicState['majors'];
+  yearLevels?: Array<{ id: string; programId: string; level: number; admissionYear?: number }>;
+  classGroups?: Array<{
+    id: string;
+    programId?: string;
+    majorId?: string;
+    yearLevelId?: string;
+    admissionYear?: number;
+    sequence?: number;
+    code?: string;
+    name?: string;
+    status?: 'active' | 'inactive';
+    updatedAt?: string;
+  }>;
+  classGroupSequenceCounters?: Record<string, number>;
+};
+
+const stamp = '2026-09-17T00:00:00.000Z';
+const statusOf = (status?: string) => status === 'inactive' ? 'inactive' as const : 'active' as const;
+const classGroupCounterKey = (majorId: string, admissionYear: number) => `${majorId}:${admissionYear}`;
+
+const sequenceToLetters = (sequence: number) => {
+  let value = sequence;
+  let letters = '';
+  while (value > 0) {
+    value -= 1;
+    letters = String.fromCharCode(65 + (value % 26)) + letters;
+    value = Math.floor(value / 26);
   }
-  return deriveAcademicState(state, []);
+  return letters;
+};
+
+const classGroupSequenceFromCode = (code?: string) => {
+  const match = code?.trim().toUpperCase().match(/^R([A-Z]+)$|^.+-R([A-Z]+)$/);
+  const letters = match?.[1] || match?.[2];
+  if (!letters) return undefined;
+  return [...letters].reduce((sequence, letter) => sequence * 26 + letter.charCodeAt(0) - 64, 0);
+};
+
+const classGroupPrefixFromCode = (code?: string) => code?.trim().toUpperCase().match(/^(.+)-R[A-Z]+$/)?.[1];
+
+export const createInitialAcademicState = (): AcademicState => {
+  const faculties: AcademicState['faculties'] = [];
+  const departments: AcademicState['departments'] = [];
+  const majors: AcademicState['majors'] = [];
+  const classGroups: AcademicState['classGroups'] = [];
+  const classGroupSequenceCounters: AcademicState['classGroupSequenceCounters'] = {};
+  academicStructure.forEach((faculty, facultyIndex) => {
+    faculties.push({
+      id: faculty.id,
+      code: `FAC${String(facultyIndex + 1).padStart(2, '0')}`,
+      name: faculty.name,
+      status: statusOf(faculty.status),
+      updatedAt: stamp,
+    });
+    faculty.departments.forEach((department, departmentIndex) => {
+      departments.push({
+        id: department.id,
+        facultyId: faculty.id,
+        code: department.code || `DEP${String(departmentIndex + 1).padStart(2, '0')}`,
+        name: department.nameTh,
+        status: statusOf(department.status),
+        updatedAt: stamp,
+      });
+      department.programs.forEach((program) => {
+        majors.push({
+          id: program.id,
+          departmentId: department.id,
+          code: program.code,
+          name: program.nameTh,
+          status: statusOf(program.status),
+          updatedAt: stamp,
+        });
+        program.classGroups.forEach((group) => {
+          const code = group.code.trim().toUpperCase();
+          const admissionYear = academicSettings.currentAcademicYear - group.yearLevel + 1;
+          const sequence = classGroupSequenceFromCode(code) || classGroups.filter((item) => item.majorId === program.id && item.admissionYear === admissionYear).length + 1;
+          classGroups.push({
+            id: group.id,
+            majorId: program.id,
+            admissionYear,
+            sequence,
+            code,
+            name: `กลุ่ม ${code.split('-').at(-1) || code}`,
+            status: statusOf(group.status),
+            updatedAt: stamp,
+          });
+          const counterKey = classGroupCounterKey(program.id, admissionYear);
+          classGroupSequenceCounters[counterKey] = Math.max(classGroupSequenceCounters[counterKey] || 0, sequence);
+        });
+      });
+    });
+  });
+  return { faculties, departments, majors, classGroups, classGroupSequenceCounters };
+};
+
+/** One-way migration from Faculty → Department → Program → Year → Group. */
+export const migrateAcademicState = (raw: unknown): AcademicState => {
+  const legacy = (raw && typeof raw === 'object' ? raw : {}) as LegacyAcademicState;
+  const seed = createInitialAcademicState();
+  const faculties = Array.isArray(legacy.faculties) && legacy.faculties.length
+    ? legacy.faculties.map((record, index) => ({
+      id: record.id,
+      code: record.code?.trim().toUpperCase() || `FAC${String(index + 1).padStart(2, '0')}`,
+      name: record.name,
+      status: statusOf(record.status),
+      updatedAt: record.updatedAt || stamp,
+    }))
+    : seed.faculties;
+  const departments = Array.isArray(legacy.departments) && legacy.departments.length
+    ? legacy.departments.map((record, index) => ({
+      id: record.id,
+      facultyId: record.facultyId,
+      code: record.code?.trim().toUpperCase() || `DEP${String(index + 1).padStart(2, '0')}`,
+      name: record.name,
+      status: statusOf(record.status),
+      updatedAt: record.updatedAt || stamp,
+    })).filter((record) => faculties.some((faculty) => faculty.id === record.facultyId))
+    : seed.departments;
+  const sourceMajors = Array.isArray(legacy.majors) && legacy.majors.length
+    ? legacy.majors
+    : Array.isArray(legacy.programs) ? legacy.programs : [];
+  const majors = sourceMajors.length
+    ? sourceMajors.map((record) => ({
+      id: record.id,
+      departmentId: record.departmentId,
+      code: record.code.trim().toUpperCase(),
+      name: record.name,
+      status: statusOf(record.status),
+      updatedAt: record.updatedAt || stamp,
+    })).filter((record) => departments.some((department) => department.id === record.departmentId))
+    : seed.majors;
+  const hasStoredGroups = Array.isArray(legacy.classGroups);
+  const sourceGroups = hasStoredGroups ? legacy.classGroups! : [];
+  const classGroups = hasStoredGroups
+    ? sourceGroups.map((record, recordIndex) => {
+      const staticPath = findAcademicPathByGroup(record.id);
+      const storedYear = legacy.yearLevels?.find((year) => year.id === record.yearLevelId);
+      const majorId = record.majorId || record.programId || staticPath?.program.id || '';
+      const admissionYear = record.admissionYear ?? storedYear?.admissionYear ??
+        (storedYear?.level ? academicSettings.currentAcademicYear - storedYear.level + 1 : undefined) ??
+        (staticPath?.group.yearLevel ? academicSettings.currentAcademicYear - staticPath.group.yearLevel + 1 : 0);
+      const sourceCode = (record.code || staticPath?.group.code || '').trim().toUpperCase();
+      const sequence = record.sequence || classGroupSequenceFromCode(sourceCode) || classGroupSequenceFromCode(staticPath?.group.code) ||
+        sourceGroups.slice(0, recordIndex).filter((item) => (item.majorId || item.programId) === majorId &&
+          (item.admissionYear ?? legacy.yearLevels?.find((year) => year.id === item.yearLevelId)?.admissionYear) === admissionYear).length + 1;
+      const prefix = classGroupPrefixFromCode(sourceCode) || classGroupPrefixFromCode(staticPath?.group.code) ||
+        sourceGroups.map((item) => item.majorId === majorId || item.programId === majorId ? classGroupPrefixFromCode(item.code) : undefined).find(Boolean) ||
+        seed.classGroups.find((group) => group.majorId === majorId && classGroupPrefixFromCode(group.code))?.code.replace(/-R[A-Z]+$/, '') ||
+        majors.find((major) => major.id === majorId)?.code || '';
+      const code = classGroupSequenceFromCode(sourceCode) || classGroupSequenceFromCode(staticPath?.group.code)
+        ? `${prefix}-R${sequenceToLetters(sequence)}`
+        : sourceCode;
+      return {
+        id: resolveAcademicGroupId(record.id) || record.id,
+        majorId,
+        admissionYear,
+        sequence,
+        code,
+        name: record.name?.trim() || (code ? `กลุ่ม ${code}` : ''),
+        status: statusOf(record.status),
+        updatedAt: record.updatedAt || stamp,
+      };
+    }).filter((record) => record.code && Number.isSafeInteger(record.admissionYear) && majors.some((major) => major.id === record.majorId))
+    : seed.classGroups;
+  const classGroupSequenceCounters = {
+    ...(hasStoredGroups ? {} : seed.classGroupSequenceCounters),
+    ...(legacy.classGroupSequenceCounters || {}),
+  };
+  classGroups.forEach((group) => {
+    const key = classGroupCounterKey(group.majorId, group.admissionYear);
+    classGroupSequenceCounters[key] = Math.max(classGroupSequenceCounters[key] || 0, group.sequence);
+  });
+  return { faculties, departments, majors, classGroups, classGroupSequenceCounters };
 };
 
 export const academicPath = (state: AcademicState, tier: AcademicTier, id: string) => {
-  const group = tier === 'classGroups' ? state.classGroups.find((item) => item.id === id) : undefined;
-  const year = state.yearLevels.find((item) => item.id === (tier === 'yearLevels' ? id : group?.yearLevelId));
-  const program = state.programs.find((item) => item.id === (tier === 'programs' ? id : group?.programId || year?.programId));
-  const department = state.departments.find((item) => item.id === (tier === 'departments' ? id : program?.departmentId));
+  const classGroup = state.classGroups.find((item) => item.id === (tier === 'classGroups' ? id : undefined));
+  const major = state.majors.find((item) => item.id === (tier === 'majors' ? id : classGroup?.majorId));
+  const department = state.departments.find((item) => item.id === (tier === 'departments' ? id : major?.departmentId));
   const faculty = state.faculties.find((item) => item.id === (tier === 'faculties' ? id : department?.facultyId));
-  return { faculty, department, program, year, group };
+  return { faculty, department, major, classGroup };
 };
 
 export const isAcademicPathActive = (state: AcademicState, tier: AcademicTier, id: string): boolean => {
   const path = academicPath(state, tier, id);
-  const required = {
-    faculties: [path.faculty],
-    departments: [path.faculty, path.department],
-    programs: [path.faculty, path.department, path.program],
-    yearLevels: [path.faculty, path.department, path.program, path.year],
-    classGroups: [path.faculty, path.department, path.program, path.year, path.group],
-  }[tier];
+  const required = tier === 'faculties'
+    ? [path.faculty]
+    : tier === 'departments'
+      ? [path.faculty, path.department]
+      : tier === 'majors'
+        ? [path.faculty, path.department, path.major]
+        : [path.faculty, path.department, path.major, path.classGroup];
   return required.every((record) => record?.status === 'active');
 };
 
-export const toAcademicHierarchy = (state: AcademicState, activeOnly = false): AcademicFaculty[] =>
-  state.faculties.filter((f) => !activeOnly || f.status === 'active').map((faculty) => ({
-    ...faculty,
-    departments: state.departments.filter((d) => d.facultyId === faculty.id && (!activeOnly || d.status === 'active')).map((department) => ({
-      ...department, nameTh: department.name, nameEn: department.name,
-      programs: state.programs.filter((p) => p.departmentId === department.id && (!activeOnly || p.status === 'active')).map((program) => ({
-        ...program, nameTh: program.name, nameEn: program.name,
-        yearLevels: state.yearLevels.filter((y) => y.programId === program.id && (!activeOnly || y.status === 'active')),
-        classGroups: state.classGroups.filter((g) => g.programId === program.id && (!activeOnly || isAcademicPathActive(state, 'classGroups', g.id))).map((group) => ({
-          ...group, yearLevel: state.yearLevels.find((y) => y.id === group.yearLevelId)?.level || 0,
-        })),
-      })),
-    })),
-  }));
+export interface AcademicCohort {
+  majorId: string;
+  admissionYear: number;
+}
+
+export const legacyGroupToCohort = (
+  groupId: string | undefined,
+  state: AcademicState,
+  rawAcademic?: unknown,
+): AcademicCohort | undefined => {
+  const resolvedId = resolveAcademicGroupId(groupId);
+  if (!resolvedId) return undefined;
+  const canonical = state.classGroups.find((group) => group.id === resolvedId);
+  if (canonical) return { majorId: canonical.majorId, admissionYear: canonical.admissionYear };
+  const legacy = (rawAcademic && typeof rawAcademic === 'object' ? rawAcademic : {}) as LegacyAcademicState;
+  const storedGroup = legacy.classGroups?.find((group) => resolveAcademicGroupId(group.id) === resolvedId);
+  const storedYear = legacy.yearLevels?.find((year) => year.id === storedGroup?.yearLevelId);
+  const staticPath = findAcademicPathByGroup(resolvedId);
+  const majorId = storedGroup?.programId || staticPath?.program.id;
+  const admissionYear = storedGroup?.admissionYear ?? storedYear?.admissionYear ??
+    (storedYear?.level ? academicSettings.currentAcademicYear - storedYear.level + 1 : undefined) ??
+    (staticPath?.group.yearLevel ? academicSettings.currentAcademicYear - staticPath.group.yearLevel + 1 : undefined);
+  if (!majorId || !state.majors.some((major) => major.id === majorId) || !admissionYear) return undefined;
+  return { majorId, admissionYear };
+};
+
+const resolveLegacyMajor = (state: AcademicState, student: Student, rawAcademic?: unknown) => {
+  if (student.majorId && state.majors.some((major) => major.id === student.majorId)) return student.majorId;
+  if (student.programId && state.majors.some((major) => major.id === student.programId)) return student.programId;
+  const cohort = legacyGroupToCohort(
+    student.classGroupId === undefined ? legacyStudentAcademicAssignments[student.id] : student.classGroupId,
+    state,
+    rawAcademic,
+  );
+  if (cohort) return cohort.majorId;
+  const matches = state.majors.filter((major) =>
+    major.code.toLowerCase() === student.programCode?.trim().toLowerCase() ||
+    major.name.trim().toLowerCase() === student.program?.trim().toLowerCase());
+  return matches.length === 1 ? matches[0].id : undefined;
+};
+
+export const migrateAcademicStudents = (
+  students: Student[],
+  state: AcademicState,
+  rawAcademic?: unknown,
+): Student[] => students.map((student) => {
+  const cohort = legacyGroupToCohort(
+    student.classGroupId === undefined ? legacyStudentAcademicAssignments[student.id] : student.classGroupId,
+    state,
+    rawAcademic,
+  );
+  const majorId = resolveLegacyMajor(state, student, rawAcademic);
+  const admissionYear = student.admissionYear || cohort?.admissionYear || suggestAdmissionYearFromStudentId(student.studentCode);
+  const candidateGroupId = resolveAcademicGroupId(
+    student.classGroupId === undefined ? legacyStudentAcademicAssignments[student.id] : student.classGroupId,
+  );
+  const candidateGroup = state.classGroups.find((group) => group.id === candidateGroupId);
+  const classGroupId = candidateGroup && candidateGroup.majorId === majorId && candidateGroup.admissionYear === admissionYear
+    ? candidateGroup.id
+    : undefined;
+  const migrated = { ...student, majorId, admissionYear, classGroupId };
+  return { ...migrated, ...studentAcademicFields(state, migrated) };
+});
 
 export const studentAcademicFields = (state: AcademicState, student: Student): Partial<Student> => {
-  const group = state.classGroups.find((g) => g.id === student.classGroupId);
-  const year = state.yearLevels.find((y) => y.id === (group?.yearLevelId || student.yearLevelId));
-  const program = state.programs.find((p) => p.id === (group?.programId || year?.programId || student.programId));
-  const department = state.departments.find((d) => d.id === (program?.departmentId || student.departmentId));
-  const faculty = state.faculties.find((f) => f.id === (department?.facultyId || student.facultyId));
+  const major = state.majors.find((item) => item.id === student.majorId);
+  const department = state.departments.find((item) => item.id === major?.departmentId);
+  const faculty = state.faculties.find((item) => item.id === department?.facultyId);
+  const classGroup = state.classGroups.find((item) => item.id === student.classGroupId && item.majorId === major?.id && item.admissionYear === student.admissionYear);
   return {
     ...(faculty && { facultyId: faculty.id, faculty: faculty.name }),
     ...(department && { departmentId: department.id, department: department.name }),
-    ...(program && { programId: program.id, programCode: program.code, program: program.name }),
-    ...withCalculatedStudentYear({ studentCode: student.studentCode }),
-    yearLevelId: state.yearLevels.find((y) => y.programId === program?.id && y.level === calculateStudentYearLevel(student.studentCode)?.yearLevel)?.id || '',
-    ...(group && { classGroupId: group.id, classGroup: group.code }),
+    ...(major && {
+      majorId: major.id,
+      programId: major.id,
+      programCode: major.code,
+      program: major.name,
+    }),
+    classGroupId: classGroup?.id,
+    classGroup: classGroup?.code,
+    ...withCalculatedStudentYear(student),
   };
 };
 
-export const migrateAcademicStudents = (students: Student[], state: AcademicState): Student[] =>
-  students.map((student) => {
-    // An explicit empty group represents an unassigned student, never a seed fallback.
-    const groupId = resolveAcademicGroupId(student.classGroupId === undefined
-      ? legacyStudentAcademicAssignments[student.id] : student.classGroupId);
-    const matchingGroups = student.classGroupId === undefined ? state.classGroups.filter((g) =>
-      g.code.toLowerCase() === student.classGroup?.toLowerCase() &&
-      (!student.programId || g.programId === student.programId) &&
-      g.admissionYear === calculateStudentYearLevel(student.studentCode)?.admissionYear) : [];
-    const group = state.classGroups.find((g) => g.id === groupId) || (matchingGroups.length === 1 ? matchingGroups[0] : undefined);
-    const program = state.programs.find((p) => p.id === student.programId || (student.programId === 'prog_001' && p.id === 'program_inet'));
-    const department = state.departments.find((d) => d.id === student.departmentId || (student.departmentId === 'dep_001' && d.id === 'department_it'));
-    const faculty = state.faculties.find((f) => f.id === student.facultyId || f.name === student.faculty);
-    const migrated = {
-      ...student, classGroupId: group?.id || '', classGroup: group?.code || '',
-      programId: program?.id || student.programId, departmentId: department?.id || student.departmentId,
-      facultyId: faculty?.id || student.facultyId,
+const normalizedAcademicLabel = (value?: string) => value?.trim().toLocaleLowerCase('th-TH') || '';
+
+const facultyAliases = (id: string, state: AcademicState) => {
+  const canonical = state.faculties.find((item) => item.id === id);
+  const legacy = academicStructure.find((item) => item.id === id);
+  return [canonical?.id, canonical?.code, canonical?.name, legacy?.name]
+    .map(normalizedAcademicLabel)
+    .filter(Boolean);
+};
+
+const departmentAliases = (id: string, state: AcademicState) => {
+  const canonical = state.departments.find((item) => item.id === id);
+  const legacy = academicStructure.flatMap((faculty) => faculty.departments).find((item) => item.id === id);
+  return [canonical?.id, canonical?.code, canonical?.name, legacy?.code, legacy?.nameTh, legacy?.nameEn]
+    .map(normalizedAcademicLabel)
+    .filter(Boolean);
+};
+
+/** Resolves stable Teacher affiliation IDs without guessing ambiguous legacy labels. */
+export const teacherAcademicFields = (
+  state: AcademicState,
+  teacher: Pick<Teacher, 'facultyId' | 'departmentId' | 'faculty' | 'department'>,
+): Partial<Teacher> => {
+  const storedDepartment = state.departments.find((item) => item.id === teacher.departmentId);
+  const storedFaculty = state.faculties.find((item) => item.id === storedDepartment?.facultyId);
+  if (storedDepartment && storedFaculty) {
+    return {
+      facultyId: storedFaculty.id,
+      departmentId: storedDepartment.id,
+      faculty: storedFaculty.name,
+      department: storedDepartment.name,
     };
-    const fields = studentAcademicFields(state, migrated);
-    const year = state.yearLevels.find((y) => y.programId === fields.programId && y.level === (fields.yearLevel || student.yearLevel || student.year));
-    return { ...migrated, ...fields, ...(year && { yearLevelId: year.id }) };
-  });
-
-export const studentsInAcademicRecord = (state: AcademicState, students: Student[], tier: AcademicTier, id: string) =>
-  students.filter((student) => {
-    const normalized = { ...student, ...studentAcademicFields(state, student) };
-    if (tier === 'faculties') return normalized.facultyId === id;
-    if (tier === 'departments') return normalized.departmentId === id;
-    if (tier === 'programs') return normalized.programId === id;
-    if (tier === 'yearLevels') {
-      const year = state.yearLevels.find((y) => y.id === id);
-      return normalized.yearLevelId === id || (year?.programId === normalized.programId && year?.level === normalized.yearLevel);
-    }
-    return normalized.classGroupId === id;
-  });
-
-export const academicDeleteError = (state: AcademicState, students: Student[], tier: AcademicTier, id: string): string | undefined => {
-  if (tier === 'yearLevels') return 'ชั้นปีคำนวณอัตโนมัติ ไม่สามารถลบได้';
-  const hasChildren = tier === 'faculties' ? state.departments.some((d) => d.facultyId === id)
-    : tier === 'departments' ? state.programs.some((p) => p.departmentId === id)
-      : tier === 'programs' ? state.classGroups.some((g) => g.programId === id)
-        : false;
-  if (hasChildren) return `ไม่สามารถลบ${academicLabels[tier]}นี้ได้ เนื่องจากยังมีข้อมูลภายใน กรุณาลบหรือย้ายข้อมูลที่เกี่ยวข้องก่อน หรือเลือกปิดใช้งาน`;
-  if (studentsInAcademicRecord(state, students, tier, id).length) {
-    return `ไม่สามารถลบ${academicLabels[tier]}นี้ได้ เนื่องจากยังมีนักศึกษาอยู่ กรุณาย้ายนักศึกษาไปยังกลุ่มอื่นก่อน หรือเลือกปิดใช้งาน`;
   }
+
+  const facultyLabel = normalizedAcademicLabel(teacher.faculty);
+  const departmentLabel = normalizedAcademicLabel(teacher.department);
+  const facultyMatches = facultyLabel
+    ? state.faculties.filter((item) => facultyAliases(item.id, state).includes(facultyLabel))
+    : [];
+  const departmentMatches = departmentLabel
+    ? state.departments.filter((item) =>
+      departmentAliases(item.id, state).includes(departmentLabel) &&
+      (!facultyMatches.length || facultyMatches.some((faculty) => faculty.id === item.facultyId)))
+    : [];
+  if (departmentMatches.length === 1) {
+    const department = departmentMatches[0];
+    const faculty = state.faculties.find((item) => item.id === department.facultyId);
+    if (faculty) return {
+      facultyId: faculty.id,
+      departmentId: department.id,
+      faculty: faculty.name,
+      department: department.name,
+    };
+  }
+  if (facultyMatches.length === 1) {
+    return { facultyId: facultyMatches[0].id, faculty: facultyMatches[0].name };
+  }
+  return {};
+};
+
+export const migrateAcademicTeachers = (
+  teachers: Teacher[],
+  state: AcademicState,
+): Teacher[] => teachers.map((teacher) => ({
+  ...teacher,
+  ...teacherAcademicFields(state, teacher),
+}));
+
+export const validateTeacherAffiliation = (
+  state: AcademicState,
+  teacher: Pick<Teacher, 'facultyId' | 'departmentId'>,
+  existing?: Pick<Teacher, 'facultyId' | 'departmentId'>,
+): string | undefined => {
+  const faculty = state.faculties.find((item) => item.id === teacher.facultyId);
+  if (!faculty) return 'กรุณาเลือกคณะ';
+  const department = state.departments.find((item) => item.id === teacher.departmentId);
+  if (!department) return 'กรุณาเลือกภาควิชา';
+  if (department.facultyId !== faculty.id) return 'ภาควิชาที่เลือกไม่ได้อยู่ในคณะที่เลือก';
+  const unchanged = existing?.facultyId === faculty.id && existing.departmentId === department.id;
+  if (!unchanged && !isAcademicPathActive(state, 'departments', department.id)) {
+    return 'คณะหรือภาควิชาที่เลือกถูกปิดใช้งาน';
+  }
+};
+
+export const studentsInAcademicRecord = (
+  state: AcademicState,
+  students: Student[],
+  tier: AcademicTier,
+  id: string,
+) => students.filter((student) => {
+  const path = student.majorId ? academicPath(state, 'majors', student.majorId) : undefined;
+  if (tier === 'faculties') return path?.faculty?.id === id;
+  if (tier === 'departments') return path?.department?.id === id;
+  if (tier === 'majors') return student.majorId === id;
+  return student.classGroupId === id;
+});
+
+export const academicDeleteError = (
+  state: AcademicState,
+  students: Student[],
+  tier: AcademicTier,
+  id: string,
+): string | undefined => {
+  const hasChildren = tier === 'faculties'
+    ? state.departments.some((department) => department.facultyId === id)
+    : tier === 'departments'
+      ? state.majors.some((major) => major.departmentId === id)
+      : tier === 'majors'
+        ? state.classGroups.some((group) => group.majorId === id)
+        : false;
+  if (hasChildren) return `ไม่สามารถลบ${academicLabels[tier]}นี้ได้ เนื่องจากยังมีข้อมูลภายใต้รายการนี้`;
+  if (studentsInAcademicRecord(state, students, tier, id).length) {
+    return `ไม่สามารถลบ${academicLabels[tier]}นี้ได้ เนื่องจากยังมีนักศึกษาอ้างอิงอยู่`;
+  }
+};
+
+const classGroupPrefix = (state: AcademicState, majorId: string) => {
+  const existingPrefix = state.classGroups
+    .filter((group) => group.majorId === majorId)
+    .map((group) => classGroupPrefixFromCode(group.code))
+    .find(Boolean);
+  return existingPrefix || state.majors.find((major) => major.id === majorId)?.code || '';
+};
+
+export const nextClassGroupSequence = (state: AcademicState, majorId: string, admissionYear: number) => {
+  const key = classGroupCounterKey(majorId, admissionYear);
+  const highestRecord = state.classGroups
+    .filter((group) => group.majorId === majorId && group.admissionYear === admissionYear)
+    .reduce((highest, group) => Math.max(highest, group.sequence || classGroupSequenceFromCode(group.code) || 0), 0);
+  return Math.max(state.classGroupSequenceCounters[key] || 0, highestRecord) + 1;
+};
+
+export const generatedClassGroupCode = (
+  state: AcademicState,
+  majorId?: string,
+  admissionYear?: number,
+  id?: string,
+) => {
+  if (!majorId || !admissionYear) return '';
+  const existing = id ? state.classGroups.find((group) => group.id === id) : undefined;
+  if (existing && existing.majorId === majorId && existing.admissionYear === admissionYear) return existing.code;
+  const prefix = classGroupPrefix(state, majorId);
+  return prefix ? `${prefix}-R${sequenceToLetters(nextClassGroupSequence(state, majorId, admissionYear))}` : '';
 };
 
 export const normalizeAcademicInput = (input: AcademicInput): AcademicInput => ({
-  ...input, name: input.name.trim(), code: input.code.trim().toUpperCase(),
+  ...input,
+  name: input.name.trim(),
+  code: input.code.trim().toUpperCase(),
 });
 
-export const validateAcademicInput = (state: AcademicState, tier: AcademicTier, input: AcademicInput, id?: string): string | undefined => {
-  if (String(tier) === 'yearLevels') return 'ชั้นปีคำนวณอัตโนมัติ ไม่สามารถแก้ไขได้';
-  const existing = state[tier].find((r) => r.id === id);
+export const validateAcademicInput = (
+  state: AcademicState,
+  tier: AcademicTier,
+  input: AcademicInput,
+  id?: string,
+): string | undefined => {
+  const existing = state[tier].find((record) => record.id === id);
+  const effectiveCode = tier === 'classGroups'
+    ? generatedClassGroupCode(state, input.majorId, input.admissionYear, id)
+    : input.code;
   if (id && !existing) return 'ไม่พบข้อมูลที่ต้องการแก้ไข';
+  if ((tier !== 'classGroups' && !input.name) || input.name.length > 150) return tier === 'classGroups' ? 'ชื่อกลุ่มต้องไม่เกิน 150 ตัวอักษร' : 'กรุณากรอกชื่อ 1–150 ตัวอักษร';
+  if (tier !== 'classGroups' && !/^[A-Z0-9-]{1,30}$/.test(effectiveCode)) return 'รหัสต้องเป็นอักษรอังกฤษ ตัวเลข หรือขีดกลาง ไม่เกิน 30 ตัวอักษร';
   if (input.status !== 'active' && input.status !== 'inactive') return 'สถานะไม่ถูกต้อง';
-  const name = input.name || (tier === 'yearLevels' ? `ชั้นปีที่ ${input.level}` : '');
-  if (tier !== 'classGroups' && (!name || name.length > 150)) return 'กรุณากรอกชื่อ 1–150 ตัวอักษร';
-  if (tier === 'programs' && !/^[A-Z0-9]+$/.test(input.code)) return 'รหัสสาขาวิชาต้องเป็นอักษรอังกฤษ A–Z หรือตัวเลข 0–9';
-  if (tier === 'classGroups' && (!/^[A-Z0-9_-]+$/.test(input.code) || input.code.length > 100)) return 'รหัสกลุ่มเรียนต้องเป็นอักษรอังกฤษ ตัวเลข ขีดกลาง หรือขีดล่าง ไม่เกิน 100 ตัวอักษร';
-  if (tier === 'yearLevels' && (!Number.isSafeInteger(input.level) || input.level < 1)) return 'ลำดับชั้นปีต้องเป็นจำนวนเต็มบวก';
-  const admissionYear = input.admissionYear ?? state.yearLevels.find((y) => y.id === input.yearLevelId)?.admissionYear;
-  if (tier === 'classGroups' && (!Number.isSafeInteger(admissionYear) || admissionYear! < 2500 || admissionYear! > academicSettings.currentAcademicYear))
-    return 'กรุณาเลือกปีการศึกษาที่เข้าที่ถูกต้อง';
-  const parentTier: AcademicTier | undefined = { faculties: undefined, departments: 'faculties', programs: 'departments', yearLevels: 'programs', classGroups: 'programs' }[tier] as AcademicTier | undefined;
-  const parentId = { faculties: '', departments: input.facultyId, programs: input.departmentId, yearLevels: input.programId, classGroups: input.programId }[tier];
-  if (parentTier && !state[parentTier].some((r) => r.id === parentId)) return 'กรุณาเลือกข้อมูลต้นสังกัดให้ครบถ้วน';
-  if (tier === 'classGroups' && input.admissionYear === undefined && state.yearLevels.find((y) => y.id === input.yearLevelId)?.programId !== input.programId) return 'ชั้นปีไม่ตรงกับสาขาวิชาที่เลือก';
-  if (parentTier && !isAcademicPathActive(state, parentTier, parentId)) {
-    const oldPath = id ? academicPath(state, tier, id) : undefined;
-    const previousParent = { faculties: '', departments: oldPath?.faculty?.id, programs: oldPath?.department?.id, yearLevels: oldPath?.program?.id, classGroups: oldPath?.program?.id }[tier];
-    if (!existing || previousParent !== parentId) return 'ข้อมูลต้นสังกัดถูกปิดใช้งาน กรุณาเลือกต้นสังกัดที่เปิดใช้งาน';
+  if (tier === 'departments' && !state.faculties.some((faculty) => faculty.id === input.facultyId)) return 'กรุณาเลือกคณะ';
+  if (tier === 'majors' && !state.departments.some((department) => department.id === input.departmentId)) return 'กรุณาเลือกภาควิชา';
+  if (tier === 'classGroups') {
+    if (!input.majorId || !state.majors.some((major) => major.id === input.majorId)) return 'กรุณาเลือกสาขาวิชา';
+    if (!Number.isSafeInteger(input.admissionYear) || !input.admissionYear || input.admissionYear < 2500 || input.admissionYear > academicSettings.currentAcademicYear) return 'กรุณาเลือกปีเข้าที่ถูกต้อง';
+    if (!/^[A-Z0-9-]{1,30}$/.test(effectiveCode)) return 'ไม่สามารถสร้างรหัสกลุ่มได้ กรุณาตรวจสอบสาขาวิชาและปีเข้า';
   }
-  const duplicates = tier === 'faculties' ? state.faculties.some((r) => r.id !== id && r.name.toLowerCase() === name.toLowerCase())
-    : tier === 'departments' ? state.departments.some((r) => r.id !== id && r.facultyId === input.facultyId && r.name.toLowerCase() === name.toLowerCase())
-      : tier === 'programs' ? state.programs.some((r) => r.id !== id && (r.code.toUpperCase() === input.code || (r.departmentId === input.departmentId && r.name.trim().toLowerCase() === name.toLowerCase())))
-        : tier === 'yearLevels' ? state.yearLevels.some((r) => r.id !== id && r.programId === input.programId && r.level === input.level)
-          : state.classGroups.some((r) => r.id !== id && r.programId === input.programId && r.admissionYear === admissionYear && r.code.trim().toUpperCase() === input.code);
-  if (duplicates) return `มี${academicLabels[tier]}นี้อยู่แล้ว กรุณาใช้ชื่อหรือรหัสอื่น`;
-  if (tier === 'yearLevels' && existing && 'programId' in existing && existing.programId !== input.programId &&
-    state.classGroups.some((g) => g.yearLevelId === id)) return 'ไม่สามารถย้ายชั้นปีที่มีกลุ่มเรียนอยู่ กรุณาย้ายกลุ่มเรียนก่อน';
+  if (tier === 'departments' && (!existing || !('facultyId' in existing) || existing.facultyId !== input.facultyId) &&
+    !isAcademicPathActive(state, 'faculties', input.facultyId)) return 'คณะที่เลือกถูกปิดใช้งาน';
+  if (tier === 'majors' && (!existing || !('departmentId' in existing) || existing.departmentId !== input.departmentId) &&
+    !isAcademicPathActive(state, 'departments', input.departmentId)) return 'ภาควิชาที่เลือกถูกปิดใช้งาน';
+  if (tier === 'classGroups' && (!existing || !('majorId' in existing) || existing.majorId !== input.majorId) &&
+    !isAcademicPathActive(state, 'majors', input.majorId!)) return 'สาขาวิชาที่เลือกถูกปิดใช้งาน';
+  const duplicate = tier === 'faculties'
+    ? state.faculties.some((record) => record.id !== id && (record.code === input.code || record.name.toLowerCase() === input.name.toLowerCase()))
+    : tier === 'departments'
+      ? state.departments.some((record) => record.id !== id && record.facultyId === input.facultyId && (record.code === input.code || record.name.toLowerCase() === input.name.toLowerCase()))
+      : tier === 'majors'
+        ? state.majors.some((record) => record.id !== id && record.departmentId === input.departmentId && (record.code === input.code || record.name.toLowerCase() === input.name.toLowerCase()))
+        : state.classGroups.some((record) => record.id !== id && record.majorId === input.majorId && record.admissionYear === input.admissionYear && record.code === effectiveCode);
+  if (duplicate) return `มี${academicLabels[tier]}นี้อยู่แล้ว กรุณาใช้ชื่อหรือรหัสอื่น`;
 };
 
-export const saveAcademicState = (state: AcademicState, tier: AcademicTier, input: AcademicInput, id?: string): AcademicState => {
-  if (String(tier) === 'yearLevels') return state;
-  const common = { id: id || crypto.randomUUID(), status: input.status, updatedAt: new Date().toISOString() };
-  const record: AcademicRecord = tier === 'faculties' ? { ...common, name: input.name }
-    : tier === 'departments' ? { ...common, name: input.name, facultyId: input.facultyId }
-      : tier === 'programs' ? { ...common, name: input.name, code: input.code, departmentId: input.departmentId }
-        : tier === 'yearLevels' ? { ...common, name: input.name || `ชั้นปีที่ ${input.level}`, level: input.level, programId: input.programId }
-          : { ...common, code: input.code, programId: input.programId, yearLevelId: input.yearLevelId, admissionYear: input.admissionYear ?? state.yearLevels.find((y) => y.id === input.yearLevelId)?.admissionYear };
-  const next = { ...state, [tier]: id ? state[tier].map((r) => r.id === id ? record : r) : [...state[tier], record] };
-  return deriveAcademicState(next, []);
+export const saveAcademicState = (
+  state: AcademicState,
+  tier: AcademicTier,
+  input: AcademicInput,
+  id?: string,
+): AcademicState => {
+  const existingGroup = tier === 'classGroups' && id ? state.classGroups.find((group) => group.id === id) : undefined;
+  const retainedGroupIdentity = existingGroup && existingGroup.majorId === input.majorId && existingGroup.admissionYear === input.admissionYear;
+  const groupSequence = tier === 'classGroups'
+    ? retainedGroupIdentity ? existingGroup.sequence : nextClassGroupSequence(state, input.majorId!, input.admissionYear!)
+    : undefined;
+  const groupCode = tier === 'classGroups'
+    ? retainedGroupIdentity ? existingGroup.code : generatedClassGroupCode(state, input.majorId, input.admissionYear, id)
+    : input.code;
+  const common = {
+    id: id || crypto.randomUUID(),
+    code: groupCode,
+    name: input.name,
+    status: input.status,
+    updatedAt: new Date().toISOString(),
+  };
+  const record: AcademicRecord = tier === 'faculties'
+    ? common
+    : tier === 'departments'
+      ? { ...common, facultyId: input.facultyId }
+      : tier === 'majors'
+      ? { ...common, departmentId: input.departmentId }
+        : { ...common, majorId: input.majorId!, admissionYear: input.admissionYear!, sequence: groupSequence! };
+  const next = {
+    ...state,
+    [tier]: id
+      ? state[tier].map((item) => item.id === id ? record : item)
+      : [...state[tier], record],
+  } as AcademicState;
+  if (tier === 'classGroups') {
+    const key = classGroupCounterKey(input.majorId!, input.admissionYear!);
+    next.classGroupSequenceCounters = {
+      ...state.classGroupSequenceCounters,
+      [key]: Math.max(state.classGroupSequenceCounters[key] || 0, groupSequence!),
+    };
+  }
+  return next;
 };
 
-export const bulkAssignmentError = (state: AcademicState, students: Student[], studentIds: string[], groupId: string): string | undefined => {
-  const group = state.classGroups.find((g) => g.id === groupId);
-  const year = state.yearLevels.find((y) => y.id === group?.yearLevelId);
-  if (!group || !year || !isAcademicPathActive(state, 'classGroups', groupId)) return 'กรุณาเลือกกลุ่มเรียนที่เปิดใช้งาน';
-  const selected = students.filter((student) => studentIds.includes(student.id));
-  if (!selected.length || selected.length !== new Set(studentIds).size) return 'กรุณาเลือกนักศึกษาที่มีอยู่ในระบบ';
-  const pathFields = studentAcademicFields(state, { ...selected[0], classGroupId: groupId });
-  if (selected.some((student) => {
-    const fields = { ...student, ...studentAcademicFields(state, student) };
-    return Boolean(state.classGroups.some((g) => g.id === student.classGroupId) ||
-      (fields.programId && fields.programId !== group.programId) ||
-      (fields.departmentId && fields.departmentId !== pathFields.departmentId) ||
-      (fields.facultyId && fields.facultyId !== pathFields.facultyId) ||
-      (!calculateStudentYearLevel(student.studentCode)?.isValid || calculateStudentYearLevel(student.studentCode)?.admissionYear !== group.admissionYear));
-  })) return 'นักศึกษาต้องยังไม่มีกลุ่มเรียน และคณะ ภาควิชา สาขาวิชาและชั้นปีต้องตรงกับกลุ่มปลายทาง';
-};
+export const deriveStudentYearLevel = (student: Student, currentAcademicYear = academicSettings.currentAcademicYear) =>
+  student.admissionYear
+    ? calculateYearLevelFromAdmissionYear(student.admissionYear, currentAcademicYear)
+    : undefined;
 
-/** Migrate legacy group links once; subsequent views derive levels from admission cohorts. */
-export const migrateAcademicCohorts = (state: AcademicState): AcademicState => ({
-  ...state,
-  classGroups: state.classGroups.map((group) => ({
-    ...group,
-    admissionYear: group.admissionYear ?? academicSettings.currentAcademicYear -
-      (state.yearLevels.find((year) => year.id === group.yearLevelId)?.level || 1) + 1,
-  })),
-});
+export const classGroupsForCohort = (
+  state: AcademicState,
+  majorId?: string,
+  admissionYear?: number,
+  activeOnly = false,
+) => state.classGroups.filter((group) =>
+  (!majorId || group.majorId === majorId) &&
+  (!admissionYear || group.admissionYear === admissionYear) &&
+  (!activeOnly || isAcademicPathActive(state, 'classGroups', group.id)));
 
-/** Year rows are disposable summaries, not manually maintained entities. */
-export const deriveAcademicState = (stored: AcademicState, students: Student[], currentYear = academicSettings.currentAcademicYear): AcademicState => {
-  const state = migrateAcademicCohorts(stored);
-  const yearLevels = state.programs.flatMap((program) => {
-    const admissions = new Set([0, 1, 2, 3].map((offset) => currentYear - offset));
-    state.classGroups.filter((g) => g.programId === program.id).forEach((g) => admissions.add(g.admissionYear!));
-    students.filter((s) => s.programId === program.id).forEach((student) => {
-      const result = calculateStudentYearLevel(student.studentCode, currentYear);
-      if (result?.isValid) admissions.add(result.admissionYear);
-    });
-    return [...admissions].filter((admission) => admission <= currentYear).sort((a, b) => b - a).map((admissionYear) => ({
-      id: `cohort_${program.id}_${admissionYear}`, programId: program.id, admissionYear,
-      level: currentYear - admissionYear + 1, name: `ชั้นปีที่ ${currentYear - admissionYear + 1}`,
-      status: 'active' as const, updatedAt: program.updatedAt,
-    }));
-  });
-  return { ...state, yearLevels, classGroups: state.classGroups.map((group) => ({
-    ...group, yearLevelId: `cohort_${group.programId}_${group.admissionYear}`,
-  })) };
-};
-
-export const studentGroupError = (state: AcademicState, student: Student): string | undefined => {
-  const result = calculateStudentYearLevel(student.studentCode);
-  if (!result?.isValid) return result?.errorMessage || 'กรุณากรอกรหัสนักศึกษา';
-  const group = state.classGroups.find((g) => g.id === student.classGroupId);
-  if (student.classGroupId && (!group || group.admissionYear !== result.admissionYear))
-    return 'ชั้นปีที่คำนวณใหม่ไม่ตรงกับกลุ่มเรียนเดิม กรุณาเลือกกลุ่มเรียนใหม่';
+export const validateStudentClassGroup = (
+  state: AcademicState,
+  student: Pick<Student, 'majorId' | 'admissionYear' | 'classGroupId'>,
+  requireActive = true,
+): string | undefined => {
+  if (!student.classGroupId) return undefined;
+  const group = state.classGroups.find((item) => item.id === student.classGroupId);
+  if (!group) return 'ไม่พบกลุ่มเรียนที่เลือก';
+  if (group.majorId !== student.majorId || group.admissionYear !== student.admissionYear) return 'กลุ่มเรียนต้องตรงกับสาขาวิชาและปีเข้าของนักศึกษา';
+  if (requireActive && !isAcademicPathActive(state, 'classGroups', group.id)) return 'กลุ่มเรียนที่เลือกถูกปิดใช้งาน';
 };

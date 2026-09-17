@@ -1,4 +1,4 @@
-import { Course } from '../types';
+import { Course, SectionCohort } from '../types';
 
 export interface CourseRecord {
   id: string;
@@ -19,7 +19,7 @@ export interface SectionRecord {
   academicYear: number;
   primaryTeacherId: string;
   coTeacherIds: string[];
-  groupIds: string[];
+  cohorts: SectionCohort[];
   status: CourseStatus;
   createdAt: string;
   updatedAt: string;
@@ -43,7 +43,7 @@ export interface SectionInput {
   academicYear: number;
   primaryTeacherId: string;
   coTeacherIds: string[];
-  groupIds: string[];
+  cohorts: SectionCohort[];
   status: CourseStatus;
 }
 
