@@ -241,7 +241,7 @@ export const TeacherDashboard: React.FC = () => {
             <Monitor className="w-5 h-5 text-gray-700" />
             <div>
               <h2 className="text-base font-bold text-gray-900">
-                {isThai ? 'ความพร้อมของอุปกรณ์ห้องสอบ:' : 'Equipment Readiness:'} {activeRoom?.labName} ({activeRoom?.building})
+                {isThai ? 'ความพร้อมของอุปกรณ์ห้องสอบ:' : 'Equipment Readiness:'} {activeRoom?.labName} (ชั้น {activeRoom?.floor})
               </h2>
               <p className="text-xs text-gray-500">
                 {isThai

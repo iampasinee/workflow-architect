@@ -24,8 +24,9 @@ npm run dev
 | `npm run lint` | ตรวจ TypeScript ด้วย `tsc --noEmit` |
 | `npm run test:academic` | ทดสอบ academic model, migration, Class Group, Teacher affiliation และ validation |
 | `npm run test:courses` | ทดสอบ Course/Section, teacher assignment, cohort collision และ portal eligibility |
+| `npm run test:rooms` | ทดสอบชั้น ห้อง ผังที่นั่ง อุปกรณ์ การย้ายข้อมูล และการป้องกันข้อมูลที่ถูกอ้างอิง |
 | `npm run build` | สร้าง production bundle ใน `dist/` |
-| `npm run preview` | เปิด production bundleในเครื่อง |
+| `npm run preview` | เปิด production bundle ในเครื่อง |
 | `git diff --check` | ตรวจ whitespace errors |
 
 ## โครงสร้างโครงการ
@@ -41,6 +42,7 @@ npm run dev
 - `src/services/academicState.ts`: academic relationships, migration, selectors และ validation
 - `src/services/academicStructureWizard.ts`: atomic-like academic structure wizard transaction
 - `src/services/courseState.ts`: Course/Section migration, validation และ portal projections
+- `src/services/roomState.ts`, `src/types/rooms.ts`: Floor/Physical Room/Exam Room, ผังที่นั่ง, อุปกรณ์ และ room migration
 - `src/services/stagedUploadStorage.ts`: IndexedDB staged-file persistence
 - `src/utils/academicYear.ts`: current academic year, admission code และ derived year level
 
@@ -122,6 +124,20 @@ type SectionCohort = {
 
 `classGroupIds` ว่างหมายถึงทั้ง cohort สาขาวิชา+ปีเข้า และสามารถเลือก RA, RB หรือ RA+RB ใน Section เดียวได้ Class Group กับ Section เป็นคนละแนวคิด ระบบตรวจ overlap/collision ของนักศึกษาระหว่าง Section ในรายวิชาและภาคการศึกษาเดียวกัน Teacher Portal และ Student eligibility ถูก project จาก Section assignment โดยใช้ stable IDs
 
+## ห้องสอบและเครื่องคอมพิวเตอร์
+
+หน้า Admin มีสามแท็บ: `ห้องสอบ`, `ผังที่นั่งและเครื่อง` และ `เครื่องคอมพิวเตอร์` ใช้โครงสร้าง `Floor → PhysicalRoom → ExamRoom → RoomSeat → ComputerDevice` โดยไม่จัดการอาคาร ห้องจริงถูกสร้างใต้ชั้นก่อน แล้วจึงเลือกเปิดเป็นห้องสอบได้
+
+ข้อมูลหลักอยู่ใน `src/types/rooms.ts` และกฎตรวจสอบใน `src/services/roomState.ts` ห้องจริงอ้างอิง `floorId`, ห้องสอบอ้างอิง `physicalRoomId`, ที่นั่งอ้างอิง `roomId` และเครื่องอ้างอิง `seatId` ด้วย stable ID ผู้ดูแลกรอกเฉพาะรหัสย่อย เช่น `08` หรือ `01A` แล้วระบบสร้าง `B4-08` หรือ `B4-01A` จากชั้นให้อัตโนมัติ รหัสถูก trim/แปลงเป็นตัวพิมพ์ใหญ่และห้ามซ้ำภายในชั้นเดียวกัน ห้องจริงหนึ่งห้องเปิดเป็นห้องสอบได้ครั้งเดียว เครื่องเก็บหมายเลขเครื่อง, Serial Number, IPv4 และ MAC Address; ตรวจข้อมูลซ้ำทั้งระบบและอนุญาตหนึ่งเครื่องต่อที่นั่ง
+
+แท็บ `ห้องสอบ` เรียงเป็น Summary cards → Tabs → Filter bar → Room table โดยไม่มี Floor overview cards หรือแผงชั้นที่เลือก ตารางแสดง Physical Room ทุกห้อง ทั้งที่เปิดและยังไม่เปิดเป็นห้องสอบ พร้อมค้นหารหัสห้อง ตัวกรองชั้น/สถานะห้อง/สถานะการเปิดสอบ ปุ่มเปิดเป็นห้องสอบ และรายละเอียดแยกข้อมูล Physical Room กับ Exam Room การเพิ่มชั้น เพิ่มห้องในชั้น และเพิ่มห้องสอบยังเปิดผ่านปุ่มระดับหน้าและ modal ได้ ห้องที่ยังไม่เปิดเป็นห้องสอบจะยังสร้างผังหรือกำหนดเครื่องไม่ได้
+
+ผังสร้างรหัส A01, A02 … AA01 พร้อม ID คงที่ ขยายผังจะคง ID เดิม ลดผังจะถูกบล็อกหากที่นั่งที่ถูกลบมีเครื่องหรือประวัติการสอบอ้างอิง ใช้ 0 × 0 เพื่อล้างผังที่ไม่มีการอ้างอิงได้
+
+เก็บข้อมูลรุ่น 2 ใน `securelab_room_state` โดย migrate รุ่น 1 และ `securelab_rooms` เดิมไปข้างหน้า สำหรับห้องสอบเดิม ระบบสร้างหรือใช้ Physical Room ร่วมกันจากคู่ชั้น+รหัสห้อง พร้อมคง Exam Room ID, Seat ID, Computer ID และการอ้างอิงประวัติสอบเดิม หน้า Teacher/Student อ่านข้อมูลที่ project จากแหล่งใหม่โดยเก็บชื่อที่นั่งเดิมสำหรับข้อสอบที่มีอยู่
+
+ข้อมูลเก่าที่ไม่มี Serial Number จะแสดง `ยังไม่ระบุ` ให้ผู้ดูแลกรอกเมื่อแก้ไข ไม่สร้าง Serial ขึ้นเอง ชั้นที่แปลงไม่ได้จะแสดง `ยังไม่กำหนดชั้น` และไม่พร้อมสำหรับการจัดสอบใหม่ การย้าย/ลบเครื่องที่มีประวัติการจัดสอบถูกบล็อก ข้อมูลนี้เตรียมไว้สำหรับ Device Binding แต่ยังไม่มีการตรวจฮาร์ดแวร์จริง
+
 ## การส่งไฟล์ข้อสอบ
 
 หน้า Student Exam File Submission ใช้ layout สองคอลัมน์บน desktop: กติกาด้านซ้าย และ Drop Zone ตามด้วยไฟล์ที่เตรียมส่งด้านขวา ต่ำกว่า 1024px จะเรียงแนวตั้ง
@@ -151,6 +167,7 @@ Academic, Teacher และ Course data ใช้ forward migration และไ
 npm run lint
 npm run test:academic
 npm run test:courses
+npm run test:rooms
 npm run build
 git diff --check
 ```

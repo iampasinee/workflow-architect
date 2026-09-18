@@ -126,6 +126,10 @@ export const CourseExamSessionManager: React.FC = () => {
 
   const handleSaveExam = (e: React.FormEvent) => {
     e.preventDefault();
+    if ((!editingExam || editingExam.roomId !== roomId) && !rooms.some((room) => room.id === roomId && room.status === 'ready')) {
+      showToast('ห้องสอบไม่พร้อมใช้งาน', 'กรุณาเลือกห้องสอบที่พร้อมใช้งาน', 'error');
+      return;
+    }
     if (conflictingSession) {
       showToast('ตารางห้องสอบซ้ำซ้อน', 'ห้องที่เลือกมีรอบการสอบซ้อนกัน', 'error');
       return;
@@ -269,7 +273,7 @@ export const CourseExamSessionManager: React.FC = () => {
 
                     <td className="px-4 py-4">
                       <div className="font-medium text-gray-800">{room?.labName}</div>
-                      <div className="text-gray-500 text-[11px]">{room?.building}</div>
+                      <div className="text-gray-500 text-[11px]">ชั้น {room?.floor}</div>
                     </td>
 
                     <td className="px-4 py-4">
@@ -464,9 +468,10 @@ export const CourseExamSessionManager: React.FC = () => {
                 onChange={(e) => setRoomId(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs focus:ring-2 focus:ring-blue-500"
               >
-                {rooms.map((r) => (
+                <option value="">เลือกห้องสอบ</option>
+                {rooms.filter((r) => r.status === 'ready' || r.id === editingExam?.roomId).map((r) => (
                   <option key={r.id} value={r.id}>
-                    {r.labName} ({r.building}, {isThai ? 'ชั้น ' : 'Fl '}{r.floor})
+                    {r.labName} (ชั้น {r.floor})
                   </option>
                 ))}
               </select>

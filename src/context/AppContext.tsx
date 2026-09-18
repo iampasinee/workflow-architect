@@ -1,4 +1,6 @@
 import { useAcademicYear, withCalculatedStudentYear, withoutStudentYear } from '../utils/academicYear';
+import { RoomState, RoomAction, RoomActionResult } from '../types/rooms';
+import { applyRoomAction, migrateRoomState, projectRooms } from '../services/roomState';
 import { CourseActionResult, CourseInput, SectionInput } from '../types/course';
 import {
   courseDeleteError, coursesForStudent, coursesForTeacher, findSection, migrateCourses,
@@ -21,7 +23,6 @@ import {
   AccountStatus,
   MachineStatus,
   ViolationType,
-  SeatBinding,
   CheatDetectionRules
 } from '../types';
 import { getTranslation } from '../i18n/translations';
@@ -103,6 +104,8 @@ interface AppContextType {
   teachers: Teacher[];
   admins: Admin[];
   rooms: Room[];
+  roomState: RoomState;
+  manageRooms: (action: RoomAction) => RoomActionResult;
   courses: Course[];
   examSessions: ExamSession[];
   seatAssignments: SeatAssignment[];
@@ -134,11 +137,6 @@ interface AppContextType {
   deleteAdmin: (id: string) => boolean;
 
   // Room Actions
-  addRoom: (room: Omit<Room, 'id'>) => void;
-  updateRoom: (id: string, updates: Partial<Room>) => void;
-  deleteRoom: (id: string) => boolean;
-  updateRoomSeats: (roomId: string, seats: SeatBinding[], rows: number, columns: number) => void;
-  updateSeatBinding: (roomId: string, seatNo: string, updates: Partial<SeatBinding>) => void;
 
   // Course Actions
   addCourse: (course: Omit<Course, 'id'>) => void;
@@ -256,9 +254,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return safeParse('securelab_admins', initialAdmins);
   });
 
-  const [rooms, setRooms] = useState<Room[]>(() => {
-    return safeParse('securelab_rooms', initialRooms);
-  });
+  const [roomState, setRoomState] = useState<RoomState>(() =>
+    migrateRoomState(safeParse<unknown>('securelab_room_state', null), safeParse('securelab_rooms', initialRooms)));
+  const rooms = useMemo(() => projectRooms(roomState), [roomState]);
 
   const [storedCourses, setCourses] = useState<Course[]>(() => {
     return migrateCourses(safeParse('securelab_courses', initialCourses), academicState, legacyAcademicSnapshot);
@@ -341,8 +339,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [admins]);
 
   useEffect(() => {
-    localStorage.setItem('securelab_rooms', JSON.stringify(rooms));
-  }, [rooms]);
+    localStorage.setItem('securelab_room_state', JSON.stringify(roomState));
+  }, [roomState]);
 
   useEffect(() => {
     localStorage.setItem('securelab_courses', JSON.stringify(storedCourses));
@@ -634,41 +632,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return true;
   };
 
-  // Room CRUD
-  const addRoom = (newRoom: Omit<Room, 'id'>) => {
-    const id = `room_${String(rooms.length + 1).padStart(4, '0')}`;
-    const created: Room = { ...newRoom, id };
-    setRooms(prev => [created, ...prev]);
-    showToast('เพิ่มห้องสอบสำเร็จ', `สร้าง ${created.labName} (${created.building}) แล้ว`, 'success');
-  };
-
-  const updateRoom = (id: string, updates: Partial<Room>) => {
-    setRooms(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
-    showToast('อัปเดตห้องสอบแล้ว', 'บันทึกรายละเอียดห้องสอบเรียบร้อยแล้ว', 'success');
-  };
-
-  const deleteRoom = (id: string): boolean => {
-    const hasActiveExam = examSessions.some(e => e.roomId === id && e.status !== 'completed');
-    if (hasActiveExam) {
-      showToast('ไม่สามารถลบห้องสอบได้', 'ห้องนี้ถูกใช้กับการสอบที่กำลังจะเริ่มหรือกำลังดำเนินการ', 'error');
-      return false;
+  // Registered room/device metadata has one canonical store; portals read a projection.
+  const manageRooms = (action: RoomAction): RoomActionResult => {
+    if (role !== 'admin') return { success: false, error: 'เฉพาะผู้ดูแลระบบเท่านั้น' };
+    const result = applyRoomAction(roomState, action, storedExamSessions, seatAssignments);
+    if (result.success && result.state) {
+      setRoomState(result.state);
+      showToast('บันทึกข้อมูลห้องสอบและเครื่องแล้ว', undefined, 'success');
     }
-    setRooms(prev => prev.filter(r => r.id !== id));
-    showToast('ลบห้องสอบแล้ว', 'นำห้องสอบออกจากระบบเรียบร้อยแล้ว', 'info');
-    return true;
-  };
-
-  const updateRoomSeats = (roomId: string, seats: SeatBinding[], rows: number, columns: number) => {
-    setRooms(prev => prev.map(r => r.id === roomId ? { ...r, seats, rows, columns } : r));
-    showToast('บันทึกผังที่นั่งแล้ว', `อัปเดตผังเป็น ${rows} แถว × ${columns} คอลัมน์ รวม ${seats.length} เครื่อง`, 'success');
-  };
-
-  const updateSeatBinding = (roomId: string, seatNo: string, updates: Partial<SeatBinding>) => {
-    setRooms(prev => prev.map(r => {
-      if (r.id !== roomId) return r;
-      const updatedSeats = r.seats.map(s => s.seatNo === seatNo ? { ...s, ...updates } : s);
-      return { ...r, seats: updatedSeats };
-    }));
+    return result;
   };
 
   // Course CRUD
@@ -745,6 +717,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Exam Sessions
   const createExamSession = (newExam: Omit<ExamSession, 'id'>) => {
+    if (!rooms.some((room) => room.id === newExam.roomId && room.status === 'ready')) {
+      showToast('ไม่สามารถสร้างรอบการสอบได้', 'กรุณาเลือกห้องสอบที่พร้อมใช้งาน', 'error');
+      return;
+    }
     const course = courses.find((item) => item.id === newExam.courseId);
     const section = course?.sections.find((item) => item.sectionNo === newExam.sectionNo);
     if (!course || course.status !== 'active' || !section || section.status === 'inactive') {
@@ -759,6 +735,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const updateExamSession = (id: string, updates: Partial<ExamSession>) => {
     const existing = storedExamSessions.find((exam) => exam.id === id);
+    if (updates.roomId && updates.roomId !== existing?.roomId && !rooms.some((room) => room.id === updates.roomId && room.status === 'ready')) {
+      showToast('ไม่สามารถเปลี่ยนห้องสอบได้', 'กรุณาเลือกห้องสอบที่พร้อมใช้งาน', 'error');
+      return;
+    }
     const course = courses.find((item) => item.id === (updates.courseId || existing?.courseId));
     const section = course?.sections.find((item) => item.sectionNo === (updates.sectionNo || existing?.sectionNo));
     if (!existing || !course || course.status !== 'active' || !section || section.status === 'inactive') {
@@ -840,6 +820,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // Seat Assignments
   const assignSeat = (examId: string, seatNo: string, studentId: string) => {
     const exam = storedExamSessions.find((item) => item.id === examId);
+    const station = rooms.find((room) => room.id === exam?.roomId)?.seats.find((seat) => seat.seatNo === seatNo);
+    if (!station || station.disabled || station.status !== 'online') {
+      showToast('ไม่สามารถจัดที่นั่งได้', 'ที่นั่งหรือเครื่องไม่พร้อมใช้งาน', 'error');
+      return;
+    }
     const section = storedCourses.find((course) => course.id === exam?.courseId)?.sections
       .find((item) => item.sectionNo === exam?.sectionNo);
     const student = students.find((item) => item.id === studentId);
@@ -859,7 +844,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const autoAssignSeats = (examId: string, roomId: string) => {
     const room = rooms.find(r => r.id === roomId);
-    if (!room) return;
+    if (!room || room.status !== 'ready' || !storedExamSessions.some((exam) => exam.id === examId && exam.roomId === roomId)) return;
 
     // Filter available seats (online, not damaged, not disabled)
     const availableSeats = room.seats.filter(s => s.status === 'online' && !s.disabled);
@@ -997,7 +982,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const toggleMachineStatus = (roomId: string, seatNo: string, status: MachineStatus) => {
-    updateSeatBinding(roomId, seatNo, { status, disabled: status === 'unavailable' || status === 'damaged' });
+    const seat = roomState.seats.find((item) => item.roomId === roomId && item.examSeatNo === seatNo);
+    if (!seat) return;
+    setRoomState((current) => ({ ...current, computers: current.computers.map((device) => device.seatId === seat.id
+      ? { ...device, machineStatus: status, status: status === 'damaged' ? 'maintenance' : status === 'unavailable' ? 'inactive' : 'ready' } : device) }));
     const statusText: Record<MachineStatus, string> = {
       online: 'ออนไลน์',
       offline: 'ออฟไลน์',
@@ -1016,7 +1004,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const migratedTeachers = migrateAcademicTeachers(initialTeachers, academicDefaults);
     setTeachers(migratedTeachers);
     setAdmins(initialAdmins);
-    setRooms(initialRooms);
+    setRoomState(migrateRoomState(null, initialRooms));
     setCourses(migrateCourses(initialCourses, academicDefaults));
     setExamSessions(initialExamSessions);
     setSeatAssignments(initialSeatAssignments);
@@ -1075,6 +1063,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         teachers,
         admins,
         rooms,
+        roomState,
+        manageRooms,
         courses,
         examSessions,
         seatAssignments,
@@ -1101,11 +1091,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         updateAdmin,
         deleteAdmin,
 
-        addRoom,
-        updateRoom,
-        deleteRoom,
-        updateRoomSeats,
-        updateSeatBinding,
 
         addCourse,
         updateCourse,

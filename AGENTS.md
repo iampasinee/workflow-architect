@@ -29,7 +29,14 @@ Application state, persisted browser state, and migrations live primarily in:
 Models, domain types, and seed/mock data live in:
 
 * `src/types.ts`
+* `src/types/`
 * `src/data/`
+
+Domain services and migrations live in:
+
+* `src/services/academicState.ts`
+* `src/services/courseState.ts`
+* `src/services/roomState.ts`
 
 Global styles belong in:
 
@@ -82,6 +89,7 @@ Use:
 * `npm run lint` — run TypeScript validation with `tsc --noEmit`
 * `npm run test:academic` — test academic hierarchy, student assignment, migrations, and derived academic data
 * `npm run test:courses` — test course/section migration, validation, teacher assignment, student eligibility, and portal assignments
+* `npm run test:rooms` — test Floor/Physical Room/Exam Room relationships, room migration, layouts, and computer binding
 * `npm run build` — create the production bundle in `dist/`
 * `npm run preview` — serve the production bundle locally
 * `git diff --check` — check whitespace errors before finishing
@@ -94,6 +102,7 @@ After meaningful domain or cross-flow changes, run:
 npm run lint
 npm run test:academic
 npm run test:courses
+npm run test:rooms
 npm run build
 git diff --check
 ```
@@ -659,29 +668,31 @@ Temporary legacy fields may exist only during migration or compatibility handlin
 
 ---
 
-## Legacy Class Group Data
+## Class Group Data
 
-Student academic identity must no longer depend on a manually managed Class Group master record.
+Class Group is a lightweight grouping adjacent to the canonical Faculty → Department → Major hierarchy. It is not a manually managed Year Level and is not a parent of Major.
 
-Search for usages such as:
+Use stable IDs and this conceptual shape:
 
-* `groupId`
-* `groupIds`
-* `classGroupId`
-* group code
-* academic group name
+```ts
+type ClassGroup = {
+  id: string;
+  majorId: string;
+  admissionYear: number;
+  code: string;
+  name?: string;
+  sequence: number;
+  isActive: boolean;
+};
+```
 
-before modifying or removing group behavior.
+A student may have at most one optional primary `classGroupId`. The referenced group must match both the student's `majorId` and `admissionYear`. Do not use multiple group IDs as the student's primary academic identity.
 
-Do not blindly delete group-related code.
+Group codes are generated automatically within `majorId + admissionYear` from the Major code and a sequence, for example `INET-DE-RA`, `INET-DE-RB`, and `INET-DE-RC`. Never reuse a sequence that was previously assigned to an active, inactive, or historical group.
 
-Some existing Course/Section behavior may currently depend on old group relationships.
+Inactive groups must not be offered for new assignments. Existing historical relationships must remain readable. Block deletion while students or Sections still reference a group.
 
-Inspect those consumers first.
-
-The goal is:
-
-Student academic identity should no longer require a manually managed academic Group entity.
+Search for legacy usages such as `groupId`, `groupIds`, legacy group codes, and compatibility fields before changing group behavior. Do not blindly delete them: forward migration may need them to reconstruct an unambiguous `classGroupId` or Section cohort.
 
 ---
 
@@ -752,16 +763,32 @@ Do not break Teacher Flow while changing academic student grouping.
 
 ---
 
+## Teacher Academic Affiliation
+
+Teacher profile affiliation uses stable `facultyId` and `departmentId` values. Department must belong to the selected Faculty, and create/edit selectors cascade as:
+
+```text
+Faculty
+→ Department
+```
+
+Legacy Faculty or Department names may remain only as display fallbacks during forward migration. Map them to IDs only when the relationship is unambiguous; do not silently assign an incorrect affiliation.
+
+Inactive academic records remain readable for existing profiles but must not be selectable for new assignments.
+
+Teacher affiliation is profile metadata. Teacher Portal course visibility must continue to derive from Primary Teacher and Co-Teacher assignments on Sections, not from Faculty or Department profile values.
+
+---
+
 ## Section Student Eligibility
 
-Student eligibility for a Section must no longer depend on a manually managed Class Group as the student's canonical academic identity.
-
-Preferred conceptual academic cohort representation:
+Section targeting is based on Major and admission year, with optional Class Group narrowing:
 
 ```ts
 type SectionCohort = {
   majorId: string;
   admissionYear: number;
+  classGroupIds?: string[];
 };
 ```
 
@@ -772,31 +799,39 @@ section.cohorts = [
   {
     majorId: 'major_it',
     admissionYear: 2567,
+    classGroupIds: ['group_it_67_ra', 'group_it_67_rb'],
   },
 ];
 ```
 
-Eligible students can conceptually be resolved by:
+An absent or empty `classGroupIds` array targets the whole Major + admission-year cohort. Otherwise, eligible students must match the Major and admission year and belong to one of the selected groups:
 
 ```ts
 student.majorId === cohort.majorId
 &&
 student.admissionYear === cohort.admissionYear
+&&
+(
+  !cohort.classGroupIds?.length
+  || cohort.classGroupIds.includes(student.classGroupId ?? '')
+)
 ```
 
 This allows a Section to represent:
 
 ```text
 สาขาวิชา IT
-รหัส 67
+ปีเข้า 67
 ```
 
 or multiple cohorts such as:
 
 ```text
-IT รหัส 67
-IT รหัส 68
+IT ปีเข้า 67
+IT ปีเข้า 68
 ```
+
+A Section may combine RA + RB or target RA and RB in separate Sections. Class Group is the student's primary academic grouping; Section is the teaching arrangement for one Course, academic year, and semester. Do not merge these concepts.
 
 Use stable IDs and stored academic years.
 
@@ -815,17 +850,22 @@ When assigning academic student groups to a Section, prefer a simple UI based on
 * คณะ
 * ภาควิชา
 * สาขาวิชา
-* รหัส
+* ปีเข้า
+* กลุ่มเรียน
 
 Example:
 
 ```text
 สาขาวิชา: IT
 
-รหัส:
+ปีเข้า:
 ☑ 67
 ☑ 68
 ☐ 69
+
+กลุ่มเรียน:
+☑ RA
+☑ RB
 ```
 
 The UI may use Faculty and Department to filter Majors.
@@ -834,6 +874,7 @@ The stored cohort relationship should primarily use:
 
 * `majorId`
 * `admissionYear`
+* optional `classGroupIds`
 
 Avoid storing redundant parent relationships when they can be derived safely.
 
@@ -843,7 +884,7 @@ Avoid storing redundant parent relationships when they can be derived safely.
 
 Preserve existing business rules preventing invalid duplicate student/cohort assignment where applicable.
 
-For example, if the current domain prevents the same academic cohort from being assigned to multiple Sections of the same Course in the same academic year and semester, preserve that behavior.
+For example, if the current domain prevents overlapping students from being assigned to multiple Sections of the same Course in the same academic year and semester, preserve that behavior. Collision checks must understand whole-cohort assignments, repeated individual groups, and overlaps between a whole cohort and one of its groups.
 
 Adapt existing collision checks from legacy `groupId` logic to the new academic cohort representation where necessary.
 
@@ -879,7 +920,7 @@ Migration should attempt to:
 * map legacy academic assignments to `majorId` where safely possible
 * derive year level rather than storing it
 * remove obsolete Year dependencies where safe
-* remove obsolete student Group dependencies where safe
+* preserve or reconstruct an optional `classGroupId` only where a legacy relationship maps unambiguously
 * preserve Course/Section relationships
 * preserve Teacher assignments
 * avoid duplicate academic entities
@@ -993,6 +1034,206 @@ Do not consider an academic refactor complete if only the Admin page works.
 
 ---
 
+## Room and Computer Domain
+
+Room and device rules live primarily in:
+
+`src/services/roomState.ts`
+
+Types live in:
+
+`src/types/rooms.ts`
+
+The Admin UI is primarily in:
+
+`src/components/admin/RoomComputerSetup.tsx`
+
+The canonical hierarchy is:
+
+```text
+Floor
+→ PhysicalRoom
+→ ExamRoom
+→ RoomSeat
+→ ComputerDevice
+```
+
+Thai UI concepts are:
+
+```text
+ชั้น
+→ ห้องในชั้น
+→ เปิดเป็นห้องสอบ
+→ ผังที่นั่ง
+→ เครื่องคอมพิวเตอร์
+```
+
+Do not reintroduce Building/อาคาร as a managed parent. A compatibility `building` field may remain on the legacy projected `Room` type, but the canonical persisted room state must not use it as a relationship.
+
+---
+
+## Physical Room and Exam Room
+
+Physical Room is the catalog record under a Floor:
+
+```ts
+type PhysicalRoomRecord = {
+  id: string;
+  floorId: string;
+  roomCode: string;
+  status: 'active' | 'inactive';
+};
+```
+
+Exam Room is the examination configuration linked to one Physical Room:
+
+```ts
+type ExamRoomRecord = {
+  id: string;
+  physicalRoomId: string;
+  status: 'ready' | 'maintenance' | 'inactive';
+  rows: number;
+  columns: number;
+};
+```
+
+Derive Floor and room code through:
+
+```text
+ExamRoom.physicalRoomId
+→ PhysicalRoom.floorId
+→ Floor
+```
+
+Do not duplicate `floorId` or `roomCode` on new Exam Room records. Physical Room and Exam Room IDs are stable relationship keys; display codes are not.
+
+A Physical Room may be opened as an Exam Room at most once. Inactive Physical Rooms remain readable but cannot be opened as new Exam Rooms. Rooms not opened as Exam Rooms cannot receive layouts, seats, or computer assignments.
+
+---
+
+## Room-Code Generation
+
+For newly created Physical Rooms, Admin enters only a suffix and the system generates the full code from the selected Floor:
+
+```text
+ชั้น 4 + 08  → B4-08
+ชั้น 4 + 01A → B4-01A
+```
+
+Use the shared helpers in `src/services/roomState.ts`:
+
+* `normalizeRoomSuffix`
+* `generateRoomCodeFromFloor`
+* `getRoomSuffixForFloor`
+
+Do not duplicate prefix/suffix concatenation inside components.
+
+Normalize suffixes by trimming whitespace, removing internal whitespace, and converting English letters to uppercase. New suffixes support English letters, numbers, and hyphens. Generated room codes must be unique within one Floor; the corresponding suffix on a different Floor is valid because it produces a different full code.
+
+Preserve legacy full codes such as `LAB 301` without rewriting them when Admin only changes status. A legacy code may be converted to the generated format only when Admin deliberately enters a new suffix. Stable IDs must not change when a room code changes.
+
+---
+
+## Room Admin UI
+
+The page `ห้องสอบและเครื่องคอมพิวเตอร์` has three tabs:
+
+```text
+[ ห้องสอบ ] [ ผังที่นั่งและเครื่อง ] [ เครื่องคอมพิวเตอร์ ]
+```
+
+The `ห้องสอบ` tab uses this compact order:
+
+```text
+Summary cards
+→ Main tabs
+→ Filter bar
+→ Room table
+```
+
+Do not insert Floor overview cards or a selected-Floor management panel between the tabs and filter bar unless explicitly requested. Floor and Physical Room CRUD remain available through the page-level actions and modals.
+
+The room table is based on all Physical Rooms, not only opened Exam Rooms. It should show:
+
+* รหัสห้อง
+* ชั้น
+* สถานะห้อง
+* สถานะการเปิดเป็นห้องสอบ
+* ผังห้อง
+* จำนวนที่นั่ง
+* จำนวนเครื่อง
+* การดำเนินการ
+
+The filter bar supports room-code search, Floor, Physical Room status, opened/unopened Exam Room status, and reset. Keep it directly above the table.
+
+Unopened active rooms provide an `เปิดเป็นห้องสอบ` action. Opened rooms expose their Exam Room state and retain safe edit/removal actions. Detail UI must distinguish Physical Room information from Exam Room information and must not expose raw relationship IDs.
+
+Page-level actions remain available for:
+
+* เพิ่มชั้น
+* เพิ่มห้องในชั้น
+* เพิ่มห้องสอบ
+
+The Physical Room modal selects a Floor, accepts `รหัสย่อย/เลขห้อง`, previews the generated `รหัสห้อง` read-only, and selects status. The Exam Room modal cascades `ชั้น → ห้อง` and keeps already-opened or inactive rooms visible but disabled where practical.
+
+---
+
+## Room Layout and Computer Binding
+
+Seat layout and computer assignment continue to target Exam Rooms:
+
+```text
+Floor → Exam Room → Seat → Computer
+```
+
+Seat IDs and existing exam seat labels must remain stable when expanding a layout. Reducing or clearing a layout must be blocked when removed seats have computers or exam-history references.
+
+Computer metadata includes:
+
+* computer code
+* Serial Number
+* IPv4 address
+* MAC Address
+* readiness status
+
+Preserve global duplicate validation for computer code, Serial Number, IP, and MAC. Allow at most one computer per seat. Do not move, rename, or delete a referenced device in ways that invalidate exam history.
+
+Teacher and Student flows consume a read-only legacy `Room[]` projection from the canonical room state. Keep this projection compatible with existing exam IDs, room IDs, seat labels, monitoring, seat assignment, and submission flows.
+
+---
+
+## Room Persistence and Migration
+
+Canonical room state is stored in:
+
+`securelab_room_state`
+
+Current canonical version is version 2. Forward migration must support:
+
+* version 1 room state using `floorId + roomCode` directly on Exam Room
+* legacy `securelab_rooms`
+
+Migration must create or reuse one Physical Room for the same Floor + normalized room code while preserving:
+
+* Exam Room IDs
+* Seat IDs
+* Computer IDs
+* exam and seat-assignment references
+* runtime/device statuses
+
+Do not wipe browser storage to avoid migration. Do not invent a Floor for data whose Floor cannot be resolved safely. Historical relationships must remain readable even when a parent is inactive.
+
+Block deletion when references exist:
+
+* Floor while Physical Rooms belong to it
+* Physical Room while an Exam Room references it
+* Exam Room while seats or exam history reference it
+* Computer while exam history references its seat
+
+Prefer deactivation when destructive deletion is unsafe.
+
+---
+
 ## Upload Domain Conventions
 
 For staged uploads, use:
@@ -1091,6 +1332,18 @@ Academic simplification should make the UI easier to use, not merely reduce data
 
 ---
 
+## Add-User Workflow
+
+The Admin add-user workflow begins with a role-selection screen for Student, Teacher, or Admin. Every role-specific create form must use the same secondary action semantics:
+
+* `ย้อนกลับ` returns to role selection without submitting and clears incompatible temporary form state
+* the modal `X` closes the entire workflow
+* the primary action creates the selected account using the existing validation and handlers
+
+Back navigation must not trigger validation. Do not label a one-step back action as `ยกเลิก`.
+
+---
+
 ## Academic Structure UI
 
 The page:
@@ -1103,22 +1356,30 @@ should focus on managing:
 คณะ
 ภาควิชา
 สาขาวิชา
+กลุ่มเรียน
 ```
 
 Recommended presentation may use tabs:
 
 ```text
-[ คณะ ] [ ภาควิชา ] [ สาขาวิชา ]
+[ คณะ ] [ ภาควิชา ] [ สาขาวิชา ] [ กลุ่มเรียน ]
 ```
 
 or another pattern consistent with the current application.
 
-Do not reintroduce:
+Do not reintroduce a manually managed Year Level or a Year Level tab. Class Group management must remain lightweight and scoped by `majorId + admissionYear`.
 
-* ชั้นปี management
-* กลุ่มเรียน management
+The `เพิ่มโครงสร้างการศึกษา` action uses a five-step wizard:
 
-as academic master-data CRUD unless explicitly requested later.
+```text
+คณะ
+→ ภาควิชา
+→ สาขาวิชา
+→ ปีเข้าและกลุ่มเรียน
+→ ตรวจสอบและบันทึก
+```
+
+Each step may select an existing record or prepare a new one. Validate against temporary state, preview generated group codes, and commit the complete structure once on final confirmation. A failed validation must not leave partial Faculty, Department, Major, or Class Group records.
 
 ---
 
@@ -1130,8 +1391,9 @@ Use these labels consistently:
 * `คณะ`
 * `ภาควิชา`
 * `สาขาวิชา`
-* `รหัส`
+* `ปีเข้า`
 * `ชั้นปี`
+* `กลุ่มเรียน`
 * `รหัสนักศึกษา`
 * `ชื่อ-นามสกุล`
 * `สถานะ`
@@ -1140,7 +1402,7 @@ Do not use:
 
 `รุ่น`
 
-for the admission cohort unless explicitly requested in a future change.
+for the admission cohort unless explicitly requested in a future change. Use `ปีเข้า` for admission-year filters, forms, tables, and group/Section configuration. `รหัสนักศึกษา` remains the correct label for Student ID.
 
 ---
 
@@ -1152,6 +1414,7 @@ Run:
 npm run lint
 npm run test:academic
 npm run test:courses
+npm run test:rooms
 npm run build
 git diff --check
 ```
@@ -1174,7 +1437,7 @@ Academic changes should verify at least:
 2. Department → Major relationship
 3. Student Major assignment
 4. Admission year persistence
-5. Admission-code formatting
+5. Admission-year display formatting
 6. Automatic student year-level calculation
 7. Academic-year changes update derived year level
 8. Invalid future admission years
@@ -1182,11 +1445,16 @@ Academic changes should verify at least:
 10. Student filtering by Faculty
 11. Student filtering by Department
 12. Student filtering by Major
-13. Student filtering by admission code
+13. Student filtering by admission year
 14. Student filtering by derived year level
 15. deletion guards
 16. migration from legacy Year data
 17. migration from legacy Group data where applicable
+18. Class Group code generation and non-reused sequence
+19. Class Group uniqueness within Major + admission year
+20. valid and invalid Student Class Group assignment
+21. Class Group deactivation and deletion guards
+22. Teacher Faculty → Department affiliation and migration
 
 ---
 
@@ -1206,10 +1474,40 @@ Course/Section changes should verify at least:
 10. Teacher portal assignment
 11. student eligibility
 12. exam creation compatibility
+13. RA-only and RB-only Section targeting
+14. combined RA + RB Section targeting
+15. separate RA/RB Sections and collision validation
 
 Preserve existing tests where still valid.
 
 Update tests to reflect the new canonical academic model.
+
+---
+
+## Room Tests
+
+Room and device changes should verify at least:
+
+1. Floor CRUD and uniqueness
+2. Physical Room creation under a Floor
+3. suffix normalization and generated room codes such as `B4-08` and `B4-01A`
+4. duplicate generated code prevention within one Floor
+5. the same suffix on different Floors
+6. legacy room-code preservation
+7. Physical Room → Exam Room relationship
+8. one Exam Room per Physical Room
+9. inactive-room restrictions
+10. opened/unopened room filtering and display
+11. stable seat IDs during layout expansion
+12. layout reduction and history guards
+13. computer metadata normalization and uniqueness
+14. one computer per seat
+15. version 1 and legacy `Room[]` migration
+16. preservation of Exam Room, Seat, Computer, and history IDs
+17. deletion guards
+18. Teacher/Student room projection compatibility
+
+Preserve existing room/device tests when refining the Admin UI. UI-only changes should still be checked in a browser for responsive overflow, filters, actions, and console errors.
 
 ---
 
@@ -1224,12 +1522,24 @@ When relevant, manually verify:
 * Student edit
 * Student search
 * cascading selectors
-* admission code
+* admission year
 * derived year level
 * academic-year change
+* Class Group create, edit, assignment, reassignment, deactivation, and deletion guard
+* five-step academic structure wizard and atomic failure behavior
 * Section creation
 * teacher assignment
+* Teacher Faculty/Department cascade and migrated affiliation
 * cohort assignment
+* RA only, RB only, and RA + RB Section targeting
+* add-user role selection, `ย้อนกลับ`, close, and form-state reset
+* add/edit/deactivate Floor and Physical Room
+* room suffix preview and generated room code
+* all-room table, Floor filter, room-status filter, and opened/unopened filter
+* open Physical Room as Exam Room and duplicate-open prevention
+* layout creation, expansion, reduction guards, and clearing
+* computer create, assignment, movement, uniqueness, and history guards
+* room persistence and forward migration after reload
 * Teacher Flow
 * Student Flow
 * Admin Flow
@@ -1359,7 +1669,8 @@ For academic identity, the new canonical source of truth is:
 Student
 ├── studentId
 ├── majorId
-└── admissionYear
+├── admissionYear
+└── classGroupId? (optional primary group)
 ```
 
 Derived dynamically:
@@ -1367,7 +1678,7 @@ Derived dynamically:
 ```text
 Faculty
 Department
-Admission Code
+Admission Year Display
 Year Level
 ```
 
@@ -1385,9 +1696,11 @@ For Course/Section academic cohort assignment, prefer:
 Major
 +
 Admission Year
++
+optional Class Group IDs
 ```
 
-rather than manually managed student Class Groups.
+An empty Class Group selection represents the whole Major + admission-year cohort.
 
 Do not introduce another competing academic model without explicit instruction.
 
@@ -1410,6 +1723,7 @@ Student academic identity:
 ├── รหัสนักศึกษา
 ├── majorId
 ├── admissionYear
+├── classGroupId? (กลุ่มประจำแบบ optional)
 └── ข้อมูลโปรไฟล์อื่น ๆ
 ```
 
@@ -1419,8 +1733,9 @@ Derived display data:
 คณะ
 ภาควิชา
 สาขาวิชา
-รหัส 67 / 68 / 69
+ปีเข้า 67 / 68 / 69
 ชั้นปี
+กลุ่มเรียน
 ```
 
 Section academic targeting:
@@ -1428,21 +1743,35 @@ Section academic targeting:
 ```text
 สาขาวิชา
 +
-รหัส
+ปีเข้า
++
+กลุ่มเรียน (optional)
 ```
 
 Example:
 
 ```text
 สาขาวิชา IT
-รหัส 67
+ปีเข้า 67
 ```
 
 or:
 
 ```text
-IT รหัส 67
-IT รหัส 68
+IT ปีเข้า 67 กลุ่ม RA
+IT ปีเข้า 67 กลุ่ม RB
 ```
+
+Room and device infrastructure:
+
+```text
+ชั้น (Floor)
+└── ห้องในชั้น (Physical Room)
+    └── ห้องสอบ (Exam Room, optional one-to-one)
+        └── ที่นั่ง (Room Seat)
+            └── เครื่องคอมพิวเตอร์ (optional one-to-one)
+```
+
+New Physical Room codes are generated from Floor + suffix, while legacy full codes remain readable. The `ห้องสอบ` tab lists all Physical Rooms directly beneath its filters without Floor overview cards or a selected-Floor panel.
 
 The system should remain simple enough for an exam submission application while preserving valid academic relationships and existing Student, Teacher, and Admin flows.

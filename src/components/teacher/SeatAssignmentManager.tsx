@@ -102,7 +102,7 @@ export const SeatAssignmentManager: React.FC = () => {
     setSelectedSeatNo(null);
   };
 
-  const rows = ['A', 'B', 'C', 'D', 'E'];
+  const rows = [...new Set(room.seats.map((seat) => seat.seatNo.replace(/\d+$/, '')))];
   const columns = Array.from({ length: room.columns || 8 }, (_, i) => i + 1);
 
   return (
@@ -118,8 +118,8 @@ export const SeatAssignmentManager: React.FC = () => {
           </h1>
           <p className="text-xs text-gray-500 mt-1">
             {isThai
-              ? `จัดสรรผู้เข้าสอบประจำเครื่องคอมพิวเตอร์ในห้อง ${room.labName} (${room.building}) โดยระบบจะคัดแยกเครื่องชำรุดและปิดใช้งานออกอัตโนมัติ`
-              : `Allocate examinees to computer workstations in ${room.labName} (${room.building}). Damaged and unavailable stations are automatically excluded.`}
+              ? `จัดสรรผู้เข้าสอบประจำเครื่องคอมพิวเตอร์ในห้อง ${room.labName} (ชั้น ${room.floor}) โดยระบบจะคัดแยกเครื่องชำรุดและปิดใช้งานออกอัตโนมัติ`
+              : `Allocate examinees to computer workstations in ${room.labName} (Floor ${room.floor}). Damaged and unavailable stations are automatically excluded.`}
           </p>
         </div>
 
@@ -194,7 +194,7 @@ export const SeatAssignmentManager: React.FC = () => {
                   {rowLetter}
                 </span>
 
-                <div className="grid grid-cols-8 gap-2.5 flex-1">
+                <div className="grid gap-2.5 flex-1 min-w-0" style={{ gridTemplateColumns: `repeat(${room.columns || 1}, minmax(0, 1fr))` }}>
                   {columns.map((colNum) => {
                     const seatNo = `${rowLetter}${colNum}`;
                     const station = room?.seats?.find((s) => s.seatNo === seatNo);

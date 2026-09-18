@@ -110,7 +110,7 @@ export const ExamInfoRules: React.FC = () => {
             <span>{isThai ? 'ห้องสอบ' : 'Location'}</span>
           </div>
           <div className="text-base font-bold text-gray-900">{room?.labName}</div>
-          <div className="text-xs text-gray-500 truncate">{room?.building}</div>
+          <div className="text-xs text-gray-500 truncate">ชั้น {room?.floor}</div>
         </div>
 
         {/* Date & Time */}

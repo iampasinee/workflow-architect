@@ -157,7 +157,7 @@ export const AnswerFileRepository: React.FC = () => {
                       <HardDrive className="w-3.5 h-3.5 text-gray-400" />
                       <span>
                         {isThai ? 'ห้องสอบ: ' : 'Room: '}
-                        {room?.labName} ({room?.building})
+                        {room?.labName} (ชั้น {room?.floor})
                       </span>
                     </div>
                   </div>

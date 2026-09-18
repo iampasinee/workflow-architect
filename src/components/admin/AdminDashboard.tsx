@@ -167,7 +167,7 @@ export const AdminDashboard: React.FC = () => {
                 <div className="flex items-center justify-between font-bold text-sm text-gray-900 mb-2">
                   <span>{room.labName}</span>
                   <span className="text-xs font-mono font-normal text-gray-500">
-                    {room.building}, {isThai ? 'ชั้น ' : 'Floor '}
+                    {isThai ? 'ชั้น ' : 'Floor '}
                     {room.floor}
                   </span>
                 </div>
