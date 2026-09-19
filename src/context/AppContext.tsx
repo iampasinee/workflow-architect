@@ -129,7 +129,6 @@ interface AppContextType {
   addTeacher: (teacher: Omit<Teacher, 'id'>) => boolean;
   updateTeacher: (id: string, updates: Partial<Teacher>) => boolean;
   deleteTeacher: (id: string) => boolean;
-  confirmTeacherProfile: (id: string) => void;
 
   // Admin Actions
   addAdmin: (admin: Omit<Admin, 'id'>) => void;
@@ -599,11 +598,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setTeachers(prev => prev.filter(t => t.id !== id));
     showToast('ลบอาจารย์แล้ว', 'นำข้อมูลออกจากระบบเรียบร้อยแล้ว', 'info');
     return true;
-  };
-
-  const confirmTeacherProfile = (id: string) => {
-    updateTeacher(id, { icitProfileStatus: 'confirmed' });
-    showToast('ยืนยันโปรไฟล์แล้ว', 'ยืนยันตัวตน ICIT สำหรับสิทธิ์อาจารย์เรียบร้อยแล้ว', 'success');
   };
 
   // Admin CRUD
@@ -1085,7 +1079,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         addTeacher,
         updateTeacher,
         deleteTeacher,
-        confirmTeacherProfile,
 
         addAdmin,
         updateAdmin,

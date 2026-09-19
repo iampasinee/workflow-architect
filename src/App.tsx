@@ -19,7 +19,6 @@ import { StudentExamProgressStepper } from './components/student/StudentExamProg
 
 // Teacher screens
 import { TeacherSidebar } from './components/teacher/TeacherSidebar';
-import { TeacherOnboarding } from './components/teacher/TeacherOnboarding';
 import { TeacherDashboard } from './components/teacher/TeacherDashboard';
 import { CourseExamSessionManager } from './components/teacher/CourseExamSessionManager';
 import { StudentGroupManager } from './components/teacher/StudentGroupManager';
@@ -50,7 +49,6 @@ const MainRouter: React.FC = () => {
   const {
     role,
     activeStudentStep,
-    currentTeacher,
     activeTeacherRoute,
     activeAdminRoute,
     setActiveAdminRoute,
@@ -127,20 +125,8 @@ const MainRouter: React.FC = () => {
     );
   }
 
-  // 3. Teacher Flow (Screens T0 -> T9)
+  // 3. Teacher Flow (Screens T1 -> T9)
   if (role === 'teacher') {
-    // Check if first-time onboarding needed
-    if (currentTeacher?.isFirstTime) {
-      return (
-        <div className="min-h-screen bg-gray-50">
-          <Header />
-          <div className="p-6">
-            <TeacherOnboarding />
-          </div>
-        </div>
-      );
-    }
-
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col">
         <Header />

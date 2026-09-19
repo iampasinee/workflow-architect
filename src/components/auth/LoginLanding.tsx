@@ -99,7 +99,7 @@ export const LoginLanding: React.FC = () => {
     }, 600);
   };
 
-  const loginAsPersona = (type: 'admin' | 'teacher_returning' | 'teacher_new' | 'student_returning' | 'student_first_time') => {
+  const loginAsPersona = (type: 'admin' | 'teacher_returning' | 'student_returning' | 'student_first_time') => {
     switch (type) {
       case 'admin':
         setRole('admin');
@@ -112,16 +112,6 @@ export const LoginLanding: React.FC = () => {
         setCurrentTeacher(teachers[0]);
         setActiveTeacherRoute('T1');
         showToast(isThai ? 'เข้าสู่ระบบในฐานะอาจารย์คุมสอบ' : 'Signed in as Returning Teacher', teachers[0].fullName, 'info');
-        break;
-      case 'teacher_new':
-        setRole('teacher');
-        setCurrentTeacher(teachers[1]);
-        setActiveTeacherRoute('T0'); // First time onboarding screen
-        showToast(
-          isThai ? 'เข้าสู่ระบบในฐานะอาจารย์ใหม่' : 'Signed in as First-Time Teacher',
-          isThai ? 'กรุณายืนยันข้อมูลโปรไฟล์ ICIT (ขั้นตอน T0)' : 'Please verify your ICIT profile (T0)',
-          'info'
-        );
         break;
       case 'student_returning':
         setRole('student');
@@ -270,23 +260,6 @@ export const LoginLanding: React.FC = () => {
               <div className="text-sm font-semibold text-gray-900 group-hover:text-blue-600">ผศ.ดร. อนุชา วิชัยดี (Dr. Anucha)</div>
               <div className="text-xs text-gray-500 mt-1">
                 {isThai ? 'T1 แดชบอร์ด → ติดตามสอบสด T5 → ขยายเวลาสอบ → จัดผังที่นั่ง' : 'T1 Dashboard → Live Monitoring T5 → Time Control → Seat Mapping'}
-              </div>
-            </button>
-
-            {/* Teacher 2: First-Time T0 */}
-            <button
-              onClick={() => loginAsPersona('teacher_new')}
-              className="p-3.5 rounded-xl bg-gray-50 hover:bg-blue-50/70 border border-gray-200 hover:border-blue-300 text-left transition-all group cursor-pointer"
-            >
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-200">
-                  {isThai ? 'อาจารย์ใหม่ (ทดสอบ T0 Onboarding)' : 'Teacher (First-Time T0)'}
-                </span>
-                <span className="text-[10px] text-gray-500 font-mono">T00124</span>
-              </div>
-              <div className="text-sm font-semibold text-gray-900 group-hover:text-blue-600">ดร. กาญจนา พลอย (Dr. Kanchana)</div>
-              <div className="text-xs text-gray-500 mt-1">
-                {isThai ? 'ทดสอบหน้าจอ T0: ตรวจสอบและยืนยันข้อมูลอาจารย์ผู้คุมสอบ ICIT' : 'Tests Screen T0: Teacher Onboarding & ICIT Profile Confirmation'}
               </div>
             </button>
 

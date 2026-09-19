@@ -362,7 +362,7 @@ export const initialTeachers: Teacher[] = [
     faculty: 'คณะเทคโนโลยีและการจัดการอุตสาหกรรม',
     department: 'ภาควิชาวิทยาการคอมพิวเตอร์',
     role: 'teacher',
-    icitProfileStatus: 'pending', // Test first-time teacher onboarding T0
+    icitProfileStatus: 'confirmed',
     accountStatus: 'active',
   }
 ];

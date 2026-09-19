@@ -145,18 +145,14 @@ export const SimulationToolbar: React.FC = () => {
                     const found = teachers.find((t) => t.id === e.target.value);
                     if (found) {
                       setCurrentTeacher(found);
-                      if (found.icitProfileStatus === 'pending') {
-                        setActiveTeacherRoute('T0');
-                      } else {
-                        setActiveTeacherRoute('T1');
-                      }
+                      setActiveTeacherRoute('T1');
                     }
                   }}
                   className="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-1.5 text-xs focus:ring-1 focus:ring-blue-500"
                 >
                   {teachers.map((t) => (
                     <option key={t.id} value={t.id}>
-                      {t.fullName} ({t.icitProfileStatus === 'pending' ? (isThai ? 'ครั้งแรก T0' : 'First-time T0') : (isThai ? 'ยืนยันแล้ว' : 'Confirmed')})
+                      {t.fullName} ({t.icitProfileStatus === 'pending' ? (isThai ? 'รอยืนยันโปรไฟล์' : 'Pending profile') : (isThai ? 'ยืนยันแล้ว' : 'Confirmed')})
                     </option>
                   ))}
                 </select>
