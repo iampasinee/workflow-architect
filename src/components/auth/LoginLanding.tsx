@@ -1,20 +1,17 @@
 import React, { useState } from 'react';
+import { ArrowRight, FlaskConical, KeyRound, ShieldCheck, Sparkles, UserPlus, Users } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import {
-  ShieldCheck,
-  GraduationCap,
-  KeyRound,
-  ArrowRight,
-  Sparkles,
-  Lock,
-  Building,
-  CheckCircle2,
-  Users,
-  Eye,
-  EyeOff
-} from 'lucide-react';
-import { Badge } from '../common/Badge';
+import { resolveMockAuthAccount } from '../../services/authState';
+import type { MockAuthUser } from '../../types/auth';
 import { getAdminRouteFromHash } from '../../utils/adminRoutes';
+import { AuthDomainNotice } from './AuthDomainNotice';
+import { MockGoogleAccountSelector } from './MockGoogleAccountSelector';
+import { MockRegistrationFlow } from './MockRegistrationFlow';
+
+type AuthView = 'landing' | 'login' | 'register';
+
+const secondaryButton = 'inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-6 py-3 text-sm font-bold text-slate-700 shadow-xs hover:border-blue-300 hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600';
+const primaryButton = 'inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-blue-600/20 hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600';
 
 export const LoginLanding: React.FC = () => {
   const {
@@ -26,358 +23,174 @@ export const LoginLanding: React.FC = () => {
     setCurrentTeacher,
     setCurrentAdmin,
     students,
+    teachers,
+    admins,
     examSessions,
     submissions,
     setCurrentExamId,
-    teachers,
-    admins,
+    mockAuthUsers,
     showToast,
-    language
   } = useApp();
+  const [view, setView] = useState<AuthView>('landing');
+  const [selectedEmail, setSelectedEmail] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [unregisteredUser, setUnregisteredUser] = useState<MockAuthUser | null>(null);
 
-  const isThai = language === 'th';
-  const activeExam =
-    examSessions.find((exam) => exam.status === 'in_progress') || examSessions[0];
-  const defaultUploadStudent =
-    students.find((student) => {
-      if (student.accountStatus !== 'active') return false;
-      const submission = submissions.find(
-        (item) => item.examId === activeExam?.id && item.studentId === student.id
-      );
-      return submission?.status !== 'submitted' && submission?.status !== 'late';
-    }) || students.find((student) => student.accountStatus === 'active') || students[0];
-  const [showIcitModal, setShowIcitModal] = useState(false);
-  const [icitUsername, setIcitUsername] = useState(defaultUploadStudent?.studentCode || '');
-  const [icitPassword, setIcitPassword] = useState('••••••••');
-  const [showPassword, setShowPassword] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const activeExam = examSessions.find((exam) => exam.status === 'in_progress') || examSessions[0];
+  const defaultUploadStudent = students.find((student) => {
+    if (student.accountStatus !== 'active') return false;
+    const submission = submissions.find((item) => item.examId === activeExam?.id && item.studentId === student.id);
+    return submission?.status !== 'submitted' && submission?.status !== 'late';
+  }) || students.find((student) => student.accountStatus === 'active') || students[0];
 
-  const handleIcitLoginSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
+  const openLogin = (email = '') => {
+    setSelectedEmail(email);
+    setLoginError('');
+    setUnregisteredUser(null);
+    setView('login');
+  };
 
-    setTimeout(() => {
-      setIsLoading(false);
-      setShowIcitModal(false);
-
-      // Match username or default to student
-      const cleanUsername = (icitUsername || '').trim();
-      if (cleanUsername.startsWith('A') || cleanUsername.toLowerCase().includes('admin')) {
-        setRole('admin');
-        if (admins.length > 0) setCurrentAdmin(admins[0]);
-        setActiveAdminRoute(getAdminRouteFromHash());
-        const adminName = admins[0]?.fullName || 'Admin';
-        showToast(
-          isThai ? 'เข้าสู่ระบบสำเร็จผ่าน ICIT SSO' : 'ICIT SSO Authenticated',
-          isThai ? `ยินดีต้อนรับผู้ดูแลระบบ ${adminName}` : `Welcome Administrator ${adminName}`,
-          'success'
-        );
-      } else if (cleanUsername.startsWith('T') || cleanUsername.toLowerCase().includes('teacher')) {
-        setRole('teacher');
-        if (teachers.length > 0) setCurrentTeacher(teachers[0]);
-        setActiveTeacherRoute('T1');
-        const teacherName = teachers[0]?.fullName || 'Teacher';
-        showToast(
-          isThai ? 'เข้าสู่ระบบสำเร็จผ่าน ICIT SSO' : 'ICIT SSO Authenticated',
-          isThai ? `ยินดีต้อนรับอาจารย์ ${teacherName}` : `Welcome ${teacherName}`,
-          'success'
-        );
-      } else {
-        // Find student or default to first student
-        const matched = students.find(s => s.studentCode === cleanUsername) || defaultUploadStudent;
-        setRole('student');
-        if (matched) setCurrentStudent(matched);
-        if (activeExam) setCurrentExamId(activeExam.id);
-        setActiveStudentStep('ST1');
-        const studentName = matched?.fullName || 'Student';
-        showToast(
-          isThai ? 'เข้าสู่ระบบสำเร็จผ่าน ICIT SSO' : 'ICIT SSO Authenticated',
-          isThai ? `ยินดีต้อนรับนักศึกษา ${studentName}` : `Welcome ${studentName}`,
-          'success'
-        );
+  const enterRole = (account: MockAuthUser) => {
+    if (account.role === 'student') {
+      const student = students.find((item) => item.id === account.subjectId);
+      if (!student || student.accountStatus !== 'active') {
+        setLoginError('บัญชีนักศึกษาไม่พร้อมเข้าใช้งาน กรุณาติดต่อผู้ดูแลระบบ');
+        return;
       }
-    }, 600);
-  };
-
-  const loginAsPersona = (type: 'admin' | 'teacher_returning' | 'student_returning' | 'student_first_time') => {
-    switch (type) {
-      case 'admin':
-        setRole('admin');
-        setCurrentAdmin(admins[0]);
-        setActiveAdminRoute(getAdminRouteFromHash());
-        showToast(isThai ? 'เข้าสู่ระบบในฐานะผู้ดูแลระบบ' : 'Signed in as Admin', admins[0].fullName, 'info');
-        break;
-      case 'teacher_returning':
-        setRole('teacher');
-        setCurrentTeacher(teachers[0]);
-        setActiveTeacherRoute('T1');
-        showToast(isThai ? 'เข้าสู่ระบบในฐานะอาจารย์คุมสอบ' : 'Signed in as Returning Teacher', teachers[0].fullName, 'info');
-        break;
-      case 'student_returning':
-        setRole('student');
-        setCurrentStudent(defaultUploadStudent);
-        if (activeExam) setCurrentExamId(activeExam.id);
-        setActiveStudentStep('ST1');
-        showToast(isThai ? 'เข้าสู่ระบบในฐานะนักศึกษาผู้เข้าสอบ' : 'Signed in as Returning Student', defaultUploadStudent?.fullName, 'info');
-        break;
-      case 'student_first_time':
-        const firstTimeStd = students.find(s => s.isFirstTime) || students[3];
-        setRole('student');
-        setCurrentStudent(firstTimeStd);
-        if (activeExam) setCurrentExamId(activeExam.id);
-        setActiveStudentStep('ST1');
-        showToast(
-          isThai ? 'เข้าสู่ระบบในฐานะนักศึกษาใหม่' : 'Signed in as First-Time Student',
-          isThai ? 'นำทางไปยังการตั้งรหัสผ่าน ST2A และลงทะเบียนใบหน้า ST2B' : 'Directing to First-Time Setup ST2A/ST2B',
-          'info'
-        );
-        break;
+      setCurrentStudent(student);
+      if (activeExam) setCurrentExamId(activeExam.id);
+      setActiveStudentStep('ST1');
+      setRole('student');
+      showToast('เข้าสู่ระบบ Mockup สำเร็จ', `ยินดีต้อนรับ ${student.fullName}`, 'success');
+      return;
     }
+    if (account.role === 'teacher') {
+      const teacher = teachers.find((item) => item.id === account.subjectId);
+      if (!teacher || teacher.accountStatus !== 'active') {
+        setLoginError('บัญชีอาจารย์ไม่พร้อมเข้าใช้งาน กรุณาติดต่อผู้ดูแลระบบ');
+        return;
+      }
+      setCurrentTeacher(teacher);
+      setActiveTeacherRoute('T1');
+      setRole('teacher');
+      showToast('เข้าสู่ระบบ Mockup สำเร็จ', `ยินดีต้อนรับ ${teacher.fullName}`, 'success');
+      return;
+    }
+    const admin = admins.find((item) => item.id === account.subjectId);
+    if (!admin || admin.accountStatus !== 'active' || !account.adminProvisioned) {
+      setLoginError('บัญชีผู้ดูแลระบบไม่ได้รับสิทธิ์จากระบบ');
+      return;
+    }
+    setCurrentAdmin(admin);
+    setActiveAdminRoute(getAdminRouteFromHash());
+    setRole('admin');
+    showToast('เข้าสู่ระบบ Mockup สำเร็จ', `ยินดีต้อนรับ ${admin.fullName}`, 'success');
   };
 
-  return (
-    <div className="min-h-screen bg-slate-50 flex flex-col justify-between text-gray-900 relative overflow-hidden">
-      {/* Subtle background tech grid */}
-      <div className="absolute inset-0 bg-[linear-gradient(to_right,#cbd5e140_1px,transparent_1px),linear-gradient(to_bottom,#cbd5e140_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] pointer-events-none" />
+  const handleMockLogin = () => {
+    setLoginError('');
+    setUnregisteredUser(null);
+    const resolution = resolveMockAuthAccount(selectedEmail, mockAuthUsers);
+    if (resolution.error || !resolution.user) {
+      setLoginError(resolution.domain === 'unsupported'
+        ? 'ไม่สามารถเข้าใช้งานได้ กรุณาใช้บัญชีอีเมลของมหาวิทยาลัยเท่านั้น'
+        : resolution.error || 'ไม่สามารถตรวจสอบบัญชีได้');
+      return;
+    }
+    if (!resolution.user.registered) {
+      setUnregisteredUser(resolution.user);
+      setLoginError('ยังไม่พบการลงทะเบียนของบัญชีนี้');
+      return;
+    }
+    enterRole(resolution.user);
+  };
 
-      {/* Top Bar */}
-      <header className="px-6 py-6 max-w-7xl mx-auto w-full flex items-center justify-between z-10">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
-            <ShieldCheck className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-xl tracking-tight text-gray-900">SecureLab</span>
-              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-                {isThai ? 'เวอร์ชัน 1.3' : 'v1.3 PRD'}
-              </span>
-            </div>
-            <p className="text-xs text-gray-500">
-              {isThai ? 'ระบบส่งไฟล์คำตอบข้อสอบและป้องกันการทุจริตห้องแล็บ' : 'Exam File Submission & Anti-Cheating Portal'}
-            </p>
-          </div>
+  const loginAsPersona = (type: 'admin' | 'teacher' | 'student_returning' | 'student_first_time') => {
+    if (type === 'admin') {
+      setRole('admin');
+      setCurrentAdmin(admins[0]);
+      setActiveAdminRoute(getAdminRouteFromHash());
+      return;
+    }
+    if (type === 'teacher') {
+      setRole('teacher');
+      setCurrentTeacher(teachers[0]);
+      setActiveTeacherRoute('T1');
+      return;
+    }
+    const student = type === 'student_first_time'
+      ? students.find((item) => item.isFirstTime) || students[3]
+      : defaultUploadStudent;
+    setRole('student');
+    if (student) setCurrentStudent(student);
+    if (activeExam) setCurrentExamId(activeExam.id);
+    setActiveStudentStep('ST1');
+  };
+
+  if (view === 'register') {
+    return <AuthShell><MockRegistrationFlow onBack={() => setView('landing')} onGoLogin={openLogin} /></AuthShell>;
+  }
+
+  if (view === 'login') {
+    return <AuthShell>
+      <div className="mx-auto w-full max-w-xl rounded-3xl border border-slate-200 bg-white p-5 shadow-xl sm:p-8">
+        <button type="button" onClick={() => setView('landing')} className="text-sm font-bold text-slate-600 hover:text-blue-700">← กลับหน้าหลัก</button>
+        <div className="mt-4"><p className="text-xs font-bold text-blue-600">SECURELAB AUTHENTICATION MOCKUP</p><h1 className="mt-1 text-2xl font-bold text-slate-900">เข้าสู่ระบบ SecureLab</h1><p className="mt-2 text-sm text-slate-500">กรุณาใช้บัญชี Google ของมหาวิทยาลัย</p></div>
+        <div className="mt-5"><AuthDomainNotice compact /></div>
+        <div className="mt-4"><MockGoogleAccountSelector value={selectedEmail} onChange={(email) => { setSelectedEmail(email); setLoginError(''); setUnregisteredUser(null); }} onContinue={handleMockLogin} actionLabel="Sign in with Google (จำลอง)" /></div>
+        {loginError && <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700"><p className="font-bold">{loginError}</p><p className="mt-2 text-xs">นักศึกษา: @email.kmutnb.ac.th<br />อาจารย์และผู้ดูแลระบบ: @itm.kmutnb.ac.th</p>{unregisteredUser && <button type="button" onClick={() => setView('register')} className="mt-3 rounded-lg bg-red-700 px-3 py-2 text-xs font-bold text-white">ลงทะเบียน</button>}</div>}
+        <p className="mt-6 text-center text-xs text-slate-500">ยังไม่มีบัญชี? <button type="button" onClick={() => setView('register')} className="font-bold text-blue-700 hover:underline">ลงทะเบียน</button></p>
+      </div>
+    </AuthShell>;
+  }
+
+  return <AuthShell>
+    <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 text-center shadow-xl sm:p-10">
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-500/20"><ShieldCheck className="h-7 w-7" /></div>
+        <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700"><Sparkles className="h-3.5 w-3.5" />SecureLab Frontend Mockup</div>
+        <h1 className="mx-auto mt-4 max-w-3xl text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">ระบบสแกนใบหน้าและติดตามการใช้ทรัพยากรคอมพิวเตอร์สำหรับการสอบในห้องปฏิบัติการ</h1>
+        <p className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-slate-500">เลือกเข้าสู่ระบบสำหรับบัญชีที่ลงทะเบียนแล้ว หรือลงทะเบียนบัญชีมหาวิทยาลัยพร้อมขั้นตอนใบหน้าแบบจำลอง</p>
+        <div className="mx-auto mt-7 grid max-w-xl gap-3 sm:grid-cols-2">
+          <button type="button" onClick={() => openLogin()} className={primaryButton}><KeyRound className="h-5 w-5" />เข้าสู่ระบบ<ArrowRight className="h-4 w-4" /></button>
+          <button type="button" onClick={() => setView('register')} className={secondaryButton}><UserPlus className="h-5 w-5" />ลงทะเบียน</button>
         </div>
+        <div className="mx-auto mt-7 max-w-2xl text-left"><AuthDomainNotice /></div>
+      </section>
 
-        <div className="flex items-center gap-3">
-          <div className="hidden sm:flex items-center gap-2 text-xs text-gray-600 bg-white px-3 py-1.5 rounded-full border border-gray-200 shadow-xs">
-            <Building className="w-3.5 h-3.5 text-blue-600" />
-            <span>{isThai ? 'เครือข่ายห้องปฏิบัติการคอมพิวเตอร์แบบบูรณาการ' : 'Integrated Computer Laboratory Network'}</span>
-          </div>
+      <section aria-label="Workflow Demo" className="mt-6 rounded-3xl border border-dashed border-slate-300 bg-white/80 p-5 sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 pb-3"><div className="flex items-center gap-2"><Users className="h-4 w-4 text-blue-600" /><h2 className="text-sm font-bold text-slate-900">จำลองบทบาทและเส้นทางการใช้งาน (Workflow Demo)</h2></div><span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-700"><FlaskConical className="h-3 w-3" />เครื่องมือสำหรับ Development</span></div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <PersonaButton title="นักศึกษา (เคยลงทะเบียนแล้ว)" code="6410123456" name="นายสมชาย ใจดี (Somchai)" detail="ยืนยันใบหน้า → รับทราบระเบียบ → อัปโหลดไฟล์" onClick={() => loginAsPersona('student_returning')} />
+          <PersonaButton title="นักศึกษาใหม่ (เข้าสอบครั้งแรก)" code="6410123459" name="นายณัฐวุฒิ ประเสริฐ (Nattawut)" detail="ตั้งรหัสผ่านสอบ → ลงทะเบียนภาพใบหน้า → เข้าห้องสอบ" onClick={() => loginAsPersona('student_first_time')} />
+          <PersonaButton title="อาจารย์คุมสอบ (ยืนยันสิทธิ์แล้ว)" code="T00123" name="ผศ.ดร. อนุชา วิชัยดี" detail="แดชบอร์ด → ติดตามสอบสด → จัดผังที่นั่ง" onClick={() => loginAsPersona('teacher')} />
+          <PersonaButton title="ผู้ดูแลระบบส่วนกลาง" code="A0001" name="ปิยดา ดูแลระบบ" detail="แดชบอร์ด → จัดการผู้ใช้ → ห้องสอบและเครื่อง" onClick={() => loginAsPersona('admin')} className="sm:col-span-2 lg:col-span-3" />
         </div>
-      </header>
-
-      {/* Main Hero & Sign-in Box */}
-      <main className="max-w-4xl mx-auto w-full px-6 py-12 flex flex-col items-center text-center z-10">
-        <Badge variant="purple" className="mb-4">
-          <Sparkles className="w-3.5 h-3.5" /> {isThai ? 'ระบบการสอบในห้องปฏิบัติการคอมพิวเตอร์ระดับสถาบัน' : 'Institutional Computer Laboratory Examination System'}
-        </Badge>
-
-        <h1 className="text-3xl sm:text-5xl font-bold tracking-tight text-gray-900 max-w-2xl leading-tight">
-          {isThai
-            ? 'ระบบส่งข้อสอบปลอดภัย พร้อมตรวจสอบความถูกต้องแบบเรียลไทม์'
-            : 'Reliable Exam Submissions with Real-Time Integrity Verification'}
-        </h1>
-
-        <p className="mt-4 text-base sm:text-lg text-gray-600 max-w-xl leading-relaxed">
-          {isThai
-            ? 'จัดการผังที่นั่งสอบอัตโนมัติ ยืนยันตัวตนด้วยข้อมูลชีวมิติใบหน้า ซิงโครไนซ์เวลานับถอยหลัง ตรวจสอบความสมบูรณ์ของไฟล์คำตอบ (.zip/.py) และตรวจจับพฤติกรรมผิดปกติทันที'
-            : 'Automating assigned seating, biometric facial identity matching, countdown synchronization, valid answer archive verification, and active cheating prevention.'}
-        </p>
-
-        {/* Primary Action Button: Sign in with ICIT Account */}
-        <div className="mt-8 flex flex-col sm:flex-row items-center gap-4">
-          <button
-            onClick={() => setShowIcitModal(true)}
-            className="px-8 py-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-base shadow-xl shadow-blue-600/20 transition-all flex items-center gap-3 hover:scale-102 cursor-pointer"
-          >
-            <KeyRound className="w-5 h-5 text-blue-200" />
-            <span>{isThai ? 'เข้าสู่ระบบด้วยบัญชี ICIT Account' : 'Sign in with ICIT Account'}</span>
-            <ArrowRight className="w-4 h-4 text-blue-200" />
-          </button>
-        </div>
-
-        {/* Quick Persona Access for Testing Workflows */}
-        <div className="mt-14 w-full bg-white border border-gray-200 rounded-2xl p-6 text-left shadow-lg">
-          <div className="flex items-center justify-between pb-3 border-b border-gray-100">
-            <div className="flex items-center gap-2">
-              <Users className="w-4 h-4 text-blue-600" />
-              <span className="text-sm font-semibold text-gray-900">
-                {isThai ? 'จำลองบทบาทและเส้นทางการใช้งาน (Workflow Demo)' : 'Instant Role & Workflow Demonstration'}
-              </span>
-            </div>
-            <span className="text-xs text-gray-500">
-              {isThai ? 'คลิกเลือกบทบาทเพื่อทดสอบโฟลว์ตามข้อกำหนด PRD' : 'Click any role to test its specific PRD journey'}
-            </span>
-          </div>
-
-          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {/* Student 1: Returning */}
-            <button
-              onClick={() => loginAsPersona('student_returning')}
-              className="p-3.5 rounded-xl bg-gray-50 hover:bg-blue-50/70 border border-gray-200 hover:border-blue-300 text-left transition-all group cursor-pointer"
-            >
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                  {isThai ? 'นักศึกษา (เคยลงทะเบียนแล้ว)' : 'Student (Returning)'}
-                </span>
-                <span className="text-[10px] text-gray-500 font-mono">6410123456</span>
-              </div>
-              <div className="text-sm font-semibold text-gray-900 group-hover:text-blue-600">นายสมชาย ใจดี (Somchai)</div>
-              <div className="text-xs text-gray-500 mt-1">
-                {isThai ? 'ตรงสู่ ยืนยันใบหน้า ST2C → รับทราบระเบียบ → จับเวลาถอยหลัง → อัปโหลดไฟล์' : 'Direct to Face Verification ST2C → Exam Info → Focus Countdown → File Upload'}
-              </div>
-            </button>
-
-            {/* Student 2: First-time */}
-            <button
-              onClick={() => loginAsPersona('student_first_time')}
-              className="p-3.5 rounded-xl bg-gray-50 hover:bg-blue-50/70 border border-gray-200 hover:border-blue-300 text-left transition-all group cursor-pointer"
-            >
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
-                  {isThai ? 'นักศึกษาใหม่ (เข้าสอบครั้งแรก)' : 'Student (First-Time)'}
-                </span>
-                <span className="text-[10px] text-gray-500 font-mono">6410123459</span>
-              </div>
-              <div className="text-sm font-semibold text-gray-900 group-hover:text-blue-600">นายณัฐวุฒิ ประเสริฐ (Nattawut)</div>
-              <div className="text-xs text-gray-500 mt-1">
-                {isThai ? 'ทดสอบ ST2A ตั้งรหัสผ่านสอบ → ST2B ลงทะเบียนภาพใบหน้า → เข้าห้องสอบ' : 'Tests ST2A Password Setup → ST2B Facial Enrollment → Exam Entry'}
-              </div>
-            </button>
-
-            {/* Teacher 1: Returning */}
-            <button
-              onClick={() => loginAsPersona('teacher_returning')}
-              className="p-3.5 rounded-xl bg-gray-50 hover:bg-blue-50/70 border border-gray-200 hover:border-blue-300 text-left transition-all group cursor-pointer"
-            >
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
-                  {isThai ? 'อาจารย์คุมสอบ (ยืนยันสิทธิ์แล้ว)' : 'Teacher (Confirmed)'}
-                </span>
-                <span className="text-[10px] text-gray-500 font-mono">T00123</span>
-              </div>
-              <div className="text-sm font-semibold text-gray-900 group-hover:text-blue-600">ผศ.ดร. อนุชา วิชัยดี (Dr. Anucha)</div>
-              <div className="text-xs text-gray-500 mt-1">
-                {isThai ? 'T1 แดชบอร์ด → ติดตามสอบสด T5 → ขยายเวลาสอบ → จัดผังที่นั่ง' : 'T1 Dashboard → Live Monitoring T5 → Time Control → Seat Mapping'}
-              </div>
-            </button>
-
-            {/* Admin */}
-            <button
-              onClick={() => loginAsPersona('admin')}
-              className="p-3.5 rounded-xl bg-gray-50 hover:bg-blue-50/70 border border-gray-200 hover:border-blue-300 text-left transition-all group sm:col-span-2 lg:col-span-2 cursor-pointer"
-            >
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
-                  {isThai ? 'ผู้ดูแลระบบส่วนกลาง (ICIT System Admin)' : 'System Administrator'}
-                </span>
-                <span className="text-[10px] text-gray-500 font-mono">A0001</span>
-              </div>
-              <div className="text-sm font-semibold text-gray-900 group-hover:text-blue-600">ปิยดา ดูแลระบบ (Piyada Dulaerabob)</div>
-              <div className="text-xs text-gray-500 mt-1">
-                {isThai ? 'ชุดผู้ดูแลระบบเต็มรูปแบบ: A1 แดชบอร์ด → จัดการผู้ใช้ → จัดการห้องและเครื่องสอบ → ผูก Static IP/MAC A12 → รายวิชา' : 'Full Admin suite: A1 Dashboard → User Management → Rooms & Seating Maps → Static IP/MAC Device Binding A12 → Courses'}
-              </div>
-            </button>
-          </div>
-        </div>
-      </main>
-
-      {/* Footer */}
-      <footer className="px-6 py-4 text-center text-xs text-gray-500 border-t border-gray-200 bg-white/60">
-        {isThai
-          ? 'SecureLab Exam Portal • กรอบการทำงานด้านความปลอดภัยและยืนยันตัวตนห้องปฏิบัติการคอมพิวเตอร์ • ออกแบบตามข้อกำหนด PRD เวอร์ชัน 1.3'
-          : 'SecureLab Examination Portal • Computer Laboratory Identity & Integrity Framework • Designed per PRD Specification v1.3'}
-      </footer>
-
-      {/* ICIT SSO Login Dialog Modal */}
-      {showIcitModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-white text-gray-900 rounded-2xl w-full max-w-md p-6 shadow-2xl border border-gray-200">
-            <div className="flex items-center justify-between pb-4 border-b border-gray-100">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white">
-                  <KeyRound className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-gray-900">
-                    {isThai ? 'ระบบยืนยันตัวตน ICIT Single Sign-On' : 'ICIT Single Sign-On'}
-                  </h3>
-                  <p className="text-xs text-gray-500">
-                    {isThai ? 'เกตเวย์รับรองความถูกต้องส่วนกลางมหาวิทยาลัย' : 'Central University Authentication'}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowIcitModal(false)}
-                className="text-gray-400 hover:text-gray-600 p-1 text-sm font-bold"
-              >
-                &times;
-              </button>
-            </div>
-
-            <form onSubmit={handleIcitLoginSubmit} className="mt-4 space-y-4 text-left">
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">
-                  {isThai ? 'ชื่อผู้ใช้บัญชี ICIT / รหัสนักศึกษา / รหัสอาจารย์' : 'ICIT Account Username / Student Code'}
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={icitUsername}
-                  onChange={(e) => setIcitUsername(e.target.value)}
-                  placeholder={isThai ? 'เช่น 6410123456 หรือ T00123' : 'e.g. 6410123456 or T00123'}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-                <span className="text-[11px] text-gray-400 mt-1 block">
-                  {isThai
-                    ? 'กรอกรหัสนักศึกษา (6410123456), รหัสอาจารย์ (T00123) หรือรหัสผู้ดูแล (A0001)'
-                    : 'Enter student ID (6410123456), teacher ID (T00123), or admin ID (A0001)'}
-                </span>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">
-                  {isThai ? 'รหัสผ่าน (Password)' : 'Password'}
-                </label>
-                <div className="relative">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    value={icitPassword}
-                    onChange={(e) => setIcitPassword(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-blue-500 pr-10"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-3 text-gray-400 hover:text-gray-600"
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="submit"
-                  disabled={isLoading}
-                  className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  {isLoading ? (
-                    <span>{isThai ? 'กำลังยืนยันความถูกต้องกับ ICIT...' : 'Authenticating with ICIT...'}</span>
-                  ) : (
-                    <>
-                      <span>{isThai ? 'ยืนยันตัวตนและเข้าสู่ระบบ' : 'Authorize & Continue'}</span>
-                      <ArrowRight className="w-4 h-4" />
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+      </section>
+    </main>
+  </AuthShell>;
 };
+
+const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div className="relative min-h-screen overflow-hidden bg-slate-50 text-left text-slate-900">
+    <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,#cbd5e130_1px,transparent_1px),linear-gradient(to_bottom,#cbd5e130_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_70%_60%_at_50%_0%,#000_60%,transparent_100%)]" />
+    <header className="relative z-10 border-b border-slate-200 bg-white/90 px-4 py-4 backdrop-blur sm:px-6"><div className="mx-auto flex max-w-7xl items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white"><ShieldCheck className="h-6 w-6" /></div><div><p className="text-lg font-bold">SecureLab</p><p className="text-[11px] text-slate-500">ระบบจัดการการสอบในห้องปฏิบัติการ</p></div></div></header>
+    <div className="relative z-[1] px-3 py-6 sm:px-6">{children}</div>
+  </div>
+);
+
+interface PersonaButtonProps {
+  title: string;
+  code: string;
+  name: string;
+  detail: string;
+  onClick: () => void;
+  className?: string;
+}
+
+const PersonaButton: React.FC<PersonaButtonProps> = ({ title, code, name, detail, onClick, className = '' }) => (
+  <button type="button" onClick={onClick} className={`rounded-xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:border-blue-300 hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-blue-600 ${className}`}>
+    <div className="flex items-start justify-between gap-2"><span className="text-xs font-bold text-blue-700">{title}</span><span className="font-mono text-[10px] text-slate-500">{code}</span></div>
+    <p className="mt-2 text-sm font-bold text-slate-900">{name}</p><p className="mt-1 text-xs text-slate-500">{detail}</p>
+  </button>
+);

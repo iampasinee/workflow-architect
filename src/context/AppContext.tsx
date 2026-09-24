@@ -1,6 +1,13 @@
 import { useAcademicYear, withCalculatedStudentYear, withoutStudentYear } from '../utils/academicYear';
 import { RoomState, RoomAction, RoomActionResult } from '../types/rooms';
+import { FaceEnrollmentStatus, MockAuthUser } from '../types/auth';
 import { applyRoomAction, migrateRoomState, projectRooms } from '../services/roomState';
+import {
+  completeMockRegistration as completeMockRegistrationState,
+  initialMockAuthUsers,
+  migrateMockAuthUsers,
+  mockAuthStorageKey,
+} from '../services/authState';
 import { CourseActionResult, CourseInput, SectionInput } from '../types/course';
 import {
   courseDeleteError, coursesForStudent, coursesForTeacher, findSection, migrateCourses,
@@ -83,6 +90,10 @@ interface AppContextType {
   setCurrentAdmin: (admin: Admin | null) => void;
   currentExamId: string;
   setCurrentExamId: (id: string) => void;
+
+  // Frontend-only authentication mock state
+  mockAuthUsers: MockAuthUser[];
+  completeMockRegistration: (userId: string, faceStatus: FaceEnrollmentStatus) => { success: boolean; error?: string };
 
   // Active Violation for Student ST8 Overlay
   activeViolationAlert: Violation | null;
@@ -253,6 +264,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return safeParse('securelab_admins', initialAdmins);
   });
 
+  const [mockAuthUsers, setMockAuthUsers] = useState<MockAuthUser[]>(() =>
+    migrateMockAuthUsers(safeParse<unknown>(mockAuthStorageKey, initialMockAuthUsers)));
+
   const [roomState, setRoomState] = useState<RoomState>(() =>
     migrateRoomState(safeParse<unknown>('securelab_room_state', null), safeParse('securelab_rooms', initialRooms)));
   const rooms = useMemo(() => projectRooms(roomState), [roomState]);
@@ -338,6 +352,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [admins]);
 
   useEffect(() => {
+    localStorage.setItem(mockAuthStorageKey, JSON.stringify(mockAuthUsers));
+  }, [mockAuthUsers]);
+
+  useEffect(() => {
     localStorage.setItem('securelab_room_state', JSON.stringify(roomState));
   }, [roomState]);
 
@@ -372,6 +390,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const dismissToast = (id: string) => {
     setToasts(prev => prev.filter(t => t.id !== id));
+  };
+
+  const completeMockRegistration = (userId: string, faceStatus: FaceEnrollmentStatus) => {
+    const result = completeMockRegistrationState(mockAuthUsers, userId, faceStatus);
+    if (result.success) setMockAuthUsers(result.users);
+    return { success: result.success, error: result.error };
   };
 
   const academicFailure = (error: string): AcademicResult => {
@@ -998,6 +1022,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const migratedTeachers = migrateAcademicTeachers(initialTeachers, academicDefaults);
     setTeachers(migratedTeachers);
     setAdmins(initialAdmins);
+    setMockAuthUsers(initialMockAuthUsers.map((user) => ({ ...user })));
     setRoomState(migrateRoomState(null, initialRooms));
     setCourses(migrateCourses(initialCourses, academicDefaults));
     setExamSessions(initialExamSessions);
@@ -1045,6 +1070,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setCurrentAdmin,
         currentExamId,
         setCurrentExamId,
+
+        mockAuthUsers,
+        completeMockRegistration,
 
         activeViolationAlert,
         setActiveViolationAlert,

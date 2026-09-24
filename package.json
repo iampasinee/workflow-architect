@@ -10,6 +10,7 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test:academic": "tsx --test src/services/academicState.test.ts",
+    "test:auth": "tsx --test src/services/authState.test.ts",
     "test:courses": "tsx --test src/services/courseState.test.ts",
     "test:rooms": "tsx --test src/services/roomState.test.ts"
   },
