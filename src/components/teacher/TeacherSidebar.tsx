@@ -4,7 +4,6 @@ import {
   LayoutDashboard,
   BookOpen,
   ClipboardList,
-  Users,
   Activity,
   FolderArchive,
   ChevronLeft,
@@ -57,26 +56,24 @@ export const TeacherSidebar: React.FC<TeacherSidebarProps> = ({
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         } ${collapsed ? 'md:w-18' : 'md:w-64'}`}
       >
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-4">
-        {/* Module Title */}
-        <div className={`px-4 mb-4 flex items-center justify-between ${collapsed ? 'md:justify-center' : ''}`}>
-          {!collapsed && (
-            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-4">
+          {/* Module Title */}
+          <div className={`px-4 mb-4 flex items-center justify-between ${collapsed ? 'md:justify-center' : ''}`}>
+            <span className={`text-[11px] font-bold uppercase tracking-wider text-gray-400 ${collapsed ? 'md:hidden' : ''}`}>
               {isThai ? 'พอร์ทัลอาจารย์ผู้สอน' : 'Instructor Portal'}
             </span>
-          )}
-          <button
-            type="button"
-            onClick={onToggle}
-            className="hidden p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors cursor-pointer md:block"
-            title={collapsed ? (isThai ? 'ขยายแถบเมนู' : 'Expand Sidebar') : (isThai ? 'ย่อแถบเมนู' : 'Collapse Sidebar')}
-          >
-            {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
-          </button>
-        </div>
+            <button
+              type="button"
+              onClick={onToggle}
+              className="hidden p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors cursor-pointer md:block"
+              title={collapsed ? (isThai ? 'ขยายแถบเมนู' : 'Expand Sidebar') : (isThai ? 'ย่อแถบเมนู' : 'Collapse Sidebar')}
+            >
+              {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+            </button>
+          </div>
 
-        {/* Nav Items */}
-        <nav className="space-y-1 px-2.5" aria-label="เมนูอาจารย์ผู้สอน">
+          {/* Nav Items */}
+          <nav className="space-y-1 px-2.5" aria-label="เมนูอาจารย์ผู้สอน">
           {menuItems.map((item) => {
             const Icon = item.icon;
             const isActive = item.routes.includes(activeTeacherRoute);
@@ -86,6 +83,7 @@ export const TeacherSidebar: React.FC<TeacherSidebarProps> = ({
                 type="button"
                 key={item.id}
                 onClick={() => navigate(item.id)}
+                aria-label={item.label}
                 aria-current={isActive ? 'page' : undefined}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all relative cursor-pointer ${
                   isActive
@@ -109,17 +107,17 @@ export const TeacherSidebar: React.FC<TeacherSidebarProps> = ({
               </button>
             );
           })}
-        </nav>
-      </div>
+          </nav>
+        </div>
 
-      {/* Footer Info */}
-      <div className={`p-4 border-t border-gray-100 bg-gray-50/50 m-2 rounded-xl text-[11px] text-gray-500 space-y-1 ${collapsed ? 'md:hidden' : ''}`}>
+        {/* Footer Info */}
+        <div className={`p-4 border-t border-gray-100 bg-gray-50/50 m-2 rounded-xl text-[11px] text-gray-500 space-y-1 ${collapsed ? 'md:hidden' : ''}`}>
           <div className="flex items-center gap-1.5 text-emerald-700 font-medium">
             <ShieldCheck className="w-3.5 h-3.5" />
             <span>{isThai ? 'ระบบคุมสอบ ICIT ทำงานปกติ' : 'ICIT Proctor Session Active'}</span>
           </div>
           <div>{isThai ? 'เชื่อมต่อห้องแล็บ 301 แล้ว' : 'Computer Lab 301 Connected'}</div>
-      </div>
+        </div>
       </aside>
     </>
   );

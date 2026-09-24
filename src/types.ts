@@ -12,6 +12,55 @@ export type ExamFormat = 'offline' | 'online';
 
 export type ExamSessionStatus = 'upcoming' | 'in_progress' | 'completed';
 
+export type ExamType = 'midterm' | 'final' | 'lab' | 'quiz' | 'other';
+
+export interface ExamResourceRule {
+  id: string;
+  name: string;
+  type: 'website' | 'web_app' | 'application';
+  value: string;
+  category?: string;
+}
+
+export interface ExamPolicy {
+  common: {
+    requireRegisteredDevice: boolean;
+    requireAgent: boolean;
+    requireFaceBeforeExam: boolean;
+    requirePeriodicFaceCheck: boolean;
+    preventDuplicateSession: boolean;
+    blockUsbStorage: boolean;
+    logViolations: boolean;
+  };
+  file: {
+    requireExamWorkspace: boolean;
+    requireDeviceSignature: boolean;
+    lockAfterFinalSubmit: boolean;
+    blockExternalStorageSource: boolean;
+  };
+  online: {
+    resourceMode: 'allowlist' | 'blocklist';
+    allowedDomains: string[];
+    blockedResources: ExamResourceRule[];
+    blockUnknownApplications: boolean;
+    restrictBrowser: boolean;
+    blockCommunicationApps: boolean;
+    blockRemoteDesktop: boolean;
+  };
+  offline: {
+    blockInternet: boolean;
+    localServerOnly: boolean;
+    localServerHost: string;
+    isolateClients: boolean;
+    blockSsh: boolean;
+    blockSmb: boolean;
+    blockFtp: boolean;
+    blockScp: boolean;
+    blockRemoteDesktop: boolean;
+    blockExternalNetwork: boolean;
+  };
+}
+
 export type StudentExamStatus = 'not_started' | 'working' | 'submitted' | 'late' | 'violation' | 'offline' | 'reopened';
 
 export type FileIntegrityStatus = 'valid' | 'invalid' | 'damaged' | 'pending';
@@ -150,6 +199,8 @@ export interface ExamRule {
 
 export interface ExamSession {
   id: string;
+  examName?: string;
+  examType?: ExamType;
   courseId: string;
   sectionNo: string;
   examDate: string;
@@ -168,6 +219,8 @@ export interface ExamSession {
     instructions: string;
   };
   rules: ExamRule[];
+  /** Frontend policy configuration for future SecureLab Agent/backend enforcement. */
+  policy?: ExamPolicy;
   status: ExamSessionStatus;
   reopenedStudents?: { [studentId: string]: { reopenedUntil: string; reason: string } };
 }

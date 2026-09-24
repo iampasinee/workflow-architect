@@ -1,29 +1,275 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
-  Activity,
   Clock,
   ShieldAlert,
   AlertOctagon,
   CheckCircle2,
-  Users,
   Search,
   Plus,
   Minus,
   RotateCcw,
-  Eye,
   RefreshCw,
-  Bell,
   ArrowRight,
-  Filter,
   Monitor,
-  Check
+  Check,
+  ArrowLeft,
+  CalendarDays,
+  MapPin,
+  CalendarRange,
+  ListChecks,
+  GraduationCap,
 } from 'lucide-react';
 import { Badge, ExamSubmissionStatusBadge } from '../common/Badge';
 import { Modal } from '../common/Modal';
-import { Student, Violation, StudentExamStatus } from '../../types';
+import { ExamSessionStatus, Student, Violation, StudentExamStatus } from '../../types';
+import { studentMatchesSection } from '../../services/courseState';
+import {
+  clearMonitoringFilters,
+  defaultMonitoringView,
+  filterMonitoringExams,
+  getAuthorizedMonitoringExams,
+  getLocalDateInputValue,
+  getMonitoringStatusCounts,
+  MonitoringView,
+  TeacherMonitoringExam,
+} from '../../services/teacherMonitoring';
+import { MonitoringCalendar } from './MonitoringCalendar';
+import { MonitoringDatePickerPopover } from './MonitoringDatePickerPopover';
 
 export const LiveExamMonitoring: React.FC = () => {
+  const [selectedExamSessionId, setSelectedExamSessionId] = useState<string | null>(null);
+  const [selectedDate, setSelectedDate] = useState(() => getLocalDateInputValue());
+  const [monitoringView, setMonitoringView] = useState<MonitoringView>(defaultMonitoringView);
+  const [statusFilter, setStatusFilter] = useState<'all' | ExamSessionStatus>('all');
+  const [courseFilter, setCourseFilter] = useState('');
+  const [roomFilter, setRoomFilter] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+
+  if (selectedExamSessionId) {
+    return (
+      <ExamMonitoringDetail
+        examSessionId={selectedExamSessionId}
+        onBack={() => setSelectedExamSessionId(null)}
+      />
+    );
+  }
+
+  return (
+    <DailyExamOverview
+      selectedDate={selectedDate}
+      monitoringView={monitoringView}
+      statusFilter={statusFilter}
+      courseFilter={courseFilter}
+      roomFilter={roomFilter}
+      searchTerm={searchTerm}
+      onSelectedDateChange={setSelectedDate}
+      onMonitoringViewChange={setMonitoringView}
+      onStatusFilterChange={setStatusFilter}
+      onCourseFilterChange={setCourseFilter}
+      onRoomFilterChange={setRoomFilter}
+      onSearchTermChange={setSearchTerm}
+      onSelectExam={setSelectedExamSessionId}
+    />
+  );
+};
+
+const statusLabels: Record<ExamSessionStatus, string> = {
+  upcoming: 'กำลังจะเริ่ม',
+  in_progress: 'กำลังสอบ',
+  completed: 'เสร็จสิ้น',
+};
+
+const statusStyles: Record<ExamSessionStatus, string> = {
+  upcoming: 'border-amber-200 bg-amber-50 text-amber-700',
+  in_progress: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  completed: 'border-slate-200 bg-slate-100 text-slate-600',
+};
+
+const formatThaiDate = (date: string) => date
+  ? new Date(`${date}T12:00:00`).toLocaleDateString('th-TH', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  })
+  : 'ยังไม่เลือกวันที่';
+
+interface DailyExamOverviewProps {
+  selectedDate: string;
+  monitoringView: MonitoringView;
+  statusFilter: 'all' | ExamSessionStatus;
+  courseFilter: string;
+  roomFilter: string;
+  searchTerm: string;
+  onSelectedDateChange: (date: string) => void;
+  onMonitoringViewChange: (view: MonitoringView) => void;
+  onStatusFilterChange: (status: 'all' | ExamSessionStatus) => void;
+  onCourseFilterChange: (courseId: string) => void;
+  onRoomFilterChange: (roomId: string) => void;
+  onSearchTermChange: (search: string) => void;
+  onSelectExam: (examSessionId: string) => void;
+}
+
+const DailyExamOverview: React.FC<DailyExamOverviewProps> = ({
+  selectedDate,
+  monitoringView,
+  statusFilter,
+  courseFilter,
+  roomFilter,
+  searchTerm,
+  onSelectedDateChange,
+  onMonitoringViewChange,
+  onStatusFilterChange,
+  onCourseFilterChange,
+  onRoomFilterChange,
+  onSearchTermChange,
+  onSelectExam,
+}) => {
+  const { currentTeacher, examSessions, courses, rooms, students, seatAssignments, submissions, violations } = useApp();
+
+  const authorizedExams = useMemo(
+    () => getAuthorizedMonitoringExams(examSessions, courses),
+    [courses, examSessions],
+  );
+  const examsOnSelectedDate = useMemo(
+    () => authorizedExams.filter(({ exam }) => exam.examDate === selectedDate),
+    [authorizedExams, selectedDate],
+  );
+  const filteredExams = useMemo(() => filterMonitoringExams(authorizedExams, rooms, {
+    date: selectedDate,
+    status: statusFilter,
+    courseId: courseFilter,
+    roomId: roomFilter,
+    search: searchTerm,
+  }), [authorizedExams, courseFilter, roomFilter, rooms, searchTerm, selectedDate, statusFilter]);
+
+  const availableCourses = useMemo(() => Array.from(new Map(
+    examsOnSelectedDate.map(({ course }) => [course.id, course]),
+  ).values()), [examsOnSelectedDate]);
+  const availableRooms = useMemo(() => Array.from(new Map(
+    examsOnSelectedDate.map(({ exam }) => {
+      const room = rooms.find((candidate) => candidate.id === exam.roomId);
+      return room ? [room.id, room] : null;
+    }).filter((entry): entry is [string, typeof rooms[number]] => Boolean(entry)),
+  ).values()), [examsOnSelectedDate, rooms]);
+
+  const statusCounts = getMonitoringStatusCounts(examsOnSelectedDate);
+
+  const renderExamCard = ({ exam, course, section }: TeacherMonitoringExam) => {
+    const room = rooms.find((candidate) => candidate.id === exam.roomId);
+    const eligibleStudents = students.filter((student) => studentMatchesSection(student, section));
+    const enteredStudentIds = new Set(seatAssignments
+      .filter((assignment) => assignment.examId === exam.id)
+      .map((assignment) => assignment.studentId));
+    const submittedStudentIds = new Set(submissions
+      .filter((submission) => submission.examId === exam.id && ['submitted', 'late'].includes(submission.status))
+      .map((submission) => submission.studentId));
+    const violationCount = violations.filter((violation) => violation.examId === exam.id).length;
+    const isPrimaryTeacher = (section.primaryTeacherId || section.teacherId) === currentTeacher?.id;
+
+    return (
+      <article key={exam.id} className="flex min-w-0 flex-col rounded-2xl border border-gray-200 bg-white p-4 shadow-xs transition-all hover:border-blue-200 hover:shadow-md sm:p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="rounded-md border border-blue-200 bg-blue-50 px-2 py-0.5 font-mono text-xs font-bold text-blue-700">{course.courseCode}</span>
+            <span className="rounded-md bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-600">Section {exam.sectionNo}</span>
+            <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold ${isPrimaryTeacher ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>{isPrimaryTeacher ? 'อาจารย์ผู้สอนหลัก' : 'อาจารย์ร่วมสอน'}</span>
+          </div>
+          <span className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-1 text-[11px] font-bold ${statusStyles[exam.status]}`}><span className="h-2 w-2 rounded-full bg-current opacity-70" />{statusLabels[exam.status]}</span>
+        </div>
+
+        <h2 className="mt-2 truncate text-sm font-bold text-gray-950 sm:text-base">{course.courseName}</h2>
+        {exam.examName && <p className="mt-0.5 truncate text-xs font-medium text-blue-600">{exam.examName}</p>}
+
+        <div className="mt-3 rounded-xl bg-gray-50 p-3 text-xs text-gray-600">
+          <div className="grid gap-2 sm:grid-cols-2"><span className="flex items-center gap-1.5"><Clock className="h-4 w-4 text-blue-500" /><strong className="text-gray-700">เวลา:</strong> {exam.startTime} - {exam.endTime} น.</span><span className="flex items-center gap-1.5"><MapPin className="h-4 w-4 text-blue-500" /><strong className="text-gray-700">ห้อง:</strong> {room?.labName || '—'}</span></div>
+          <p className="mt-2 text-[11px] text-gray-500">{formatThaiDate(exam.examDate)} • {exam.durationMinutes} นาที • ห้องปฏิบัติการ{exam.format === 'online' ? 'ออนไลน์' : 'ออฟไลน์'}</p>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2 text-center text-[10px] sm:grid-cols-4">
+          <div className="rounded-xl border border-gray-100 bg-slate-50 px-2 py-2"><span className="block text-gray-500">ผู้มีสิทธิ์</span><strong className="text-sm text-gray-900">{eligibleStudents.length}</strong></div>
+          <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-2 py-2"><span className="block text-emerald-600">เข้าสอบแล้ว</span><strong className="text-sm text-emerald-900">{enteredStudentIds.size}</strong></div>
+          <div className="rounded-xl border border-amber-100 bg-amber-50 px-2 py-2"><span className="block text-amber-600">ยังไม่เข้า</span><strong className="text-sm text-amber-900">{Math.max(eligibleStudents.length - enteredStudentIds.size, 0)}</strong></div>
+          <div className="rounded-xl border border-blue-100 bg-blue-50 px-2 py-2"><span className="block text-blue-600">ส่งคำตอบ</span><strong className="text-sm text-blue-900">{submittedStudentIds.size}</strong></div>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between gap-3 border-t border-gray-100 pt-3">
+          <span className={`text-[11px] ${violationCount > 0 ? 'font-semibold text-red-600' : 'text-gray-400'}`}>{violationCount > 0 ? `ผิดปกติ ${violationCount} เหตุการณ์` : `ID: ${exam.id}`}</span>
+          <button type="button" onClick={() => onSelectExam(exam.id)} className="inline-flex min-h-9 items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">ดูรายละเอียด<ArrowRight className="h-4 w-4" /></button>
+        </div>
+      </article>
+    );
+  };
+
+  const clearFilters = () => {
+    const cleared = clearMonitoringFilters({
+      date: selectedDate,
+      status: statusFilter,
+      courseId: courseFilter,
+      roomId: roomFilter,
+      search: searchTerm,
+    });
+    onStatusFilterChange(cleared.status);
+    onCourseFilterChange(cleared.courseId);
+    onRoomFilterChange(cleared.roomId);
+    onSearchTermChange(cleared.search);
+  };
+
+  return (
+    <div className="space-y-5 text-left">
+      <header className="flex flex-col gap-4 border-b border-gray-200 pb-4 xl:flex-row xl:items-end xl:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white"><CalendarDays className="h-5 w-5" /></div>
+          <div className="min-w-0">
+            <p className="text-xs font-bold text-blue-600">พอร์ทัลอาจารย์ผู้สอน <span className="px-1 text-gray-300">•</span> ภาพรวมการสอบ</p>
+            <h1 className="text-2xl font-bold text-gray-900">ติดตามการสอบ</h1>
+            <p className="text-xs text-gray-500">ตรวจสอบรายการสอบตามตารางประจำวัน และเลือกการสอบเพื่อเข้าสู่ระบบติดตามความคืบหน้าแบบ Real-time</p>
+          </div>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="inline-flex rounded-xl border border-gray-200 bg-gray-100 p-1" role="tablist" aria-label="มุมมองติดตามการสอบ">
+            <button type="button" role="tab" aria-selected={monitoringView === 'daily'} onClick={() => onMonitoringViewChange('daily')} className={`inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-semibold sm:flex-none ${monitoringView === 'daily' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}><ListChecks className="h-4 w-4" />รายการประจำวัน</button>
+            <button type="button" role="tab" aria-selected={monitoringView === 'calendar'} onClick={() => onMonitoringViewChange('calendar')} className={`inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-semibold sm:flex-none ${monitoringView === 'calendar' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}><CalendarRange className="h-4 w-4" />ปฏิทินการสอบ</button>
+          </div>
+          <MonitoringDatePickerPopover
+            exams={authorizedExams}
+            selectedDate={selectedDate}
+            onSelectDate={onSelectedDateChange}
+            onShowDaily={() => onMonitoringViewChange('daily')}
+          />
+        </div>
+      </header>
+
+      {monitoringView === 'calendar' ? <MonitoringCalendar exams={authorizedExams} selectedDate={selectedDate} onSelectDate={onSelectedDateChange} onShowDaily={() => onMonitoringViewChange('daily')} /> : <>
+        <section className="flex flex-col gap-4 rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 to-white p-4 shadow-xs lg:flex-row lg:items-center lg:justify-between">
+          <div><p className="text-xs font-bold text-blue-600">กำหนดการสอบประจำวันที่ {formatThaiDate(selectedDate)}</p><h2 className="mt-1 text-xl font-bold text-gray-950">{selectedDate === getLocalDateInputValue() ? 'วันนี้' : 'วันที่เลือก'}มีการสอบ {statusCounts.all} รายการ</h2><p className="mt-1 flex items-center gap-1.5 text-[11px] text-gray-500"><GraduationCap className="h-4 w-4 text-blue-600" />อาจารย์ผู้คุมสอบ: <strong className="text-gray-700">{currentTeacher?.fullName || '—'}</strong> (แสดงเฉพาะรายวิชาและตอนเรียนที่ท่านได้รับมอบหมาย)</p></div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">{([['all', 'ทั้งหมด'], ['in_progress', 'กำลังสอบ'], ['upcoming', 'กำลังจะเริ่ม'], ['completed', 'เสร็จสิ้น']] as Array<['all' | ExamSessionStatus, string]>).map(([status, label]) => <button key={status} type="button" onClick={() => onStatusFilterChange(status)} className={`min-w-24 rounded-xl border px-3 py-2 text-center transition-all ${statusFilter === status ? 'border-blue-500 bg-white text-blue-700 ring-2 ring-blue-500/15' : 'border-gray-200 bg-white/80 text-gray-600 hover:border-blue-200'}`}><span className="block text-[10px] font-medium">{label}</span><strong className="mt-0.5 block text-lg text-gray-900">{statusCounts[status]}</strong></button>)}</div>
+        </section>
+
+        <section className="rounded-2xl border border-gray-200 bg-white p-3 shadow-xs">
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-[minmax(250px,1.5fr)_130px_1fr_1fr_auto]">
+            <label className="relative"><span className="sr-only">ค้นหา</span><Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" /><input value={searchTerm} onChange={(event) => onSearchTermChange(event.target.value)} placeholder="ค้นหารหัสวิชา, ชื่อวิชา, ชื่อการสอบ, Section หรือห้องสอบ..." className="h-10 w-full rounded-xl border border-gray-300 pl-9 pr-3 text-xs text-gray-800 focus:ring-2 focus:ring-blue-500" /></label>
+            <label><span className="sr-only">สถานะ</span><select value={statusFilter} onChange={(event) => onStatusFilterChange(event.target.value as 'all' | ExamSessionStatus)} className="h-10 w-full rounded-xl border border-gray-300 px-3 text-xs text-gray-800 focus:ring-2 focus:ring-blue-500"><option value="all">สถานะ: ทั้งหมด</option><option value="in_progress">กำลังสอบ</option><option value="upcoming">กำลังจะเริ่ม</option><option value="completed">เสร็จสิ้น</option></select></label>
+            <label><span className="sr-only">รายวิชา</span><select value={courseFilter} onChange={(event) => onCourseFilterChange(event.target.value)} className="h-10 w-full rounded-xl border border-gray-300 px-3 text-xs text-gray-800 focus:ring-2 focus:ring-blue-500"><option value="">ทุกรายวิชา</option>{availableCourses.map((course) => <option key={course.id} value={course.id}>{course.courseCode} — {course.courseName}</option>)}</select></label>
+            <label><span className="sr-only">ห้องสอบ</span><select value={roomFilter} onChange={(event) => onRoomFilterChange(event.target.value)} className="h-10 w-full rounded-xl border border-gray-300 px-3 text-xs text-gray-800 focus:ring-2 focus:ring-blue-500"><option value="">ทุกห้องสอบ</option>{availableRooms.map((room) => <option key={room.id} value={room.id}>{room.labName}</option>)}</select></label>
+            <button type="button" onClick={clearFilters} className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl px-3 text-xs font-semibold text-blue-600 hover:bg-blue-50"><RefreshCw className="h-4 w-4" />ล้างตัวกรอง</button>
+          </div>
+        </section>
+
+        <section className="grid gap-4 lg:grid-cols-2" aria-live="polite">
+          {filteredExams.length > 0 ? filteredExams.map(renderExamCard) : <div className="rounded-2xl border border-dashed border-gray-300 bg-white px-6 py-14 text-center lg:col-span-2"><CalendarDays className="mx-auto h-10 w-10 text-gray-300" /><h2 className="mt-3 text-base font-bold text-gray-900">{examsOnSelectedDate.length ? 'ไม่พบรายการตามตัวกรอง' : 'ไม่มีการสอบในวันที่เลือก'}</h2><p className="mt-1 text-xs text-gray-500">ลองเลือกวันที่อื่น หรือปรับตัวกรอง</p><div className="mt-4 flex flex-wrap justify-center gap-2"><button type="button" onClick={() => { onSelectedDateChange(getLocalDateInputValue()); clearFilters(); }} className="min-h-9 rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white hover:bg-blue-700">กลับไปวันนี้</button><button type="button" onClick={() => onMonitoringViewChange('calendar')} className="min-h-9 rounded-xl border border-gray-300 bg-white px-4 text-xs font-semibold text-gray-700 hover:bg-gray-50">เปิดปฏิทิน</button></div></div>}
+        </section>
+      </>}
+    </div>
+  );
+};
+
+interface ExamMonitoringDetailProps {
+  examSessionId: string;
+  onBack: () => void;
+}
+
+const ExamMonitoringDetail: React.FC<ExamMonitoringDetailProps> = ({ examSessionId, onBack }) => {
   const {
     examSessions,
     courses,
@@ -41,9 +287,9 @@ export const LiveExamMonitoring: React.FC = () => {
   } = useApp();
 
   const isThai = language === 'th';
-  const activeExam = examSessions[0];
+  const activeExam = examSessions.find((exam) => exam.id === examSessionId);
   const course = courses.find((c) => c.id === activeExam?.courseId);
-  const room = rooms.find((r) => r.id === activeExam?.roomId) || rooms[0];
+  const room = rooms.find((r) => r.id === activeExam?.roomId);
 
   const [lastUpdated, setLastUpdated] = useState(new Date().toLocaleTimeString());
   const [activeFilter, setActiveFilter] = useState<string>('all');
@@ -83,6 +329,27 @@ export const LiveExamMonitoring: React.FC = () => {
     }, 5000);
     return () => clearInterval(timer);
   }, []);
+
+  if (!activeExam || !course || !room) {
+    return (
+      <div className="rounded-2xl border border-dashed border-gray-300 bg-white px-6 py-14 text-center">
+        <AlertOctagon className="mx-auto h-10 w-10 text-gray-300" />
+        <h1 className="mt-3 text-base font-bold text-gray-900">ไม่พบข้อมูลการสอบที่เลือก</h1>
+        <button type="button" onClick={onBack} className="mt-4 rounded-xl bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700">
+          ย้อนกลับไปภาพรวมประจำวัน
+        </button>
+      </div>
+    );
+  }
+
+  const section = course.sections.find((candidate) => candidate.sectionNo === activeExam.sectionNo);
+  const eligibleStudentCount = section
+    ? students.filter((student) => studentMatchesSection(student, section)).length
+    : 0;
+  const examViolations = violations.filter((violation) => violation.examId === activeExam.id);
+  const submittedCount = new Set(submissions
+    .filter((submission) => submission.examId === activeExam.id && ['submitted', 'late'].includes(submission.status))
+    .map((submission) => submission.studentId)).size;
 
   const hasActiveReopening = (studentId: string) => {
     const reopening =
@@ -126,19 +393,13 @@ export const LiveExamMonitoring: React.FC = () => {
 
   // Aggregated totals
   let totalAssigned = 0;
-  let submittedCount = 0;
-  let workingCount = 0;
-  let lateCount = 0;
   let violationCount = 0;
   let offlineCount = 0;
 
   (room?.seats || []).forEach((seat) => {
     const res = getSeatStatus(seat.seatNo);
     if (res.student) totalAssigned++;
-    if (res.status === 'submitted') submittedCount++;
-    else if (res.status === 'working') workingCount++;
-    else if (res.status === 'late') lateCount++;
-    else if (res.status === 'violation') violationCount++;
+    if (res.status === 'violation') violationCount++;
     else if (res.status === 'offline') offlineCount++;
   });
 
@@ -215,9 +476,17 @@ export const LiveExamMonitoring: React.FC = () => {
       {/* Top Header & Telemetry Status */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-gray-200 gap-3">
         <div>
+          <button
+            type="button"
+            onClick={onBack}
+            className="mb-3 inline-flex min-h-9 items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            ย้อนกลับไปภาพรวมประจำวัน
+          </button>
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold uppercase tracking-wider text-blue-600">
-              {isThai ? 'ข้อมูลการคุมสอบสด (T5 & T6)' : 'Active Proctor Feed (T5 & T6)'}
+              {isThai ? 'รายละเอียดการติดตามการสอบ' : 'Exam Monitoring Detail'}
             </span>
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
             <span className="text-xs text-gray-500">
@@ -226,14 +495,17 @@ export const LiveExamMonitoring: React.FC = () => {
             </span>
           </div>
           <h1 className="text-2xl font-bold text-gray-900 mt-0.5">
-            {course?.courseCode}: {isThai ? 'ติดตามการสอบสด & ควบคุมเวลาสอบ' : 'Live Exam Monitoring & Time Control'}
+            {activeExam.examName || `${course.courseCode}: ${course.courseName}`}
           </h1>
-          <p className="text-xs text-gray-500">
-            {isThai ? 'ห้องสอบ: ' : 'Room: '}
-            {room.labName} • {isThai ? 'กำหนดเวลา: ' : 'Scheduled: '}
-            {activeExam?.startTime} - {activeExam?.endTime} ({isThai ? 'ระยะเวลา: ' : 'Duration: '}
-            {activeExam?.durationMinutes} {isThai ? 'นาที' : 'min'})
-          </p>
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
+            {activeExam.examName && <span>{course.courseCode}: {course.courseName}</span>}
+            <span>Section {activeExam.sectionNo}</span>
+            <span>{formatThaiDate(activeExam.examDate)}</span>
+            <span>{activeExam.startTime} - {activeExam.endTime}</span>
+            <span>{activeExam.durationMinutes} นาที</span>
+            <span>ห้อง {room.labName}</span>
+            <span className={`rounded-full border px-2 py-0.5 font-semibold ${statusStyles[activeExam.status]}`}>{statusLabels[activeExam.status]}</span>
+          </div>
         </div>
 
         {/* Global Time Controls Button Group */}
@@ -283,9 +555,9 @@ export const LiveExamMonitoring: React.FC = () => {
           }`}
         >
           <span className="text-[11px] text-gray-500 font-medium block">
-            {isThai ? 'ที่นั่งสอบทั้งหมด' : 'Total Seated'}
+            {isThai ? 'ผู้มีสิทธิ์สอบทั้งหมด' : 'Eligible Students'}
           </span>
-          <span className="text-2xl font-bold text-gray-900 font-mono mt-0.5 block">{totalAssigned}</span>
+          <span className="text-2xl font-bold text-gray-900 font-mono mt-0.5 block">{eligibleStudentCount}</span>
         </div>
 
         <div
@@ -302,32 +574,18 @@ export const LiveExamMonitoring: React.FC = () => {
           <span className="text-2xl font-bold text-emerald-800 font-mono mt-0.5 block">{submittedCount}</span>
         </div>
 
-        <div
-          onClick={() => setActiveFilter('working')}
-          className={`p-3.5 rounded-2xl border transition-all cursor-pointer text-center ${
-            activeFilter === 'working'
-              ? 'bg-blue-50 border-blue-400 ring-2 ring-blue-400/20'
-              : 'bg-white border-gray-200 hover:border-blue-200'
-          }`}
-        >
+        <div className="p-3.5 rounded-2xl border border-gray-200 bg-white text-center">
           <span className="text-[11px] text-blue-700 font-medium block">
-            {isThai ? 'กำลังทำข้อสอบ (สีฟ้า)' : 'Working (Blue)'}
+            {isThai ? 'เข้าสอบแล้ว' : 'Entered'}
           </span>
-          <span className="text-2xl font-bold text-blue-800 font-mono mt-0.5 block">{workingCount}</span>
+          <span className="text-2xl font-bold text-blue-800 font-mono mt-0.5 block">{totalAssigned}</span>
         </div>
 
-        <div
-          onClick={() => setActiveFilter('late')}
-          className={`p-3.5 rounded-2xl border transition-all cursor-pointer text-center ${
-            activeFilter === 'late'
-              ? 'bg-amber-50 border-amber-400 ring-2 ring-amber-400/20'
-              : 'bg-white border-gray-200 hover:border-amber-200'
-          }`}
-        >
+        <div className="p-3.5 rounded-2xl border border-gray-200 bg-white text-center">
           <span className="text-[11px] text-amber-700 font-medium block">
-            {isThai ? 'ส่งช้า (สีเหลือง)' : 'Late (Amber)'}
+            {isThai ? 'ยังไม่เข้าสอบ' : 'Not Entered'}
           </span>
-          <span className="text-2xl font-bold text-amber-800 font-mono mt-0.5 block">{lateCount}</span>
+          <span className="text-2xl font-bold text-amber-800 font-mono mt-0.5 block">{Math.max(eligibleStudentCount - totalAssigned, 0)}</span>
         </div>
 
         <div
@@ -465,17 +723,17 @@ export const LiveExamMonitoring: React.FC = () => {
               <span>{isThai ? 'บันทึกการละเมิดสด' : 'Violation Feed'}</span>
             </h3>
             <span className="text-xs font-mono font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded-full">
-              {violations.length}
+              {examViolations.length}
             </span>
           </div>
 
           <div className="space-y-2.5 overflow-y-auto max-h-[480px] flex-1 pr-1">
-            {violations.length === 0 ? (
+            {examViolations.length === 0 ? (
               <div className="p-6 text-center text-xs text-gray-400 bg-gray-50 rounded-xl">
                 {isThai ? 'ไม่พบการละเมิดกฎในขณะนี้' : 'No active integrity breaches detected.'}
               </div>
             ) : (
-              violations.map((vio) => {
+              examViolations.map((vio) => {
                 const std = students.find((s) => s.id === vio.studentId);
                 return (
                   <div
@@ -670,7 +928,7 @@ export const LiveExamMonitoring: React.FC = () => {
                   <ShieldAlert className="w-4 h-4 text-red-600" />
                   <span>{isThai ? 'พบการละเมิดกฎความปลอดภัย:' : 'Flagged Integrity Breach:'}</span>
                 </div>
-                {violations
+                {examViolations
                   .filter((v) => v.studentId === selectedStudentForDetail.student.id)
                   .map((v) => (
                     <div key={v.id} className="text-xs">

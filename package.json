@@ -12,6 +12,8 @@
     "test:academic": "tsx --test src/services/academicState.test.ts",
     "test:auth": "tsx --test src/services/authState.test.ts",
     "test:courses": "tsx --test src/services/courseState.test.ts",
+    "test:monitoring": "tsx --test src/services/teacherMonitoring.test.ts",
+    "test:exam-wizard": "tsx --test src/services/examWizard.test.ts",
     "test:rooms": "tsx --test src/services/roomState.test.ts"
   },
   "dependencies": {
