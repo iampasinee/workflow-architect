@@ -23,8 +23,9 @@ export interface MonitoringStatusCounts {
   completed: number;
 }
 
-export interface MonitoringDateSummary extends MonitoringStatusCounts {
+export interface MonitoringDateSummary {
   date: string;
+  examCount: number;
 }
 
 export interface MonitoringCalendarDateCell {
@@ -74,9 +75,13 @@ export const getMonitoringStatusCounts = (
 export const getMonitoringDateSummaries = (
   exams: TeacherMonitoringExam[],
 ): MonitoringDateSummary[] => {
-  const dates = Array.from(new Set(exams.map(({ exam }) => exam.examDate))).sort();
-  return dates.map((date) => ({ date, ...getMonitoringStatusCounts(exams, date) }));
+  const counts = new Map<string, number>();
+  exams.forEach(({ exam }) => counts.set(exam.examDate, (counts.get(exam.examDate) || 0) + 1));
+  return Array.from(counts, ([date, examCount]) => ({ date, examCount }))
+    .sort((first, second) => first.date.localeCompare(second.date));
 };
+
+export const formatMonitoringExamCount = (count: number): string => `${count} รอบ`;
 
 export const getMonitoringMonthSummary = (
   exams: TeacherMonitoringExam[],
@@ -87,7 +92,7 @@ export const getMonitoringMonthSummary = (
   const dates = getMonitoringDateSummaries(exams)
     .filter((summary) => summary.date.startsWith(monthPrefix));
   return {
-    totalExams: dates.reduce((total, summary) => total + summary.all, 0),
+    totalExams: dates.reduce((total, summary) => total + summary.examCount, 0),
     dates,
   };
 };

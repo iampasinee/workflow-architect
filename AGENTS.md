@@ -91,6 +91,9 @@ Use:
 * `npm run test:academic` — test academic hierarchy, student assignment, migrations, and derived academic data
 * `npm run test:courses` — test course/section migration, validation, teacher assignment, student eligibility, and portal assignments
 * `npm run test:rooms` — test Floor/Physical Room/Exam Room relationships, room migration, layouts, and computer binding
+* `npm run test:exam-wizard` — test teacher exam setup, authorization, draft persistence, and schedule validation
+* `npm run test:exam-management` — test teacher exam search and filters
+* `npm run test:monitoring` — test authorized monitoring summaries, calendar counts, and daily filters
 * `npm run build` — create the production bundle in `dist/`
 * `npm run preview` — serve the production bundle locally
 * `git diff --check` — check whitespace errors before finishing
@@ -105,6 +108,9 @@ npm run test:auth
 npm run test:academic
 npm run test:courses
 npm run test:rooms
+npm run test:exam-wizard
+npm run test:exam-management
+npm run test:monitoring
 npm run build
 git diff --check
 ```
@@ -1045,6 +1051,20 @@ Do not silently assign students from the wrong Major or admission year.
 
 ---
 
+## Teacher Exam Management and Monitoring
+
+Teacher exam setup lives in `src/components/teacher/ExamCreationWizard.tsx` and `src/services/examWizard.ts`. The `จัดการสอบ` page lives in `src/components/teacher/CourseExamSessionManager.tsx`; its canonical exam filters live in `src/services/teacherExamManagement.ts`.
+
+The exam Wizard has six steps: exam information, eligible students, schedule and Exam Room, online/offline mode, policies, and review/save. Course and Section choices must be authorized through Primary Teacher or Co-Teacher assignments. Resolve eligible students through existing Section cohorts. Validate the time range, room conflict, and capacity before final creation. Policies are frontend configuration only; do not imply that an Agent, network control, or biometric verification is enforced.
+
+Keep incomplete drafts separate from canonical `ExamSession` records under `securelab_teacher_exam_drafts_v1`. Saving a draft must not create a canonical exam. Editing an existing exam must preserve its stable ID and current status restrictions. A created exam should appear in monitoring through canonical state, not a duplicate monitoring record.
+
+The `การสอบทั้งหมด` tab filters already-authorized exams by search text, canonical status (`upcoming`, `in_progress`, `completed`), and exam mode (`online`, `offline`). Its tab count represents all authorized canonical exams, while a separate result count may reflect filters. The `ร่างการสอบ` tab has independent draft search; canonical exam filters must not affect it.
+
+Teacher monitoring lives in `src/components/teacher/LiveExamMonitoring.tsx`, `MonitoringCalendar.tsx`, `MonitoringDatePickerPopover.tsx`, and `src/services/teacherMonitoring.ts`. The daily overview retains status counters and search/status/course/room filters. The full calendar and compact date picker display schedule dates and exam counts (`N รอบ`) only, without status dots, status categories, or a status legend in their date cells. Both date controls use the same selected date; choosing a date returns to the daily overview without opening an exam detail automatically. Keep monitoring restricted to the Teacher's authorized Course/Sections.
+
+---
+
 ## Portal Compatibility
 
 After academic changes, verify all role portals.
@@ -1069,6 +1089,8 @@ Verify:
 * student eligibility remains correct
 * exam creation still works
 * exam management still works
+* exam drafts, authorization, and canonical exam filters remain separate
+* monitoring calendar counts and daily status views remain correct
 
 ### Student Flow
 
@@ -1465,6 +1487,9 @@ npm run test:auth
 npm run test:academic
 npm run test:courses
 npm run test:rooms
+npm run test:exam-wizard
+npm run test:exam-management
+npm run test:monitoring
 npm run build
 git diff --check
 ```
@@ -1587,6 +1612,10 @@ When relevant, manually verify:
 * Teacher Faculty/Department cascade and migrated affiliation
 * cohort assignment
 * RA only, RB only, and RA + RB Section targeting
+* authorized exam creation, draft save/reopen, and online/offline policy configuration
+* exam time, room conflict, and capacity validation
+* canonical exam search/status/mode filters independent from draft search
+* monitoring date selection, calendar counts, daily status filters, and exam detail
 * add-user role selection, `ย้อนกลับ`, close, and form-state reset
 * add/edit/deactivate Floor and Physical Room
 * room suffix preview and generated room code

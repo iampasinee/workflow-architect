@@ -10,6 +10,7 @@ import {
   ListChecks,
   MapPin,
   Plus,
+  RotateCcw,
   Search,
   Trash2,
 } from 'lucide-react';
@@ -24,6 +25,12 @@ import {
   loadExamDrafts,
   removeExamDraft,
 } from '../../services/examWizard';
+import { getAuthorizedMonitoringExams } from '../../services/teacherMonitoring';
+import {
+  defaultTeacherExamFilters,
+  filterTeacherExamSessions,
+  TeacherExamFilters,
+} from '../../services/teacherExamManagement';
 
 interface WizardTarget {
   editingExam?: ExamSession;
@@ -35,7 +42,7 @@ type ExamManagementView = 'exams' | 'drafts';
 export const CourseExamSessionManager: React.FC = () => {
   const { currentTeacher, examSessions, courses, rooms, showToast } = useApp();
   const [activeView, setActiveView] = useState<ExamManagementView>('exams');
-  const [searchTerm, setSearchTerm] = useState('');
+  const [examFilters, setExamFilters] = useState<TeacherExamFilters>(defaultTeacherExamFilters);
   const [draftSearchTerm, setDraftSearchTerm] = useState('');
   const [wizardTarget, setWizardTarget] = useState<WizardTarget | null>(null);
   const [previewExam, setPreviewExam] = useState<ExamSession | null>(null);
@@ -61,18 +68,10 @@ export const CourseExamSessionManager: React.FC = () => {
     );
   }
 
-  const authorizedSessions = examSessions.filter((session) => courses.some((course) => (
-    course.id === session.courseId
-    && course.sections.some((section) => section.sectionNo === session.sectionNo)
-  )));
-
-  const filteredSessions = authorizedSessions.filter((session) => {
-    const course = courses.find((candidate) => candidate.id === session.courseId);
-    const room = rooms.find((candidate) => candidate.id === session.roomId);
-    const search = searchTerm.trim().toLocaleLowerCase('th');
-    return !search || [session.examName, course?.courseCode, course?.courseName, room?.labName, session.examDate]
-      .some((value) => value?.toLocaleLowerCase('th').includes(search));
-  });
+  const authorizedSessions = getAuthorizedMonitoringExams(examSessions, courses);
+  const filteredSessions = filterTeacherExamSessions(examSessions, courses, rooms, examFilters);
+  const hasExamFilters = Boolean(examFilters.search.trim()) || examFilters.status !== 'all' || examFilters.mode !== 'all';
+  const updateExamFilters = (updates: Partial<TeacherExamFilters>) => setExamFilters((current) => ({ ...current, ...updates }));
 
   const filteredDrafts = filterExamDrafts(drafts, courses, draftSearchTerm)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -133,7 +132,32 @@ export const CourseExamSessionManager: React.FC = () => {
       {activeView === 'exams' ? (
         <>
           <section className="rounded-2xl border border-gray-200 bg-white p-3 shadow-xs">
-            <div className="relative"><Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" /><input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="ค้นหารหัสวิชา ชื่อการสอบ ห้องสอบ หรือวันที่..." className="h-10 w-full rounded-xl border border-gray-200 bg-gray-50 pl-9 pr-4 text-xs text-gray-800 outline-none focus:ring-2 focus:ring-blue-500" /></div>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_160px_150px_auto]">
+              <label className="relative min-w-0 sm:col-span-2 lg:col-span-1">
+                <span className="sr-only">ค้นหาการสอบ</span>
+                <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                <input value={examFilters.search} onChange={(event) => updateExamFilters({ search: event.target.value })} placeholder="ค้นหาชื่อการสอบ รหัสวิชา รายวิชา Section หรือห้องสอบ..." className="h-10 w-full rounded-xl border border-gray-200 bg-gray-50 pl-9 pr-4 text-xs text-gray-800 outline-none focus:ring-2 focus:ring-blue-500" />
+              </label>
+              <label className="min-w-0">
+                <span className="sr-only">สถานะการสอบ</span>
+                <select value={examFilters.status} onChange={(event) => updateExamFilters({ status: event.target.value as TeacherExamFilters['status'] })} className="h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-xs text-gray-800 focus:ring-2 focus:ring-blue-500">
+                  <option value="all">ทุกสถานะ</option>
+                  <option value="upcoming">กำลังจะถึง</option>
+                  <option value="in_progress">กำลังสอบ</option>
+                  <option value="completed">เสร็จสิ้น</option>
+                </select>
+              </label>
+              <label className="min-w-0">
+                <span className="sr-only">รูปแบบการสอบ</span>
+                <select value={examFilters.mode} onChange={(event) => updateExamFilters({ mode: event.target.value as TeacherExamFilters['mode'] })} className="h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-xs text-gray-800 focus:ring-2 focus:ring-blue-500">
+                  <option value="all">ทุกรูปแบบ</option>
+                  <option value="online">ออนไลน์</option>
+                  <option value="offline">ออฟไลน์</option>
+                </select>
+              </label>
+              <button type="button" onClick={() => setExamFilters(defaultTeacherExamFilters())} disabled={!hasExamFilters} className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl px-3 text-xs font-semibold text-blue-600 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-default disabled:text-gray-400 disabled:hover:bg-transparent sm:col-span-2 lg:col-span-1"><RotateCcw className="h-4 w-4" />ล้างตัวกรอง</button>
+            </div>
+            {hasExamFilters && <p className="mt-2 text-[11px] text-gray-500" aria-live="polite">พบ {filteredSessions.length} จาก {authorizedSessions.length} รายการ</p>}
           </section>
 
           <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xs">
@@ -141,7 +165,7 @@ export const CourseExamSessionManager: React.FC = () => {
               <table className="w-full min-w-[860px] text-left text-xs">
                 <thead className="border-b border-gray-200 bg-gray-50 font-semibold text-gray-600"><tr><th className="px-5 py-3.5">การสอบ / รายวิชา</th><th className="px-4 py-3.5">วันเวลา</th><th className="px-4 py-3.5">ห้องสอบ</th><th className="px-4 py-3.5">รูปแบบ / ไฟล์</th><th className="px-4 py-3.5">สถานะ</th><th className="px-5 py-3.5 text-right">การดำเนินการ</th></tr></thead>
                 <tbody className="divide-y divide-gray-100">
-                  {filteredSessions.map((session) => {
+                  {filteredSessions.map(({ exam: session }) => {
                     const course = courses.find((candidate) => candidate.id === session.courseId);
                     const room = rooms.find((candidate) => candidate.id === session.roomId);
                     const editable = session.status === 'upcoming';
@@ -156,7 +180,7 @@ export const CourseExamSessionManager: React.FC = () => {
                       </tr>
                     );
                   })}
-                  {filteredSessions.length === 0 && <tr><td colSpan={6} className="px-6 py-14 text-center"><CalendarDays className="mx-auto h-9 w-9 text-gray-300" /><p className="mt-3 font-semibold text-gray-700">ไม่พบการสอบ</p><p className="mt-1 text-[11px] text-gray-400">ลองเปลี่ยนคำค้นหา หรือสร้างการสอบใหม่</p></td></tr>}
+                  {filteredSessions.length === 0 && <tr><td colSpan={6} className="px-6 py-14 text-center"><CalendarDays className="mx-auto h-9 w-9 text-gray-300" /><p className="mt-3 font-semibold text-gray-700">{hasExamFilters ? 'ไม่พบการสอบที่ตรงกับตัวกรอง' : 'ยังไม่มีการสอบ'}</p><p className="mt-1 text-[11px] text-gray-400">{hasExamFilters ? 'ลองเปลี่ยนคำค้นหา สถานะ หรือรูปแบบการสอบ' : 'สร้างการสอบใหม่เพื่อเริ่มจัดการรายการสอบ'}</p>{hasExamFilters && <button type="button" onClick={() => setExamFilters(defaultTeacherExamFilters())} className="mt-4 min-h-9 rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">ล้างตัวกรอง</button>}</td></tr>}
                 </tbody>
               </table>
             </div>

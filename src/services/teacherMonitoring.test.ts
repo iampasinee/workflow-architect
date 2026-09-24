@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import type { Course, ExamSession, Room } from '../types';
+import { MonitoringCalendar } from '../components/teacher/MonitoringCalendar';
 import {
   clearMonitoringFilters,
   defaultMonitoringView,
   filterMonitoringExams,
   findAuthorizedMonitoringExam,
+  formatMonitoringExamCount,
   getCalendarMonthCells,
   getMonitoringCalendarDateCells,
   getAuthorizedMonitoringExams,
@@ -109,13 +113,16 @@ test('an alternate date without exams returns the empty state collection', () =>
   }).length, 0);
 });
 
-test('calendar summaries count only authorized exams and preserve multiple same-day sessions', () => {
+test('schedule summaries count only authorized exams without live-status categories', () => {
   const authorized = getAuthorizedMonitoringExams(sessions, courses);
   const summaries = getMonitoringDateSummaries(authorized);
   assert.deepEqual(summaries, [
-    { date: '2026-09-25', all: 3, in_progress: 1, upcoming: 1, completed: 1 },
-    { date: '2026-09-26', all: 1, in_progress: 0, upcoming: 1, completed: 0 },
+    { date: '2026-09-25', examCount: 3 },
+    { date: '2026-09-26', examCount: 1 },
   ]);
+  assert.equal(summaries.find(({ date }) => date === '2026-09-22'), undefined);
+  assert.equal(formatMonitoringExamCount(1), '1 รอบ');
+  assert.equal(formatMonitoringExamCount(3), '3 รอบ');
   assert.deepEqual(getMonitoringStatusCounts(authorized, '2026-09-25'), {
     all: 3, in_progress: 1, upcoming: 1, completed: 1,
   });
@@ -142,10 +149,27 @@ test('popover month grid includes adjacent dates and authorized monthly totals',
   });
   assert.ok(cells.some((cell) => !cell.isCurrentMonth));
   assert.equal(month.totalExams, 4);
-  assert.deepEqual(month.dates.map(({ date, all }) => ({ date, all })), [
-    { date: '2026-09-25', all: 3 },
-    { date: '2026-09-26', all: 1 },
+  assert.deepEqual(month.dates, [
+    { date: '2026-09-25', examCount: 3 },
+    { date: '2026-09-26', examCount: 1 },
   ]);
+});
+
+test('full calendar renders only session counts, including quick dates, without status markers', () => {
+  const authorized = getAuthorizedMonitoringExams(sessions, courses);
+  const markup = renderToStaticMarkup(React.createElement(MonitoringCalendar, {
+    exams: authorized,
+    selectedDate: '2026-09-25',
+    onSelectDate: () => undefined,
+    onShowDaily: () => undefined,
+  }));
+
+  assert.match(markup, /25 กันยายน 2569 มีการสอบ 3 รอบ/);
+  assert.match(markup, /26 กันยายน 2569 มีการสอบ 1 รอบ/);
+  assert.match(markup, /22 กันยายน 2569 ไม่มีการสอบ/);
+  assert.match(markup, /25 ก.ย. 2569/);
+  assert.match(markup, /3 รอบ/);
+  assert.doesNotMatch(markup, /0 รอบ|กำลังสอบ|กำลังจะเริ่ม|เสร็จสิ้น|bg-emerald-500|bg-amber-500|bg-gray-400/);
 });
 
 test('status counter filtering, rich search and clear filters preserve the selected date', () => {

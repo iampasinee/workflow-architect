@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
+  formatMonitoringExamCount,
   getCalendarMonthCells,
   getLocalDateInputValue,
   getMonitoringDateSummaries,
@@ -69,7 +70,7 @@ export const MonitoringCalendar: React.FC<MonitoringCalendarProps> = ({
             const isSelected = date === selectedDate;
             const isToday = date === today;
             const accessibleLabel = summary
-              ? `${formatThaiDate(date)} มีการสอบ ${summary.all} รายการ: กำลังสอบ ${summary.in_progress}, กำลังจะเริ่ม ${summary.upcoming}, เสร็จสิ้น ${summary.completed}`
+              ? `${formatThaiDate(date)} มีการสอบ ${formatMonitoringExamCount(summary.examCount)}`
               : `${formatThaiDate(date)} ไม่มีการสอบ`;
             return (
               <button
@@ -78,10 +79,10 @@ export const MonitoringCalendar: React.FC<MonitoringCalendarProps> = ({
                 onClick={() => selectDate(date)}
                 aria-label={accessibleLabel}
                 title={accessibleLabel}
-                className={`min-h-16 min-w-0 rounded-xl border p-1.5 text-left transition-all sm:min-h-24 sm:p-2.5 ${isSelected ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-500/15' : isToday ? 'border-blue-200 bg-white' : summary ? 'border-gray-200 bg-white hover:border-blue-300 hover:shadow-sm' : 'border-gray-100 bg-gray-50/40 hover:bg-gray-50'}`}
+                className={`min-h-16 min-w-0 rounded-xl border p-1.5 text-left transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 sm:min-h-24 sm:p-2.5 ${isSelected ? 'border-blue-600 bg-blue-600 text-white shadow-sm' : isToday ? 'border-blue-300 bg-blue-50 text-blue-700' : summary ? 'border-blue-100 bg-blue-50/50 text-gray-700 hover:border-blue-300 hover:shadow-sm' : 'border-gray-100 bg-gray-50/40 text-gray-700 hover:bg-gray-50'}`}
               >
-                <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${isToday ? 'bg-blue-600 text-white' : 'text-gray-700'}`}>{day}</span>
-                {summary && <><span className="mt-1 block truncate text-[9px] font-bold text-gray-700 sm:text-[11px]">{summary.all} สอบ</span><span className="mt-1 flex flex-wrap gap-1" aria-hidden="true">{summary.in_progress > 0 && <span className="h-2 w-2 rounded-full bg-emerald-500" title="กำลังสอบ" />}{summary.upcoming > 0 && <span className="h-2 w-2 rounded-full bg-amber-500" title="กำลังจะเริ่ม" />}{summary.completed > 0 && <span className="h-2 w-2 rounded-full bg-gray-400" title="เสร็จสิ้น" />}</span></>}
+                <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${isSelected ? 'text-white' : isToday ? 'border border-blue-400 text-blue-700' : 'text-gray-700'}`}>{day}</span>
+                {summary && <span className={`mt-1 inline-block rounded-full px-1.5 py-0.5 text-[9px] font-bold sm:text-[11px] ${isSelected ? 'bg-white text-blue-700' : 'bg-blue-100 text-blue-700'}`}>{formatMonitoringExamCount(summary.examCount)}</span>}
               </button>
             );
           })}
@@ -90,7 +91,7 @@ export const MonitoringCalendar: React.FC<MonitoringCalendarProps> = ({
 
       <div className="border-t border-gray-100 bg-gray-50/60 p-4">
         <p className="text-[11px] font-semibold text-gray-600">วันที่มีการสอบในระบบ</p>
-        <div className="mt-2 flex flex-wrap gap-2">{summaries.length ? summaries.map((summary) => <button key={summary.date} type="button" onClick={() => selectDate(summary.date)} className="rounded-full border border-gray-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-gray-600 hover:border-blue-300 hover:text-blue-700">{formatThaiDate(summary.date, 'short')} <span className="ml-1 text-blue-600">{summary.all}</span></button>) : <span className="text-xs text-gray-400">ยังไม่มีตารางสอบ</span>}</div>
+        <div className="mt-2 flex flex-wrap gap-2">{summaries.length ? summaries.map((summary) => <button key={summary.date} type="button" onClick={() => selectDate(summary.date)} className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold ${summary.date === selectedDate ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-200 bg-white text-gray-600 hover:border-blue-300 hover:text-blue-700'}`}>{formatThaiDate(summary.date, 'short')} <span className={summary.date === selectedDate ? 'ml-1 text-blue-100' : 'ml-1 text-blue-600'}>{formatMonitoringExamCount(summary.examCount)}</span></button>) : <span className="text-xs text-gray-400">ยังไม่มีตารางสอบ</span>}</div>
       </div>
     </section>
   );

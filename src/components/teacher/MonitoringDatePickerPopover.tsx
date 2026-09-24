@@ -1,11 +1,11 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
+  formatMonitoringExamCount,
   getLocalDateInputValue,
   getMonitoringCalendarDateCells,
   getMonitoringDateSummaries,
   getMonitoringMonthSummary,
-  getMonitoringStatusCounts,
   selectMonitoringCalendarDate,
   TeacherMonitoringExam,
 } from '../../services/teacherMonitoring';
@@ -69,7 +69,7 @@ export const MonitoringDatePickerPopover: React.FC<MonitoringDatePickerPopoverPr
     () => new Map(summaries.map((summary) => [summary.date, summary])),
     [summaries],
   );
-  const selectedCount = getMonitoringStatusCounts(exams, selectedDate).all;
+  const selectedCount = summaryByDate.get(selectedDate)?.examCount || 0;
   const monthSummary = useMemo(
     () => getMonitoringMonthSummary(exams, monthCursor.getFullYear(), monthCursor.getMonth()),
     [exams, monthCursor],
@@ -102,7 +102,7 @@ export const MonitoringDatePickerPopover: React.FC<MonitoringDatePickerPopoverPr
         >
           <CalendarDays className="h-4 w-4 shrink-0 text-blue-600" />
           <span className="min-w-0 truncate whitespace-nowrap">{formatThaiDate(selectedDate)}</span>
-          <span className="inline-flex shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">{selectedCount} สอบ</span>
+          <span className="inline-flex shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700">{formatMonitoringExamCount(selectedCount)}</span>
           <ChevronDown className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
         </button>
         <button
@@ -165,7 +165,7 @@ export const MonitoringDatePickerPopover: React.FC<MonitoringDatePickerPopoverPr
                 const isSelected = date === selectedDate;
                 const isToday = date === today;
                 const accessibleLabel = summary
-                  ? `${formatThaiDate(date)} มีการสอบ ${summary.all} รายการ: กำลังสอบ ${summary.in_progress}, กำลังจะเริ่ม ${summary.upcoming}, เสร็จสิ้น ${summary.completed}`
+                  ? `${formatThaiDate(date)} มีการสอบ ${formatMonitoringExamCount(summary.examCount)}`
                   : `${formatThaiDate(date)} ไม่มีการสอบ`;
                 return (
                   <button
@@ -177,16 +177,7 @@ export const MonitoringDatePickerPopover: React.FC<MonitoringDatePickerPopoverPr
                     className={`relative flex min-h-11 min-w-0 flex-col items-center justify-center rounded-xl border px-0.5 py-1 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${isSelected ? 'border-blue-600 bg-blue-600 text-white shadow-sm' : isToday ? 'border-blue-300 bg-blue-50 text-blue-700' : summary ? 'border-blue-100 bg-blue-50/50 text-gray-700 hover:border-blue-300' : 'border-transparent text-gray-600 hover:bg-gray-50'} ${isCurrentMonth ? '' : 'opacity-40'}`}
                   >
                     <span className="text-[11px] font-semibold">{Number(date.slice(-2))}</span>
-                    {summary && (
-                      <>
-                        <span className={`mt-0.5 rounded-full px-1 py-px text-[8px] font-bold leading-tight ${isSelected ? 'bg-white text-blue-700' : 'bg-blue-100 text-blue-700'}`}>{summary.all} สอบ</span>
-                        <span className="mt-0.5 flex gap-0.5" aria-hidden="true">
-                          {summary.in_progress > 0 && <span className={`h-1.5 w-1.5 rounded-full ${isSelected ? 'bg-emerald-200' : 'bg-emerald-500'}`} />}
-                          {summary.upcoming > 0 && <span className={`h-1.5 w-1.5 rounded-full ${isSelected ? 'bg-amber-200' : 'bg-amber-500'}`} />}
-                          {summary.completed > 0 && <span className={`h-1.5 w-1.5 rounded-full ${isSelected ? 'bg-gray-200' : 'bg-gray-400'}`} />}
-                        </span>
-                      </>
-                    )}
+                    {summary && <span className={`mt-0.5 whitespace-nowrap rounded-full px-1 py-px text-[8px] font-bold leading-tight ${isSelected ? 'bg-white text-blue-700' : 'bg-blue-100 text-blue-700'}`}>{formatMonitoringExamCount(summary.examCount)}</span>}
                   </button>
                 );
               })}
@@ -206,14 +197,9 @@ export const MonitoringDatePickerPopover: React.FC<MonitoringDatePickerPopoverPr
                   onClick={() => chooseDate(summary.date)}
                   className={`rounded-lg px-2 py-1 text-[9px] font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${summary.date === selectedDate ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 ring-1 ring-gray-200 hover:text-blue-700'}`}
                 >
-                  {formatThaiDate(summary.date, 'short')} <span className={summary.date === selectedDate ? 'text-blue-100' : 'text-blue-600'}>{summary.all}</span>
+                  {formatThaiDate(summary.date, 'short')} <span className={summary.date === selectedDate ? 'text-blue-100' : 'text-blue-600'}>{formatMonitoringExamCount(summary.examCount)}</span>
                 </button>
               )) : <span className="py-1 text-[10px] text-gray-400">ยังไม่มีตารางสอบ</span>}
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-gray-200 pt-2 text-[9px] text-gray-500">
-              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" />กำลังสอบ</span>
-              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-500" />กำลังจะเริ่ม</span>
-              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-gray-400" />เสร็จสิ้น</span>
             </div>
           </div>
         </div>

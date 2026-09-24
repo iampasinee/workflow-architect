@@ -26,6 +26,9 @@ npm run dev
 | `npm run test:academic` | ทดสอบ academic model, migration, Class Group, Teacher affiliation และ validation |
 | `npm run test:courses` | ทดสอบ Course/Section, teacher assignment, cohort collision และ portal eligibility |
 | `npm run test:rooms` | ทดสอบชั้น ห้อง ผังที่นั่ง อุปกรณ์ การย้ายข้อมูล และการป้องกันข้อมูลที่ถูกอ้างอิง |
+| `npm run test:exam-wizard` | ทดสอบการสร้าง/แก้ไขการสอบ ร่างการสอบ สิทธิ์ผู้สอน และการตรวจสอบเวลา/ห้องสอบ |
+| `npm run test:exam-management` | ทดสอบการค้นหาและตัวกรองรายการสอบของอาจารย์ |
+| `npm run test:monitoring` | ทดสอบสิทธิ์และข้อมูลปฏิทิน/ภาพรวมการติดตามสอบ |
 | `npm run build` | สร้าง production bundle ใน `dist/` |
 | `npm run preview` | เปิด production bundle ในเครื่อง |
 | `git diff --check` | ตรวจ whitespace errors |
@@ -46,6 +49,9 @@ npm run dev
 - `src/services/academicStructureWizard.ts`: atomic-like academic structure wizard transaction
 - `src/services/courseState.ts`: Course/Section migration, validation และ portal projections
 - `src/services/roomState.ts`, `src/types/rooms.ts`: Floor/Physical Room/Exam Room, ผังที่นั่ง, อุปกรณ์ และ room migration
+- `src/services/examWizard.ts`: state ของ Wizard, validation, policy mock และร่างการสอบ
+- `src/services/teacherExamManagement.ts`: ตัวกรองรายการสอบของอาจารย์
+- `src/services/teacherMonitoring.ts`: สิทธิ์ผู้สอน การสรุปตารางสอบ และตัวกรองติดตามสอบ
 - `src/services/stagedUploadStorage.ts`: IndexedDB staged-file persistence
 - `src/utils/academicYear.ts`: current academic year, admission code และ derived year level
 
@@ -140,6 +146,20 @@ type SectionCohort = {
 
 `classGroupIds` ว่างหมายถึงทั้ง cohort สาขาวิชา+ปีเข้า และสามารถเลือก RA, RB หรือ RA+RB ใน Section เดียวได้ Class Group กับ Section เป็นคนละแนวคิด ระบบตรวจ overlap/collision ของนักศึกษาระหว่าง Section ในรายวิชาและภาคการศึกษาเดียวกัน Teacher Portal และ Student eligibility ถูก project จาก Section assignment โดยใช้ stable IDs
 
+## การจัดการสอบของอาจารย์
+
+หน้า `จัดการสอบ` แยก `การสอบทั้งหมด` กับ `ร่างการสอบ` โดยนับรายการตามสิทธิ์ Course/Section ของอาจารย์ แท็บการสอบทั้งหมดค้นหาชื่อสอบ รหัส/ชื่อวิชา Section และห้องสอบได้ พร้อมกรองสถานะ `กำลังจะถึง` / `กำลังสอบ` / `เสร็จสิ้น` และรูปแบบ `ออนไลน์` / `ออฟไลน์` ตัวกรองนี้ไม่กระทบแท็บร่าง ซึ่งมีการค้นหาแยกต่างหาก
+
+ปุ่ม `สร้างการสอบ` เปิด Wizard 6 ขั้น: ข้อมูลการสอบ → ผู้เข้าสอบ → วันเวลาและห้องสอบ → รูปแบบการสอบ → ข้อกำหนดและนโยบาย → ตรวจสอบและบันทึก รายวิชา/Section ต้องอยู่ในงานสอนที่ได้รับมอบหมาย รายชื่อผู้เข้าสอบมาจาก Section cohort และการสร้างจริงตรวจเวลา ห้องสอบที่เปิดใช้งาน การชนกันของตาราง และความจุห้อง
+
+ร่างการสอบเก็บแยกจาก `ExamSession` ภายใต้ `securelab_teacher_exam_drafts_v1` จนกว่าจะยืนยันสร้าง การแก้ไขการสอบที่มีอยู่คง ID เดิม ตัวเลือกนโยบายออนไลน์/ออฟไลน์เป็นเพียงการตั้งค่าใน frontend; ยังไม่มีการบังคับใช้ผ่าน Agent, เครือข่าย หรือการตรวจใบหน้าจริง
+
+## ติดตามการสอบของอาจารย์
+
+หน้า `ติดตามการสอบ` ใช้การสอบที่อาจารย์มีสิทธิ์จาก Course/Section เดิม ภาพรวมรายวันแสดงตัวนับตามสถานะ ค้นหาและกรองรายการได้ และเปิดรายละเอียดการสอบเดิมเพื่อดูความคืบหน้า ส่วนปฏิทินเต็มหน้าและตัวเลือกวันที่แบบย่อแสดงเฉพาะวันที่กับจำนวนรอบสอบ (`N รอบ`) ไม่ใช้จุดสีหรือสรุปสถานะในช่องวัน
+
+ตัวเลือกวันที่และปฏิทินใช้วันที่ที่เลือกร่วมกัน การเลือกวันจะกลับสู่ภาพรวมรายวันและไม่เปิดรายละเอียดการสอบอัตโนมัติ สถานะการสอบยังอยู่ในภาพรวมรายวันและหน้ารายละเอียด
+
 ## ห้องสอบและเครื่องคอมพิวเตอร์
 
 หน้า Admin มีสามแท็บ: `ห้องสอบ`, `ผังที่นั่งและเครื่อง` และ `เครื่องคอมพิวเตอร์` ใช้โครงสร้าง `Floor → PhysicalRoom → ExamRoom → RoomSeat → ComputerDevice` โดยไม่จัดการอาคาร ห้องจริงถูกสร้างใต้ชั้นก่อน แล้วจึงเลือกเปิดเป็นห้องสอบได้
@@ -187,6 +207,9 @@ npm run test:auth
 npm run test:academic
 npm run test:courses
 npm run test:rooms
+npm run test:exam-wizard
+npm run test:exam-management
+npm run test:monitoring
 npm run build
 git diff --check
 ```
