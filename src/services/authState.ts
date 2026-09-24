@@ -3,8 +3,10 @@ import type {
   MockAuthResolution,
   MockAuthUser,
   MockGoogleAccountOption,
+  ParsedStudentUniversityEmail,
   UniversityAccountResolution,
 } from '../types/auth';
+import { inferAdmissionYearFromStudentId } from '../utils/academicYear';
 
 export const mockAuthStorageKey = 'securelab_mock_auth_users_v1';
 
@@ -18,7 +20,7 @@ const faceStatuses: FaceEnrollmentStatus[] = [
 export const initialMockAuthUsers: MockAuthUser[] = [
   {
     id: 'auth_student_new',
-    email: '6410123456@email.kmutnb.ac.th',
+    email: 's6701011500167@email.kmutnb.ac.th',
     role: 'student',
     subjectId: 'std_0001',
     registered: false,
@@ -26,7 +28,7 @@ export const initialMockAuthUsers: MockAuthUser[] = [
   },
   {
     id: 'auth_student_registered',
-    email: '6410123457@email.kmutnb.ac.th',
+    email: 's6410123457@email.kmutnb.ac.th',
     role: 'student',
     subjectId: 'std_0002',
     registered: true,
@@ -60,15 +62,30 @@ export const initialMockAuthUsers: MockAuthUser[] = [
 ];
 
 export const mockGoogleAccountOptions: MockGoogleAccountOption[] = [
-  { email: '6410123456@email.kmutnb.ac.th', label: 'นักศึกษา — ยังไม่ลงทะเบียน' },
-  { email: '6410123457@email.kmutnb.ac.th', label: 'นักศึกษา — ลงทะเบียนแล้ว' },
+  { email: 's6701011500167@email.kmutnb.ac.th', label: 'นักศึกษา — ยังไม่ลงทะเบียน' },
+  { email: 's6410123457@email.kmutnb.ac.th', label: 'นักศึกษา — ลงทะเบียนแล้ว' },
   { email: 'teacher@itm.kmutnb.ac.th', label: 'อาจารย์ — ยังไม่ลงทะเบียน' },
   { email: 'anucha@itm.kmutnb.ac.th', label: 'อาจารย์ — ลงทะเบียนแล้ว' },
   { email: 'admin@itm.kmutnb.ac.th', label: 'ผู้ดูแลระบบ — บัญชีที่ระบบกำหนดไว้' },
+  { email: 'student@email.kmutnb.ac.th', label: 'รูปแบบบัญชีนักศึกษาไม่ถูกต้อง — สำหรับทดสอบ' },
   { email: 'user@gmail.com', label: 'บัญชีไม่รองรับ — สำหรับทดสอบ' },
 ];
 
+const legacyMockAuthEmailsById: Record<string, string[]> = {
+  auth_student_new: ['6410123456@email.kmutnb.ac.th'],
+  auth_student_registered: ['6410123457@email.kmutnb.ac.th'],
+};
+
 export const normalizeAuthEmail = (email: string): string => email.trim().toLowerCase();
+
+export const parseStudentUniversityEmail = (email: string): ParsedStudentUniversityEmail | null => {
+  const normalizedEmail = normalizeAuthEmail(email);
+  const match = normalizedEmail.match(/^s(\d{10,15})@email\.kmutnb\.ac\.th$/);
+  if (!match) return null;
+  const admissionYear = inferAdmissionYearFromStudentId(match[1]);
+  if (!admissionYear) return null;
+  return { studentId: match[1], admissionYear };
+};
 
 export const resolveUniversityAccount = (email: string): UniversityAccountResolution => {
   const normalizedEmail = normalizeAuthEmail(email);
@@ -88,6 +105,9 @@ export const resolveMockAuthAccount = (
   const resolution = resolveUniversityAccount(email);
   if (resolution.domain === 'unsupported') {
     return { ...resolution, error: 'อีเมลนี้ไม่ใช่บัญชีที่รองรับ' };
+  }
+  if (resolution.domain === 'student' && !parseStudentUniversityEmail(resolution.normalizedEmail)) {
+    return { ...resolution, error: 'กรุณาใช้บัญชีนักศึกษาของมหาวิทยาลัยในรูปแบบที่กำหนด' };
   }
   const user = users.find((item) => normalizeAuthEmail(item.email) === resolution.normalizedEmail);
   if (!user) {
@@ -109,7 +129,9 @@ export const migrateMockAuthUsers = (raw: unknown): MockAuthUser[] => {
   if (!Array.isArray(raw)) return initialMockAuthUsers.map((user) => ({ ...user }));
   return initialMockAuthUsers.map((seed) => {
     const stored = raw.find((item) => item && typeof item === 'object' && 'id' in item && item.id === seed.id) as Partial<MockAuthUser> | undefined;
-    if (!stored || normalizeAuthEmail(stored.email || '') !== seed.email) return { ...seed };
+    const storedEmail = normalizeAuthEmail(stored?.email || '');
+    const acceptedEmails = [seed.email, ...(legacyMockAuthEmailsById[seed.id] || [])];
+    if (!stored || !acceptedEmails.includes(storedEmail)) return { ...seed };
     const faceEnrollmentStatus = faceStatuses.includes(stored.faceEnrollmentStatus as FaceEnrollmentStatus)
       ? stored.faceEnrollmentStatus as FaceEnrollmentStatus
       : seed.faceEnrollmentStatus;

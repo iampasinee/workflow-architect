@@ -4,15 +4,47 @@ import {
   completeMockRegistration,
   initialMockAuthUsers,
   migrateMockAuthUsers,
+  parseStudentUniversityEmail,
   resolveMockAuthAccount,
   resolveUniversityAccount,
 } from './authState';
+import { classGroupsForCohort, createInitialAcademicState } from './academicState';
+import { calculateYearLevelFromAdmissionYear } from '../utils/academicYear';
 
 test('university domains resolve student and staff without granting Admin from domain alone', () => {
-  assert.equal(resolveUniversityAccount('6410123456@email.kmutnb.ac.th').domain, 'student');
+  assert.equal(resolveUniversityAccount('s6701011500167@email.kmutnb.ac.th').domain, 'student');
   assert.equal(resolveUniversityAccount('teacher@itm.kmutnb.ac.th').domain, 'staff');
   assert.equal(resolveUniversityAccount('admin@itm.kmutnb.ac.th').domain, 'staff');
   assert.equal(resolveUniversityAccount('user@gmail.com').domain, 'unsupported');
+});
+
+test('student university email derives Student ID and canonical admission year', () => {
+  assert.deepEqual(parseStudentUniversityEmail('s6701011500167@email.kmutnb.ac.th'), {
+    studentId: '6701011500167',
+    admissionYear: 2567,
+  });
+});
+
+test('student university email parsing rejects missing prefix and non-digit local parts', () => {
+  assert.equal(parseStudentUniversityEmail('6701011500167@email.kmutnb.ac.th'), null);
+  assert.equal(parseStudentUniversityEmail('student@email.kmutnb.ac.th'), null);
+  assert.equal(parseStudentUniversityEmail('sABC123@email.kmutnb.ac.th'), null);
+  assert.match(resolveMockAuthAccount('student@email.kmutnb.ac.th', initialMockAuthUsers).error || '', /รูปแบบที่กำหนด/);
+});
+
+test('derived student year level continues to use central academic-year calculation', () => {
+  const result = calculateYearLevelFromAdmissionYear(2567, 2569);
+  assert.equal(result.yearLevel, 3);
+  assert.equal(result.formattedYearLevel, 'ชั้นปีที่ 3');
+});
+
+test('Student registration cohort options use Major + admissionYear and active status', () => {
+  const state = createInitialAcademicState();
+  const groups = classGroupsForCohort(state, 'program_inet', 2567, true);
+  assert.ok(groups.length > 0);
+  assert.ok(groups.every((group) => group.majorId === 'program_inet' && group.admissionYear === 2567 && group.status === 'active'));
+  const selectedGroupId = groups[0].id;
+  assert.equal(classGroupsForCohort(state, 'program_ine', 2567, true).some((group) => group.id === selectedGroupId), false);
 });
 
 test('staff role comes from the predefined mock account record', () => {
@@ -63,4 +95,15 @@ test('persisted registration cannot be complete without verified mock face enrol
   }]);
   assert.equal(migrated[0].registered, false);
   assert.equal(migrated[0].faceEnrollmentStatus, 'captured');
+});
+
+test('legacy student mock email migrates to the new prefixed format without losing registration', () => {
+  const migrated = migrateMockAuthUsers([{
+    ...initialMockAuthUsers[0],
+    email: '6410123456@email.kmutnb.ac.th',
+    registered: true,
+    faceEnrollmentStatus: 'verified_mock',
+  }]);
+  assert.equal(migrated[0].email, 's6701011500167@email.kmutnb.ac.th');
+  assert.equal(migrated[0].registered, true);
 });

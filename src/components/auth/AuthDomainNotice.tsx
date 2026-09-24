@@ -7,7 +7,7 @@ export const AuthDomainNotice: React.FC<{ compact?: boolean }> = ({ compact = fa
     <div className={`mt-3 grid gap-3 ${compact ? 'sm:grid-cols-2' : 'sm:grid-cols-2'}`}>
       <div className="flex min-w-0 items-center gap-3 rounded-xl bg-white p-3">
         <GraduationCap className="h-5 w-5 shrink-0 text-blue-600" />
-        <div className="min-w-0"><p className="text-xs font-semibold text-slate-700">นักศึกษา</p><p className="break-all font-mono text-xs font-bold text-blue-700">@email.kmutnb.ac.th</p></div>
+        <div className="min-w-0"><p className="text-xs font-semibold text-slate-700">นักศึกษา</p><p className="break-all font-mono text-xs font-bold text-blue-700">@email.kmutnb.ac.th</p><p className="mt-0.5 text-[10px] text-slate-500">ชื่อบัญชีต้องขึ้นต้นด้วย s ตามด้วยรหัสนักศึกษา</p></div>
       </div>
       <div className="flex min-w-0 items-center gap-3 rounded-xl bg-white p-3">
         <ShieldCheck className="h-5 w-5 shrink-0 text-indigo-600" />

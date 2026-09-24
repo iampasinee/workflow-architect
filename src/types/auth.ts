@@ -29,6 +29,11 @@ export interface UniversityAccountResolution {
   normalizedEmail: string;
 }
 
+export interface ParsedStudentUniversityEmail {
+  studentId: string;
+  admissionYear: number;
+}
+
 export interface MockAuthResolution extends UniversityAccountResolution {
   user?: MockAuthUser;
   error?: string;

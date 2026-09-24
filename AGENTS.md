@@ -87,6 +87,7 @@ Use:
 * `npm install` — install locked dependencies
 * `npm run dev` — start Vite on port 3000 and expose it on the LAN
 * `npm run lint` — run TypeScript validation with `tsc --noEmit`
+* `npm run test:auth` — test university-email parsing, mock role resolution, face-enrollment gates, and auth migration
 * `npm run test:academic` — test academic hierarchy, student assignment, migrations, and derived academic data
 * `npm run test:courses` — test course/section migration, validation, teacher assignment, student eligibility, and portal assignments
 * `npm run test:rooms` — test Floor/Physical Room/Exam Room relationships, room migration, layouts, and computer binding
@@ -100,6 +101,7 @@ After meaningful domain or cross-flow changes, run:
 
 ```bash
 npm run lint
+npm run test:auth
 npm run test:academic
 npm run test:courses
 npm run test:rooms
@@ -460,6 +462,8 @@ However, `admissionYear` must remain stored separately.
 Admin must be able to correct the admission year if the student ID format does not match the expected convention.
 
 Do not derive critical domain behavior permanently from student ID substring logic.
+
+The frontend-only Student Registration mock is a scoped exception for initial account enrollment. A valid university email such as `s6701011500167@email.kmutnb.ac.th` is parsed once to initialize and save `studentCode = 6701011500167` and `admissionYear = 2567`. Those values are read-only during Registration. After registration, normal domain behavior must read the separately persisted `admissionYear`; it must not repeatedly derive academic state from the email or Student ID.
 
 ---
 
@@ -970,6 +974,51 @@ Preserve valid existing demo data where practical.
 
 ---
 
+## Authentication and Registration Mockup
+
+Authentication is frontend-only and lives primarily in:
+
+* `src/components/auth/`
+* `src/services/authState.ts`
+* `src/types/auth.ts`
+* the mock-auth slice in `src/context/AppContext.tsx`
+
+Supported university domains are:
+
+* Student: `@email.kmutnb.ac.th`
+* Teacher/Admin: `@itm.kmutnb.ac.th`
+
+For Student accounts, the local part must be `s` followed by Student ID digits. Use the shared `parseStudentUniversityEmail()` helper. Do not duplicate email parsing in React components.
+
+Example:
+
+```text
+s6701011500167@email.kmutnb.ac.th
+→ studentCode: 6701011500167
+→ admissionYear: 2567
+```
+
+Student ID and admission year are read-only in the Student Registration UI. Year level remains read-only derived data from `academicSettings.currentAcademicYear` and is never persisted as a manual field. Major remains a stable `majorId` selection. Optional Class Group options must be active and match the selected `majorId + admissionYear`; changing Major clears an incompatible group.
+
+The staff domain alone must never grant Admin access. Resolve Teacher/Admin from the predefined mock account record, and require `adminProvisioned` for Admin. Do not provide public Admin self-registration.
+
+Registration has four steps:
+
+```text
+Google account
+→ role-specific profile
+→ required mock face enrollment
+→ review and confirmation
+```
+
+Face enrollment stores status only. Do not store face images, perform biometric matching, or describe the mock as production authentication. Registration cannot complete unless the status is `verified_mock`.
+
+Mock registration state is stored under `securelab_mock_auth_users_v1`. Forward migration may map known legacy demo emails by stable auth ID, but persisted data must not override canonical role, email, subject ID, or Admin provisioning. A persisted `registered` state is valid only with verified mock face enrollment.
+
+Teacher/Admin email rules and their existing role flows must remain unchanged when refining Student Registration.
+
+---
+
 ## Course/Section Migration
 
 If existing Sections use:
@@ -1412,6 +1461,7 @@ Run:
 
 ```bash
 npm run lint
+npm run test:auth
 npm run test:academic
 npm run test:courses
 npm run test:rooms
@@ -1521,6 +1571,11 @@ When relevant, manually verify:
 * Student create
 * Student edit
 * Student search
+* valid and invalid university-email formats
+* Student Registration read-only Student ID, admission year, and derived year level
+* Student Registration Major/Class Group filtering and incompatible-group reset
+* required mock face enrollment and registration review
+* Teacher/Admin mock-account role resolution
 * cascading selectors
 * admission year
 * derived year level
@@ -1707,6 +1762,20 @@ Do not introduce another competing academic model without explicit instruction.
 ---
 
 ## Final Architecture Summary
+
+Frontend authentication mock:
+
+```text
+University email
+├── Student domain → parse s + Student ID
+└── Staff domain → resolve Teacher/Admin from mock account data
+
+Registration
+→ profile data
+→ required mock face status
+→ review
+→ return to Login
+```
 
 Academic master data:
 

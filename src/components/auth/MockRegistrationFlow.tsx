@@ -1,10 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { Camera, Check, ChevronLeft, CircleUserRound, ShieldCheck } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { resolveMockAuthAccount } from '../../services/authState';
+import { parseStudentUniversityEmail, resolveMockAuthAccount } from '../../services/authState';
 import { classGroupsForCohort, isAcademicPathActive } from '../../services/academicState';
 import type { FaceEnrollmentStatus, MockAuthUser } from '../../types/auth';
-import { calculateYearLevelFromAdmissionYear, getAdmissionCode, getAdmissionYearOptions, useAcademicYear } from '../../utils/academicYear';
+import { calculateYearLevelFromAdmissionYear, getAdmissionCode, useAcademicYear } from '../../utils/academicYear';
 import { AuthDomainNotice } from './AuthDomainNotice';
 import { MockGoogleAccountSelector } from './MockGoogleAccountSelector';
 
@@ -68,30 +68,39 @@ export const MockRegistrationFlow: React.FC<MockRegistrationFlowProps> = ({ onBa
   const activeFaculties = academicState.faculties.filter((item) => item.status === 'active');
   const availableDepartments = academicState.departments.filter((item) => item.facultyId === info.facultyId && item.status === 'active');
   const availableMajors = academicState.majors.filter((item) => item.status === 'active' && isAcademicPathActive(academicState, 'majors', item.id));
-  const availableGroups = info.majorId && info.admissionYear
-    ? classGroupsForCohort(academicState, info.majorId, info.admissionYear, true)
+  const parsedStudentEmail = target?.role === 'student'
+    ? parseStudentUniversityEmail(target.email)
+    : null;
+  const studentAdmissionYear = parsedStudentEmail?.admissionYear || 0;
+  const availableGroups = info.majorId && studentAdmissionYear
+    ? classGroupsForCohort(academicState, info.majorId, studentAdmissionYear, true)
     : [];
   const selectedMajor = academicState.majors.find((item) => item.id === info.majorId);
   const selectedDepartment = academicState.departments.find((item) => item.id === selectedMajor?.departmentId);
   const selectedFaculty = academicState.faculties.find((item) => item.id === selectedDepartment?.facultyId);
   const selectedGroup = academicState.classGroups.find((item) => item.id === info.classGroupId);
-  const yearLevel = info.admissionYear
-    ? calculateYearLevelFromAdmissionYear(info.admissionYear, currentAcademicYear)
+  const yearLevel = studentAdmissionYear
+    ? calculateYearLevelFromAdmissionYear(studentAdmissionYear, currentAcademicYear)
     : null;
-  const admissionYears = useMemo(() => getAdmissionYearOptions(currentAcademicYear).slice(0, 12), [currentAcademicYear]);
 
   const initializeInfo = (user: MockAuthUser) => {
     if (user.role === 'student') {
       const student = students.find((item) => item.id === user.subjectId);
       const names = splitName(student?.fullName || '');
+      const parsedEmail = parseStudentUniversityEmail(user.email);
+      const existingGroup = academicState.classGroups.find((group) =>
+        group.id === student?.classGroupId &&
+        group.majorId === student?.majorId &&
+        group.admissionYear === parsedEmail?.admissionYear &&
+        isAcademicPathActive(academicState, 'classGroups', group.id));
       setInfo({
         ...emptyInfo,
-        code: student?.studentCode || user.email.split('@')[0],
+        code: parsedEmail?.studentId || '',
         firstName: student?.firstName || names.firstName,
         lastName: student?.lastName || names.lastName,
         majorId: student?.majorId || '',
-        admissionYear: student?.admissionYear || 0,
-        classGroupId: student?.classGroupId || '',
+        admissionYear: parsedEmail?.admissionYear || 0,
+        classGroupId: existingGroup?.id || '',
       });
     } else if (user.role === 'teacher') {
       const teacher = teachers.find((item) => item.id === user.subjectId);
@@ -133,8 +142,10 @@ export const MockRegistrationFlow: React.FC<MockRegistrationFlowProps> = ({ onBa
     if (!target) return 'กรุณาเลือกบัญชี';
     if (!info.code.trim() || !info.firstName.trim() || !info.lastName.trim()) return 'กรุณากรอกข้อมูลผู้ใช้ให้ครบถ้วน';
     if (target.role === 'student') {
+      if (!parsedStudentEmail) return 'ไม่สามารถอ่านรหัสนักศึกษาจากอีเมลนี้ได้';
+      if (info.code !== parsedStudentEmail.studentId || info.admissionYear !== parsedStudentEmail.admissionYear) return 'ข้อมูลรหัสนักศึกษาและปีเข้าต้องมาจากอีเมลมหาวิทยาลัย';
       if (!info.majorId) return 'กรุณาเลือกสาขาวิชา';
-      if (!info.admissionYear || !yearLevel?.isValid) return 'กรุณาเลือกปีเข้าที่ถูกต้อง';
+      if (!yearLevel?.isValid) return 'ไม่สามารถคำนวณชั้นปีจากปีเข้าได้';
       if (info.classGroupId && !availableGroups.some((group) => group.id === info.classGroupId)) return 'กลุ่มเรียนไม่ตรงกับสาขาวิชาและปีเข้า';
     }
     if (target.role === 'teacher') {
@@ -168,14 +179,18 @@ export const MockRegistrationFlow: React.FC<MockRegistrationFlowProps> = ({ onBa
     const fullName = `${info.firstName.trim()} ${info.lastName.trim()}`.trim();
     let profileSaved = true;
     if (target.role === 'student') {
+      if (!parsedStudentEmail) {
+        setError('ไม่สามารถอ่านรหัสนักศึกษาจากอีเมลนี้ได้');
+        return;
+      }
       profileSaved = updateStudent(target.subjectId, {
         email: target.email,
-        studentCode: info.code.trim(),
+        studentCode: parsedStudentEmail.studentId,
         fullName,
         firstName: info.firstName.trim(),
         lastName: info.lastName.trim(),
         majorId: info.majorId,
-        admissionYear: info.admissionYear,
+        admissionYear: parsedStudentEmail.admissionYear,
         classGroupId: info.classGroupId || undefined,
         faceReferenceStatus: 'available',
         isFirstTime: false,
@@ -250,7 +265,7 @@ export const MockRegistrationFlow: React.FC<MockRegistrationFlowProps> = ({ onBa
         {target.role === 'admin' && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><div className="flex gap-2"><ShieldCheck className="h-5 w-5 shrink-0" /><div><p className="font-bold">บัญชีผู้ดูแลระบบต้องได้รับการกำหนดสิทธิ์จากระบบ</p><p className="mt-1 text-xs">บัญชีนี้เป็นบัญชี mock ที่กำหนดไว้ล่วงหน้า จึงสามารถดำเนินการต่อได้ ไม่มีตัวเลือกสมัครเป็นผู้ดูแลระบบทั่วไป</p></div></div></div>}
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="text-xs font-semibold text-slate-700">อีเมล<input readOnly value={target.email} className={`${inputClass} mt-1 bg-slate-50`} /></label>
-          <label className="text-xs font-semibold text-slate-700">{target.role === 'student' ? 'รหัสนักศึกษา' : target.role === 'teacher' ? 'รหัสบุคลากร/อาจารย์' : 'รหัสผู้ดูแลระบบ'}<input value={info.code} onChange={(event) => setInfo({ ...info, code: event.target.value })} className={`${inputClass} mt-1`} /></label>
+          <label className="text-xs font-semibold text-slate-700">{target.role === 'student' ? 'รหัสนักศึกษา' : target.role === 'teacher' ? 'รหัสบุคลากร/อาจารย์' : 'รหัสผู้ดูแลระบบ'}<input aria-label={target.role === 'student' ? 'รหัสนักศึกษา' : target.role === 'teacher' ? 'รหัสบุคลากร/อาจารย์' : 'รหัสผู้ดูแลระบบ'} readOnly={target.role === 'student'} value={info.code} onChange={(event) => setInfo({ ...info, code: event.target.value })} className={`${inputClass} mt-1 ${target.role === 'student' ? 'bg-slate-100' : ''}`} /></label>
           <label className="text-xs font-semibold text-slate-700">ชื่อ<input value={info.firstName} onChange={(event) => setInfo({ ...info, firstName: event.target.value })} className={`${inputClass} mt-1`} /></label>
           <label className="text-xs font-semibold text-slate-700">นามสกุล<input value={info.lastName} onChange={(event) => setInfo({ ...info, lastName: event.target.value })} className={`${inputClass} mt-1`} /></label>
         </div>
@@ -259,10 +274,11 @@ export const MockRegistrationFlow: React.FC<MockRegistrationFlowProps> = ({ onBa
           <label htmlFor="registration-major" className="block text-xs font-semibold text-slate-700">สาขาวิชา<select id="registration-major" aria-label="สาขาวิชา" value={info.majorId} onChange={(event) => setInfo({ ...info, majorId: event.target.value, classGroupId: '' })} className={`${inputClass} mt-1`}><option value="">เลือกสาขาวิชา</option>{availableMajors.map((major) => <option key={major.id} value={major.id}>[{major.code}] {major.name}</option>)}</select></label>
           {selectedMajor && <p className="text-xs text-slate-500">{selectedFaculty?.name || '—'} → {selectedDepartment?.name || '—'}</p>}
           <div className="grid gap-4 sm:grid-cols-3">
-            <label htmlFor="registration-admission-year" className="text-xs font-semibold text-slate-700">ปีเข้า<select id="registration-admission-year" aria-label="ปีเข้า" value={info.admissionYear || ''} onChange={(event) => setInfo({ ...info, admissionYear: Number(event.target.value), classGroupId: '' })} className={`${inputClass} mt-1`}><option value="">เลือกปีเข้า</option>{admissionYears.map((year) => <option key={year} value={year}>{year} (ปีเข้า {getAdmissionCode(year)})</option>)}</select></label>
+            <label htmlFor="registration-admission-year" className="text-xs font-semibold text-slate-700">ปีเข้า<input id="registration-admission-year" aria-label="ปีเข้า" readOnly value={studentAdmissionYear ? `${studentAdmissionYear} (ปีเข้า ${getAdmissionCode(studentAdmissionYear)})` : 'ไม่สามารถอ่านจากอีเมลได้'} className={`${inputClass} mt-1 bg-slate-100`} /></label>
             <label htmlFor="registration-year-level" className="text-xs font-semibold text-slate-700">ชั้นปี<input id="registration-year-level" aria-label="ชั้นปี" readOnly value={yearLevel?.formattedYearLevel || 'คำนวณอัตโนมัติ'} className={`${inputClass} mt-1 bg-slate-100`} /></label>
-            <label htmlFor="registration-class-group" className="text-xs font-semibold text-slate-700">กลุ่มเรียน<select id="registration-class-group" aria-label="กลุ่มเรียน" disabled={!info.majorId || !info.admissionYear} value={info.classGroupId} onChange={(event) => setInfo({ ...info, classGroupId: event.target.value })} className={`${inputClass} mt-1`}><option value="">ยังไม่กำหนด</option>{availableGroups.map((group) => <option key={group.id} value={group.id}>{group.code}</option>)}</select></label>
+            <label htmlFor="registration-class-group" className="text-xs font-semibold text-slate-700">กลุ่มเรียน<select id="registration-class-group" aria-label="กลุ่มเรียน" disabled={!info.majorId || !studentAdmissionYear || availableGroups.length === 0} value={info.classGroupId} onChange={(event) => setInfo({ ...info, classGroupId: event.target.value })} className={`${inputClass} mt-1`}><option value="">{info.majorId && studentAdmissionYear && availableGroups.length === 0 ? 'ยังไม่มีกลุ่มเรียนสำหรับสาขาและปีเข้านี้' : 'ยังไม่กำหนด'}</option>{availableGroups.map((group) => <option key={group.id} value={group.id}>{group.code}</option>)}</select></label>
           </div>
+          {info.majorId && studentAdmissionYear && availableGroups.length === 0 && <p className="text-xs font-medium text-amber-700">ยังไม่มีกลุ่มเรียนสำหรับสาขาและปีเข้านี้</p>}
         </div>}
 
         {target.role === 'teacher' && <div className="grid gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">

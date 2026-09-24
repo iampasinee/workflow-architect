@@ -22,6 +22,7 @@ npm run dev
 | `npm install` | ติดตั้ง dependencies จาก lockfile |
 | `npm run dev` | เปิด Vite ที่ port 3000 และ LAN |
 | `npm run lint` | ตรวจ TypeScript ด้วย `tsc --noEmit` |
+| `npm run test:auth` | ทดสอบโดเมนอีเมล การแยกบทบาท การลงทะเบียนใบหน้า mock และ auth migration |
 | `npm run test:academic` | ทดสอบ academic model, migration, Class Group, Teacher affiliation และ validation |
 | `npm run test:courses` | ทดสอบ Course/Section, teacher assignment, cohort collision และ portal eligibility |
 | `npm run test:rooms` | ทดสอบชั้น ห้อง ผังที่นั่ง อุปกรณ์ การย้ายข้อมูล และการป้องกันข้อมูลที่ถูกอ้างอิง |
@@ -36,10 +37,12 @@ npm run dev
 - `src/components/teacher/`: courses, exams, monitoring, integrity และ reopening
 - `src/components/admin/`: dashboard, users, academic structure, Course/Section, rooms, biometric, security, audit และ profile
 - `src/components/common/`, `src/components/simulation/`: shared UI และเครื่องมือจำลอง
+- `src/components/auth/`: Auth landing, mock Google account selector และ Registration 4 ขั้น
 - `src/context/AppContext.tsx`: state, CRUD, persistence และ forward migration
 - `src/types.ts`, `src/types/`: domain models
 - `src/data/`: mock/seed data
 - `src/services/academicState.ts`: academic relationships, migration, selectors และ validation
+- `src/services/authState.ts`, `src/types/auth.ts`: กฎโดเมนอีเมล บัญชี mock สถานะใบหน้า และ auth persistence
 - `src/services/academicStructureWizard.ts`: atomic-like academic structure wizard transaction
 - `src/services/courseState.ts`: Course/Section migration, validation และ portal projections
 - `src/services/roomState.ts`, `src/types/rooms.ts`: Floor/Physical Room/Exam Room, ผังที่นั่ง, อุปกรณ์ และ room migration
@@ -51,6 +54,19 @@ npm run dev
 UI ปัจจุบันบังคับภาษาไทยทั้งระบบ แต่ Context ยังเก็บ language API เพื่อ compatibility Admin ใช้ hash routes เช่น `#/admin/users/students`, `#/admin/faculties-and-groups` และ `#/admin/courses` การ refresh ยังคงเริ่มที่ Login แล้วเปิด Admin route จาก hash หลังเข้าสู่ระบบ
 
 Sidebar ผู้ดูแลระบบไม่มีหน้าจัดการบทบาทแบบกำหนดเอง บทบาท `student`, `teacher` และ `admin` เป็นบทบาทคงที่ และ Student/Teacher/Admin flows ยังคงแยกกัน
+
+## Authentication และ Registration Mockup
+
+หน้าเริ่มต้นมี `เข้าสู่ระบบ` และ `ลงทะเบียน` โดยใช้ตัวเลือกบัญชี Google แบบจำลอง ยังไม่มี Google OAuth หรือ backend session จริง โดเมนที่รองรับคือ:
+
+- นักศึกษา: `@email.kmutnb.ac.th` และชื่อบัญชีต้องเป็น `s` ตามด้วยรหัสนักศึกษา เช่น `s6701011500167@email.kmutnb.ac.th`
+- อาจารย์/ผู้ดูแลระบบ: `@itm.kmutnb.ac.th`
+
+โดเมน `@itm.kmutnb.ac.th` ระบุเพียงว่าเป็นบัญชีบุคลากร ระบบต้องแยก Teacher/Admin จาก mock account record อีกครั้ง และบัญชี Admin ต้องถูก provision ไว้ล่วงหน้า ไม่มี public self-registration สำหรับ Admin
+
+Registration มี 4 ขั้น: บัญชี Google → ข้อมูลผู้ใช้ → ใบหน้า → ยืนยัน ขั้นใบหน้าเป็นข้อบังคับแต่เก็บเฉพาะ `FaceEnrollmentStatus` แบบ mock ไม่เปิดกล้องจริง ไม่เก็บภาพ และไม่ทำ biometric matching เมื่อลงทะเบียนสำเร็จ ระบบจะกลับไป Login โดยไม่สร้าง production session
+
+สำหรับนักศึกษา `parseStudentUniversityEmail()` จะตัด `s` เพื่อสร้าง Student ID และใช้สองหลักแรกเป็น `admissionYear` เช่น `67 → 2567` ช่องรหัสนักศึกษา ปีเข้า และชั้นปีเป็น read-only ส่วน Major และ Class Group ยังเลือกจากข้อมูลวิชาการจริง Class Group แสดงเฉพาะกลุ่ม active ที่ตรงกับ `majorId + admissionYear` และจะถูกล้างเมื่อเปลี่ยน Major
 
 ## การจัดการผู้ใช้งาน
 
@@ -106,7 +122,7 @@ Class Group ผูกกับ `majorId + admissionYear` และเก็บ s
 yearLevel = currentAcademicYear - admissionYear + 1
 ```
 
-`academicSettings.currentAcademicYear` ใน `src/utils/academicYear.ts` เป็นแหล่งปีการศึกษากลาง ห้ามคำนวณจากปีปฏิทินของอุปกรณ์ Student ID ใช้แนะนำปีเข้าในฟอร์มได้ แต่ `admissionYear` ที่บันทึกแยกต่างหากยังเป็น canonical source
+`academicSettings.currentAcademicYear` ใน `src/utils/academicYear.ts` เป็นแหล่งปีการศึกษากลาง ห้ามคำนวณจากปีปฏิทินของอุปกรณ์ Student ID ใช้แนะนำปีเข้าในฟอร์ม Admin ได้ แต่ `admissionYear` ที่บันทึกแยกต่างหากยังเป็น canonical source สำหรับ Student Registration ระบบอนุมาน Student ID และ `admissionYear` จากอีเมลมหาวิทยาลัยครั้งเดียวในขั้นลงทะเบียน แล้วบันทึกลง canonical fields เดิม
 
 Student Management มีโหมด `นักศึกษาทั้งหมด` สำหรับค้นหาเร็ว และ `แยกตามปีเข้า` สำหรับกรองคณะ ภาควิชา สาขาวิชา ปีเข้า ชั้นปี และกลุ่มเรียน ตารางแสดงกลุ่มที่กำหนดหรือ `ยังไม่กำหนด` และ CSV ส่งออกรายการทั้งหมดที่ผ่านตัวกรอง
 
@@ -155,7 +171,9 @@ Rename เปลี่ยนเฉพาะ `submissionName` โดยคง `or
 
 ## Persistence และข้อจำกัด
 
-Application state เก็บใน `localStorage`; staged blobs และ sequence counters เก็บใน IndexedDB `securelab-staged-uploads` browser storage เป็นเพียง mock persistence ไม่ใช่ production database หรือ security boundary
+Application state เก็บใน `localStorage`; สถานะบัญชี Registration mock เก็บใน `securelab_mock_auth_users_v1`; staged blobs และ sequence counters เก็บใน IndexedDB `securelab-staged-uploads` browser storage เป็นเพียง mock persistence ไม่ใช่ production database หรือ security boundary
+
+Auth migration ยอมรับอีเมลนักศึกษา mock รูปแบบเดิมผ่าน stable auth ID แล้วเปลี่ยนไปใช้รูปแบบที่ขึ้นต้นด้วย `s` โดยไม่อนุญาตให้ persisted data เปลี่ยน role หรือ subject identity สถานะ `registered` จะสมบูรณ์ได้เมื่อสถานะใบหน้าเป็น `verified_mock` เท่านั้น
 
 Academic, Teacher และ Course data ใช้ forward migration และไม่ล้างข้อมูลเก่าโดยอัตโนมัติ Legacy records จะถูก map เฉพาะเมื่อระบุความสัมพันธ์ได้อย่างไม่กำกวม มิฉะนั้นเก็บข้อความ fallback ไว้ให้ Admin แก้ไข
 
@@ -165,6 +183,7 @@ Academic, Teacher และ Course data ใช้ forward migration และไ
 
 ```sh
 npm run lint
+npm run test:auth
 npm run test:academic
 npm run test:courses
 npm run test:rooms
