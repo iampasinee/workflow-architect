@@ -55,6 +55,7 @@ const MainRouter: React.FC = () => {
   } = useApp();
 
   const [teacherSidebarCollapsed, setTeacherSidebarCollapsed] = useState(false);
+  const [teacherMobileMenuOpen, setTeacherMobileMenuOpen] = useState(false);
   const [adminSidebarCollapsed, setAdminSidebarCollapsed] = useState(false);
   const [adminMobileMenuOpen, setAdminMobileMenuOpen] = useState(false);
   const [adminHashReady, setAdminHashReady] = useState(false);
@@ -128,15 +129,17 @@ const MainRouter: React.FC = () => {
   // 3. Teacher Flow (Screens T1 -> T9)
   if (role === 'teacher') {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col">
-        <Header />
-        <div className="flex-1 flex overflow-hidden">
+      <div className="flex h-screen flex-col overflow-hidden bg-gray-50">
+        <Header onTeacherMenuToggle={() => setTeacherMobileMenuOpen(true)} />
+        <div className="flex min-h-0 flex-1 overflow-hidden">
           <TeacherSidebar
             collapsed={teacherSidebarCollapsed}
             onToggle={() => setTeacherSidebarCollapsed(!teacherSidebarCollapsed)}
+            mobileOpen={teacherMobileMenuOpen}
+            onMobileClose={() => setTeacherMobileMenuOpen(false)}
           />
 
-          <main className="flex-1 overflow-y-auto p-6 md:p-8">
+          <main className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6 md:p-8">
             <div className="max-w-7xl mx-auto">
               {activeTeacherRoute === 'T1' && <TeacherDashboard />}
               {activeTeacherRoute === 'T2' && <CourseExamSessionManager />}

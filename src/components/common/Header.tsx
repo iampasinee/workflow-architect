@@ -6,9 +6,10 @@ import { Badge } from './Badge';
 
 interface HeaderProps {
   onAdminMenuToggle?: () => void;
+  onTeacherMenuToggle?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onAdminMenuToggle }) => {
+export const Header: React.FC<HeaderProps> = ({ onAdminMenuToggle, onTeacherMenuToggle }) => {
   const {
     role,
     setRole,
@@ -63,6 +64,16 @@ export const Header: React.FC<HeaderProps> = ({ onAdminMenuToggle }) => {
             onClick={onAdminMenuToggle}
             className="flex h-9 w-9 items-center justify-center rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 md:hidden"
             aria-label="เปิดเมนูผู้ดูแลระบบ"
+          >
+            <Menu className="h-5 w-5" strokeWidth={1.75} />
+          </button>
+        )}
+        {role === 'teacher' && onTeacherMenuToggle && (
+          <button
+            type="button"
+            onClick={onTeacherMenuToggle}
+            className="flex h-9 w-9 items-center justify-center rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 md:hidden"
+            aria-label="เปิดเมนูอาจารย์"
           >
             <Menu className="h-5 w-5" strokeWidth={1.75} />
           </button>
