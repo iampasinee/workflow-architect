@@ -1,5 +1,5 @@
 import { calculateYearLevelFromAdmissionYear } from '../../utils/academicYear';
-import { studentMatchesSection } from '../../services/courseState';
+import { studentMatchesExamSection } from '../../services/courseState';
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
@@ -37,7 +37,7 @@ export const SeatAssignmentManager: React.FC = () => {
   const room = rooms.find((r) => r.id === activeExam?.roomId) || rooms[0];
   const activeSection = courses.find((course) => course.id === activeExam?.courseId)?.sections
     .find((section) => section.sectionNo === activeExam?.sectionNo);
-  const eligibleStudents = students.filter((student) => studentMatchesSection(student, activeSection));
+  const eligibleStudents = students.filter((student) => activeExam && studentMatchesExamSection(student, activeExam, activeSection));
 
   const [selectedSeatNo, setSelectedSeatNo] = useState<string | null>(null);
   const [draggedStudentId, setDraggedStudentId] = useState<string | null>(null);

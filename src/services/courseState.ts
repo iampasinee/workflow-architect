@@ -83,6 +83,7 @@ export const migrateCourses = (courses: Course[], academic: AcademicState, legac
           teacherId: primaryTeacherId,
           coTeacherIds: section.coTeacherIds || [],
           cohorts: uniqueCohorts(migratedCohorts),
+          ...normalizeSectionOverrides(section),
           groupIds: undefined,
           status: section.status || 'active',
           createdAt: section.createdAt || createdAt,
@@ -203,6 +204,7 @@ export const saveSection = (courses: Course[], raw: SectionInput, id?: string): 
     teacherId: raw.primaryTeacherId,
     coTeacherIds: [...raw.coTeacherIds],
     cohorts: uniqueCohorts(raw.cohorts),
+    ...normalizeSectionOverrides(existing),
     status: raw.status,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
@@ -218,11 +220,167 @@ export const studentMatchesCohort = (student: Student, cohort: SectionCohort) =>
   student.majorId === cohort.majorId && student.admissionYear === cohort.admissionYear &&
   (!cohort.classGroupIds?.length || Boolean(student.classGroupId && cohort.classGroupIds.includes(student.classGroupId)));
 
-export const studentMatchesSection = (student: Student, section?: Course['sections'][number]) =>
+export const normalizeSectionOverrides = (section?: Pick<Course['sections'][number], 'includedStudentIds' | 'excludedStudentIds'>) => {
+  const includedStudentIds = [...new Set(section?.includedStudentIds || [])];
+  const included = new Set(includedStudentIds);
+  const excludedStudentIds = [...new Set(section?.excludedStudentIds || [])].filter((id) => !included.has(id));
+  return { includedStudentIds, excludedStudentIds };
+};
+
+export const studentMatchesSectionBase = (student: Student, section?: Course['sections'][number]) =>
   Boolean(section?.cohorts?.some((cohort) => studentMatchesCohort(student, cohort)));
+
+export const studentMatchesSection = (student: Student, section?: Course['sections'][number]) => {
+  if (!section) return false;
+  const { includedStudentIds, excludedStudentIds } = normalizeSectionOverrides(section);
+  if (excludedStudentIds.includes(student.id)) return false;
+  return includedStudentIds.includes(student.id) || studentMatchesSectionBase(student, section);
+};
+
+export const searchStudentsByIdentity = (students: Student[], query: string): Student[] => {
+  const normalized = query.trim().toLocaleLowerCase();
+  return normalized ? students.filter((student) =>
+    `${student.studentCode} ${student.fullName} ${student.email}`.toLocaleLowerCase().includes(normalized)) : students;
+};
+
+export const studentMatchesExamSection = (student: Student, exam: ExamSession, section?: Course['sections'][number]) =>
+  exam.status !== 'upcoming' && exam.eligibleStudentIds
+    ? exam.eligibleStudentIds.includes(student.id)
+    : studentMatchesSection(student, section);
+
+export const snapshotAffectedExamRosters = (
+  exams: ExamSession[], courses: Course[], students: Student[], affectedSectionIds: string[],
+): ExamSession[] => {
+  const affected = new Set(affectedSectionIds);
+  return exams.map((exam) => {
+    if (exam.status === 'upcoming' || exam.eligibleStudentIds) return exam;
+    const course = courses.find((item) => item.id === exam.courseId);
+    const section = course?.sections.find((item) => item.sectionNo === exam.sectionNo);
+    if (!course || !section || !affected.has(sectionIdOf(course.id, section))) return exam;
+    return { ...exam, eligibleStudentIds: students.filter((student) => studentMatchesSection(student, section)).map((student) => student.id) };
+  });
+};
+
+export const enrollmentExamReferenceError = (exams: ExamSession[], courses: Course[], affectedSectionIds: string[]): string | undefined => {
+  for (const id of affectedSectionIds) {
+    const located = findSection(courses, id);
+    if (!located) continue;
+    const duplicateSectionNumbers = located.course.sections.filter((section) => section.sectionNo === located.section.sectionNo);
+    if (duplicateSectionNumbers.length > 1 && exams.some((exam) => exam.courseId === located.course.id && exam.sectionNo === located.section.sectionNo)) {
+      return 'รายวิชานี้มี Section หมายเลขเดียวกันหลายภาคการศึกษา และการสอบยังไม่ได้อ้างอิง Section ID จึงไม่สามารถปรับรายชื่อเฉพาะรายได้อย่างปลอดภัย';
+    }
+  }
+};
+
+export const teacherCanManageSection = (section: Course['sections'][number], teacherId: string) =>
+  Boolean(teacherId && ((section.primaryTeacherId || section.teacherId) === teacherId || section.coTeacherIds?.includes(teacherId)));
+
+export const findStudentEnrollmentInCourse = (
+  courses: Course[], student: Student, courseId: string, targetSectionId: string, teacherId: string,
+) => {
+  const target = findSection(courses, targetSectionId);
+  if (!target || target.course.id !== courseId || !teacherCanManageSection(target.section, teacherId)) return null;
+  const section = target.course.sections.find((candidate) => sectionIdOf(courseId, candidate) !== targetSectionId &&
+    candidate.academicYear === target.section.academicYear && String(candidate.semester) === String(target.section.semester) &&
+    studentMatchesSection(student, candidate));
+  return section ? {
+    sectionId: sectionIdOf(courseId, section), sectionNo: section.sectionNo,
+    manageable: teacherCanManageSection(section, teacherId),
+  } : null;
+};
+
+export interface SectionEnrollmentResult {
+  success: boolean;
+  error?: string;
+  courses?: Course[];
+  affectedSectionIds?: string[];
+}
+
+const updateSection = (courses: Course[], sectionId: string, update: (section: Course['sections'][number]) => Course['sections'][number]) =>
+  courses.map((course) => ({ ...course, sections: course.sections.map((section) =>
+    sectionIdOf(course.id, section) === sectionId ? update(section) : section) }));
+
+const sectionsInOffering = (course: Course, section: Course['sections'][number]) =>
+  course.sections.filter((candidate) => candidate.academicYear === section.academicYear && String(candidate.semester) === String(section.semester));
+
+export const addStudentToSection = (courses: Course[], students: Student[], studentId: string, sectionId: string, teacherId: string): SectionEnrollmentResult => {
+  const located = findSection(courses, sectionId);
+  const student = students.find((item) => item.id === studentId);
+  if (!located || !student) return { success: false, error: 'ไม่พบนักศึกษาหรือ Section ในระบบ' };
+  const { course, section } = located;
+  if (!teacherCanManageSection(section, teacherId)) return { success: false, error: 'คุณไม่มีสิทธิ์จัดการ Section นี้' };
+  if (course.status !== 'active' || section.status === 'inactive') return { success: false, error: 'รายวิชาหรือ Section นี้ปิดใช้งาน' };
+  if (studentMatchesSection(student, section)) return { success: false, error: 'นักศึกษาอยู่ใน Section นี้แล้ว' };
+  const other = sectionsInOffering(course, section).find((candidate) =>
+    sectionIdOf(course.id, candidate) !== sectionId && studentMatchesSection(student, candidate));
+  if (other) return { success: false, error: `นักศึกษาอยู่ใน Section ${other.sectionNo} แล้ว กรุณาใช้การย้ายแทน` };
+  const updated = updateSection(courses, sectionId, (current) => {
+    const overrides = normalizeSectionOverrides(current);
+    return {
+      ...current,
+      includedStudentIds: studentMatchesSectionBase(student, current)
+        ? overrides.includedStudentIds.filter((id) => id !== studentId)
+        : [...overrides.includedStudentIds, studentId],
+      excludedStudentIds: overrides.excludedStudentIds.filter((id) => id !== studentId),
+      updatedAt: new Date().toISOString(),
+    };
+  });
+  return { success: true, courses: updated, affectedSectionIds: [sectionId] };
+};
+
+export const moveStudentBetweenSections = (
+  courses: Course[], students: Student[], studentId: string, fromSectionId: string, toSectionId: string, teacherId: string,
+): SectionEnrollmentResult => {
+  const source = findSection(courses, fromSectionId);
+  const target = findSection(courses, toSectionId);
+  const student = students.find((item) => item.id === studentId);
+  if (!source || !target || !student) return { success: false, error: 'ไม่พบนักศึกษาหรือ Section ในระบบ' };
+  if (fromSectionId === toSectionId || source.course.id !== target.course.id ||
+    source.section.academicYear !== target.section.academicYear || String(source.section.semester) !== String(target.section.semester)) {
+    return { success: false, error: 'ย้ายได้เฉพาะ Section อื่นของรายวิชาและภาคการศึกษาเดียวกัน' };
+  }
+  if (!teacherCanManageSection(source.section, teacherId) || !teacherCanManageSection(target.section, teacherId)) {
+    return { success: false, error: 'คุณไม่มีสิทธิ์จัดการ Section ต้นทางหรือปลายทาง' };
+  }
+  if (source.course.status !== 'active' || source.section.status === 'inactive' || target.section.status === 'inactive') {
+    return { success: false, error: 'รายวิชาหรือ Section นี้ปิดใช้งาน' };
+  }
+  if (!studentMatchesSection(student, source.section)) return { success: false, error: 'นักศึกษาไม่ได้อยู่ใน Section ต้นทาง' };
+  if (studentMatchesSection(student, target.section)) return { success: false, error: 'นักศึกษาอยู่ใน Section ปลายทางแล้ว' };
+  const another = sectionsInOffering(source.course, source.section).find((candidate) => {
+    const id = sectionIdOf(source.course.id, candidate);
+    return id !== fromSectionId && id !== toSectionId && studentMatchesSection(student, candidate);
+  });
+  if (another) return { success: false, error: `นักศึกษาอยู่ใน Section ${another.sectionNo} อีกแห่ง กรุณาตรวจสอบก่อนย้าย` };
+  let updated = updateSection(courses, fromSectionId, (current) => {
+    const overrides = normalizeSectionOverrides(current);
+    return {
+      ...current,
+      includedStudentIds: overrides.includedStudentIds.filter((id) => id !== studentId),
+      excludedStudentIds: studentMatchesSectionBase(student, current)
+        ? [...overrides.excludedStudentIds, studentId] : overrides.excludedStudentIds,
+      updatedAt: new Date().toISOString(),
+    };
+  });
+  updated = updateSection(updated, toSectionId, (current) => {
+    const overrides = normalizeSectionOverrides(current);
+    return {
+      ...current,
+      includedStudentIds: studentMatchesSectionBase(student, current)
+        ? overrides.includedStudentIds.filter((id) => id !== studentId)
+        : [...overrides.includedStudentIds, studentId],
+      excludedStudentIds: overrides.excludedStudentIds.filter((id) => id !== studentId),
+      updatedAt: new Date().toISOString(),
+    };
+  });
+  return { success: true, courses: updated, affectedSectionIds: [fromSectionId, toSectionId] };
+};
 
 export const courseStudentCount = (students: Student[], cohorts: SectionCohort[]) =>
   students.filter((student) => student.accountStatus === 'active' && cohorts.some((cohort) => studentMatchesCohort(student, cohort))).length;
+
+export const sectionStudentCount = (students: Student[], section: Course['sections'][number]) =>
+  students.filter((student) => student.accountStatus === 'active' && studentMatchesSection(student, section)).length;
 
 export const courseDeleteError = (course: Course, exams: ExamSession[]) =>
   course.sections.length || exams.some((exam) => exam.courseId === course.id)
@@ -236,7 +394,9 @@ export const coursesForTeacher = (courses: Course[], teacherId?: string) => !tea
   .map((course) => ({ ...course, sections: course.sections.filter((section) => (section.primaryTeacherId || section.teacherId) === teacherId || section.coTeacherIds?.includes(teacherId)) }))
   .filter((course) => course.sections.length);
 
-export const coursesForStudent = (courses: Course[], student?: Pick<Student, 'majorId' | 'admissionYear' | 'classGroupId'> | null) =>
-  !student?.majorId || !student.admissionYear ? [] : courses
-    .map((course) => ({ ...course, sections: course.sections.filter((section) => studentMatchesSection(student as Student, section)) }))
+export const coursesForStudent = (courses: Course[], student?: Student | null, exams: ExamSession[] = []) =>
+  !student ? [] : courses
+    .map((course) => ({ ...course, sections: course.sections.filter((section) =>
+      studentMatchesSection(student, section) || exams.some((exam) => exam.courseId === course.id && exam.sectionNo === section.sectionNo &&
+        exam.status !== 'upcoming' && exam.eligibleStudentIds?.includes(student.id))) }))
     .filter((course) => course.sections.length);

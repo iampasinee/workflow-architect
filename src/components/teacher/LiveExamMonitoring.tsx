@@ -23,7 +23,7 @@ import {
 import { Badge, ExamSubmissionStatusBadge } from '../common/Badge';
 import { Modal } from '../common/Modal';
 import { ExamSessionStatus, Student, Violation, StudentExamStatus } from '../../types';
-import { studentMatchesSection } from '../../services/courseState';
+import { studentMatchesExamSection } from '../../services/courseState';
 import {
   clearMonitoringFilters,
   defaultMonitoringView,
@@ -157,7 +157,7 @@ const DailyExamOverview: React.FC<DailyExamOverviewProps> = ({
 
   const renderExamCard = ({ exam, course, section }: TeacherMonitoringExam) => {
     const room = rooms.find((candidate) => candidate.id === exam.roomId);
-    const eligibleStudents = students.filter((student) => studentMatchesSection(student, section));
+    const eligibleStudents = students.filter((student) => studentMatchesExamSection(student, exam, section));
     const enteredStudentIds = new Set(seatAssignments
       .filter((assignment) => assignment.examId === exam.id)
       .map((assignment) => assignment.studentId));
@@ -344,7 +344,7 @@ const ExamMonitoringDetail: React.FC<ExamMonitoringDetailProps> = ({ examSession
 
   const section = course.sections.find((candidate) => candidate.sectionNo === activeExam.sectionNo);
   const eligibleStudentCount = section
-    ? students.filter((student) => studentMatchesSection(student, section)).length
+    ? students.filter((student) => studentMatchesExamSection(student, activeExam, section)).length
     : 0;
   const examViolations = violations.filter((violation) => violation.examId === activeExam.id);
   const submittedCount = new Set(submissions

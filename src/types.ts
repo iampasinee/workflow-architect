@@ -167,6 +167,9 @@ export interface Section {
   coTeacherIds?: string[];
   /** Canonical student targeting for a section. */
   cohorts?: SectionCohort[];
+  /** Individual exceptions to the cohort roster; Student master data stays unchanged. */
+  includedStudentIds?: string[];
+  excludedStudentIds?: string[];
   /** Legacy persisted relationship; read only by the forward migration. */
   groupIds?: string[];
   status?: 'active' | 'inactive';
@@ -222,6 +225,8 @@ export interface ExamSession {
   /** Frontend policy configuration for future SecureLab Agent/backend enforcement. */
   policy?: ExamPolicy;
   status: ExamSessionStatus;
+  /** Frozen when an active/completed exam could be affected by a roster override. */
+  eligibleStudentIds?: string[];
   reopenedStudents?: { [studentId: string]: { reopenedUntil: string; reason: string } };
 }
 

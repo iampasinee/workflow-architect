@@ -1053,6 +1053,9 @@ Do not silently assign students from the wrong Major or admission year.
 
 ## Teacher Exam Management and Monitoring
 
+The Teacher `จัดการรายวิชา & กลุ่มเรียน` page is course-first, then Section-first. Only assigned Sections may be shown. Student master records remain Admin-managed. Individual exceptions to cohort membership use `includedStudentIds` and `excludedStudentIds` on existing Sections in `securelab_courses`; effective membership is base cohort plus inclusions minus exclusions. Teacher add/move operations must validate both Section assignments, prevent duplicates and cross-course moves, and never modify Student master data. Before an override changes an in-progress or completed exam's Section, freeze that exam's eligible student IDs; upcoming exams continue using the effective live roster.
+
+
 Teacher exam setup lives in `src/components/teacher/ExamCreationWizard.tsx` and `src/services/examWizard.ts`. The `จัดการสอบ` page lives in `src/components/teacher/CourseExamSessionManager.tsx`; its canonical exam filters live in `src/services/teacherExamManagement.ts`.
 
 The exam Wizard has six steps: exam information, eligible students, schedule and Exam Room, online/offline mode, policies, and review/save. Course and Section choices must be authorized through Primary Teacher or Co-Teacher assignments. Resolve eligible students through existing Section cohorts. Validate the time range, room conflict, and capacity before final creation. Policies are frontend configuration only; do not imply that an Agent, network control, or biometric verification is enforced.

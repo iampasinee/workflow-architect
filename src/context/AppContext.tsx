@@ -10,8 +10,11 @@ import {
 } from '../services/authState';
 import { CourseActionResult, CourseInput, SectionInput } from '../types/course';
 import {
-  courseDeleteError, coursesForStudent, coursesForTeacher, findSection, migrateCourses,
-  saveCourse, saveSection, sectionDeleteError, studentMatchesSection, validateCourseInput, validateSectionInput,
+  addStudentToSection as addStudentEnrollment, courseDeleteError, coursesForStudent, coursesForTeacher,
+  enrollmentExamReferenceError,
+  findSection, findStudentEnrollmentInCourse, migrateCourses,
+  moveStudentBetweenSections as moveStudentEnrollment, saveCourse, saveSection, sectionDeleteError,
+  snapshotAffectedExamRosters, studentMatchesExamSection, studentMatchesSection, validateCourseInput, validateSectionInput,
 } from '../services/courseState';
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
 import {
@@ -112,6 +115,8 @@ interface AppContextType {
   setAcademicStatus: (tier: AcademicTier, id: string, status: 'active' | 'inactive') => AcademicResult;
   assignStudentsToClassGroup: (groupId: string, studentIds: string[], allowReassign?: boolean) => AcademicResult;
   students: Student[];
+  /** Existing Student master records available for teacher Section enrollment search. */
+  studentDirectory: Student[];
   teachers: Teacher[];
   admins: Admin[];
   rooms: Room[];
@@ -156,6 +161,9 @@ interface AppContextType {
   saveSectionRecord: (input: SectionInput, id?: string) => CourseActionResult;
   deleteSectionRecord: (sectionId: string) => CourseActionResult;
   setSectionStatus: (sectionId: string, status: 'active' | 'inactive') => CourseActionResult;
+  addStudentToSection: (studentId: string, sectionId: string) => CourseActionResult;
+  moveStudentBetweenSections: (studentId: string, fromSectionId: string, toSectionId: string) => CourseActionResult;
+  findStudentSectionInCourse: (studentId: string, courseId: string, targetSectionId: string) => { sectionId: string; sectionNo: string; manageable: boolean } | null;
 
   // Exam Actions
   createExamSession: (exam: Omit<ExamSession, 'id'>) => void;
@@ -317,8 +325,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [currentAdmin, setCurrentAdmin] = useState<Admin | null>(initialAdmins[0]);
   const [currentExamId, setCurrentExamId] = useState<string>('exam_0001');
   const courses = useMemo(() => role === 'teacher' ? coursesForTeacher(storedCourses, currentTeacher?.id)
-    : role === 'student' ? coursesForStudent(storedCourses, derivedCurrentStudent) : storedCourses,
-  [role, storedCourses, currentTeacher?.id, derivedCurrentStudent]);
+    : role === 'student' ? coursesForStudent(storedCourses, derivedCurrentStudent, storedExamSessions) : storedCourses,
+  [role, storedCourses, currentTeacher?.id, derivedCurrentStudent, storedExamSessions]);
   const examSessions = useMemo(() => role === 'admin' || !role ? storedExamSessions : storedExamSessions.filter((exam) =>
     courses.some((course) => course.id === exam.courseId && course.sections.some((section) => section.sectionNo === exam.sectionNo))),
   [role, storedExamSessions, courses]);
@@ -326,8 +334,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (role === 'student') return students.filter((student) => student.id === currentStudent?.id);
     if (role !== 'teacher') return students;
     const sections = courses.flatMap((course) => course.sections);
-    return students.filter((student) => sections.some((section) => studentMatchesSection(student, section)));
-  }, [role, students, courses, currentStudent?.id]);
+    return students.filter((student) => sections.some((section) => studentMatchesSection(student, section)) ||
+      storedExamSessions.some((exam) => exam.status !== 'upcoming' && exam.eligibleStudentIds?.includes(student.id) &&
+        courses.some((course) => course.id === exam.courseId && course.sections.some((section) => section.sectionNo === exam.sectionNo))));
+  }, [role, students, courses, currentStudent?.id, storedExamSessions]);
+  const studentDirectory = role === 'teacher' ? students : visibleStudents;
 
   // Sync to localStorage
   useEffect(() => {
@@ -733,6 +744,43 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return { success: true };
   };
 
+  const persistEnrollmentChange = (nextCourses: Course[], affectedSectionIds: string[]) => {
+    setExamSessions((current) => snapshotAffectedExamRosters(current, storedCourses, students, affectedSectionIds));
+    setCourses(nextCourses);
+  };
+
+  const addStudentToSection = (studentId: string, sectionId: string): CourseActionResult => {
+    if (role !== 'teacher' || !currentTeacher || currentTeacher.accountStatus !== 'active') {
+      return { success: false, error: 'เฉพาะอาจารย์ที่มีสถานะปกติเท่านั้น' };
+    }
+    const result = addStudentEnrollment(storedCourses, students, studentId, sectionId, currentTeacher.id);
+    if (!result.success || !result.courses) return { success: false, error: result.error };
+    const examError = enrollmentExamReferenceError(storedExamSessions, storedCourses, result.affectedSectionIds || []);
+    if (examError) return { success: false, error: examError };
+    persistEnrollmentChange(result.courses, result.affectedSectionIds || []);
+    showToast('เพิ่มนักศึกษาเข้า Section แล้ว', undefined, 'success');
+    return { success: true, sectionId };
+  };
+
+  const moveStudentBetweenSections = (studentId: string, fromSectionId: string, toSectionId: string): CourseActionResult => {
+    if (role !== 'teacher' || !currentTeacher || currentTeacher.accountStatus !== 'active') {
+      return { success: false, error: 'เฉพาะอาจารย์ที่มีสถานะปกติเท่านั้น' };
+    }
+    const result = moveStudentEnrollment(storedCourses, students, studentId, fromSectionId, toSectionId, currentTeacher.id);
+    if (!result.success || !result.courses) return { success: false, error: result.error };
+    const examError = enrollmentExamReferenceError(storedExamSessions, storedCourses, result.affectedSectionIds || []);
+    if (examError) return { success: false, error: examError };
+    persistEnrollmentChange(result.courses, result.affectedSectionIds || []);
+    showToast('ย้ายนักศึกษาแล้ว', 'อัปเดตรายชื่อของทั้งสอง Section เรียบร้อยแล้ว', 'success');
+    return { success: true, sectionId: toSectionId };
+  };
+
+  const findStudentSectionInCourse = (studentId: string, courseId: string, targetSectionId: string) => {
+    if (role !== 'teacher' || !currentTeacher) return null;
+    const student = students.find((item) => item.id === studentId);
+    return student ? findStudentEnrollmentInCourse(storedCourses, student, courseId, targetSectionId, currentTeacher.id) : null;
+  };
+
   // Exam Sessions
   const createExamSession = (newExam: Omit<ExamSession, 'id'>) => {
     if (!rooms.some((room) => room.id === newExam.roomId && room.status === 'ready')) {
@@ -846,7 +894,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const section = storedCourses.find((course) => course.id === exam?.courseId)?.sections
       .find((item) => item.sectionNo === exam?.sectionNo);
     const student = students.find((item) => item.id === studentId);
-    if (!student || !studentMatchesSection(student, section)) {
+    if (!student || !exam || !studentMatchesExamSection(student, exam, section)) {
       showToast('ไม่สามารถจัดที่นั่งได้', 'นักศึกษาไม่อยู่ในสาขาวิชาและรหัสที่กำหนดสำหรับตอนเรียนนี้', 'error');
       return;
     }
@@ -870,7 +918,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const section = storedCourses.find((course) => course.id === exam?.courseId)?.sections
       .find((item) => item.sectionNo === exam?.sectionNo);
     const activeStudents = students.filter((student) =>
-      student.accountStatus === 'active' && studentMatchesSection(student, section));
+      student.accountStatus === 'active' && Boolean(exam && studentMatchesExamSection(student, exam, section)));
 
     const newAssignments: SeatAssignment[] = [];
     const minCount = Math.min(availableSeats.length, activeStudents.length);
@@ -1082,6 +1130,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         updateSecurityRules,
 
         students: visibleStudents,
+        studentDirectory,
         teachers,
         admins,
         rooms,
@@ -1120,6 +1169,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         saveSectionRecord,
         deleteSectionRecord,
         setSectionStatus,
+        addStudentToSection,
+        moveStudentBetweenSections,
+        findStudentSectionInCourse,
 
         createExamSession,
         updateExamSession,

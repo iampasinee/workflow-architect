@@ -5,17 +5,28 @@ import { Course } from '../types';
 import { SectionInput } from '../types/course';
 import { createInitialAcademicState, migrateAcademicStudents } from './academicState';
 import {
+  addStudentToSection,
   courseDeleteError,
   courseStudentCount,
   cohortsOverlap,
   coursesForStudent,
   coursesForTeacher,
+  enrollmentExamReferenceError,
   findSection,
+  findStudentEnrollmentInCourse,
   migrateCourses,
+  moveStudentBetweenSections,
+  normalizeSectionOverrides,
   saveCourse,
   saveSection,
+  searchStudentsByIdentity,
   sectionDeleteError,
   sectionIdOf,
+  sectionStudentCount,
+  snapshotAffectedExamRosters,
+  studentMatchesExamSection,
+  studentMatchesSectionBase,
+  teacherCanManageSection,
   studentMatchesSection,
   validateCourseInput,
   validateSectionInput,
@@ -171,4 +182,158 @@ test('section ID remains stable for migrated records', () => {
   const course: Course = courses[0];
   const section = course.sections[0];
   assert.equal(findSection(courses, sectionIdOf(course.id, section))?.section.id, section.id);
+});
+
+const enrollmentStudent = students.find((student) => student.majorId && student.admissionYear)!;
+const exceptionalStudent = students.find((student) => student.id !== enrollmentStudent.id &&
+  (student.majorId !== enrollmentStudent.majorId || student.admissionYear !== enrollmentStudent.admissionYear))!;
+const enrollmentTeacherId = primaryTeacher.id;
+const enrollmentCourse: Course = {
+  ...baseCourse,
+  id: 'course-enrollment-test',
+  sections: [
+    {
+      id: 'section-enrollment-1', courseId: 'course-enrollment-test', sectionNo: '1', semester: 1, academicYear: 2569,
+      teacherId: enrollmentTeacherId, primaryTeacherId: enrollmentTeacherId, coTeacherIds: [],
+      cohorts: [{ majorId: enrollmentStudent.majorId!, admissionYear: enrollmentStudent.admissionYear! }],
+    },
+    {
+      id: 'section-enrollment-2', courseId: 'course-enrollment-test', sectionNo: '2', semester: 1, academicYear: 2569,
+      teacherId: enrollmentTeacherId, primaryTeacherId: enrollmentTeacherId, coTeacherIds: [],
+      cohorts: [{ majorId: 'other-major', admissionYear: 2568 }],
+    },
+  ],
+};
+
+test('enrollment overrides preserve base cohort and normalize duplicate/conflicting IDs', () => {
+  const section = enrollmentCourse.sections[0];
+  assert.equal(studentMatchesSectionBase(enrollmentStudent, section), true);
+  assert.equal(studentMatchesSection(enrollmentStudent, section), true);
+  assert.deepEqual(normalizeSectionOverrides({ includedStudentIds: ['a', 'a'], excludedStudentIds: ['a', 'b', 'b'] }),
+    { includedStudentIds: ['a'], excludedStudentIds: ['b'] });
+});
+
+test('Student roster and candidate search match ID, name and email without changing Student master', () => {
+  assert.ok(searchStudentsByIdentity(students, enrollmentStudent.studentCode).some((student) => student.id === enrollmentStudent.id));
+  assert.ok(searchStudentsByIdentity(students, enrollmentStudent.fullName.toUpperCase()).some((student) => student.id === enrollmentStudent.id));
+  assert.ok(searchStudentsByIdentity(students, enrollmentStudent.email.toUpperCase()).some((student) => student.id === enrollmentStudent.id));
+  assert.deepEqual(searchStudentsByIdentity(students, ''), students);
+});
+
+test('adding an existing Student master record creates only an individual Section inclusion', () => {
+  const before = structuredClone(students);
+  const result = addStudentToSection([enrollmentCourse], students, exceptionalStudent.id, 'section-enrollment-1', enrollmentTeacherId);
+  assert.equal(result.success, true);
+  const section = result.courses![0].sections[0];
+  assert.deepEqual(section.includedStudentIds, [exceptionalStudent.id]);
+  assert.equal(studentMatchesSection(exceptionalStudent, section), true);
+  assert.deepEqual(students, before);
+  assert.equal(section.id, 'section-enrollment-1');
+  assert.equal(result.courses![0].id, enrollmentCourse.id);
+  assert.ok(coursesForStudent(result.courses!, exceptionalStudent).some((course) => course.sections.some((item) => item.id === section.id)));
+});
+
+test('individual inclusion remains eligible when legacy Student academic fields are incomplete', () => {
+  const incomplete = { ...exceptionalStudent, id: 'student-incomplete', majorId: undefined, admissionYear: undefined };
+  const result = addStudentToSection([enrollmentCourse], [...students, incomplete], incomplete.id, 'section-enrollment-1', enrollmentTeacherId);
+  assert.equal(result.success, true);
+  assert.ok(coursesForStudent(result.courses!, incomplete).length);
+});
+
+test('add rejects missing Student, duplicate membership and unauthorized Teacher', () => {
+  assert.match(addStudentToSection([enrollmentCourse], students, 'missing', 'section-enrollment-1', enrollmentTeacherId).error || '', /ไม่พบ/);
+  assert.match(addStudentToSection([enrollmentCourse], students, enrollmentStudent.id, 'section-enrollment-1', enrollmentTeacherId).error || '', /อยู่ใน Section นี้แล้ว/);
+  assert.match(addStudentToSection([enrollmentCourse], students, exceptionalStudent.id, 'section-enrollment-1', 'other-teacher').error || '', /ไม่มีสิทธิ์/);
+  assert.equal(addStudentToSection([enrollmentCourse], students, exceptionalStudent.id, 'section-enrollment-1', enrollmentTeacherId).success, true);
+});
+
+test('add requires Move when Student already belongs to another Section of the offering', () => {
+  const result = addStudentToSection([enrollmentCourse], students, enrollmentStudent.id, 'section-enrollment-2', enrollmentTeacherId);
+  assert.match(result.error || '', /ย้าย/);
+  assert.deepEqual(findStudentEnrollmentInCourse([enrollmentCourse], enrollmentStudent, enrollmentCourse.id, 'section-enrollment-2', enrollmentTeacherId),
+    { sectionId: 'section-enrollment-1', sectionNo: '1', manageable: true });
+});
+
+test('move excludes cohort Student from source and includes them in destination without changing Student master', () => {
+  const before = structuredClone(enrollmentStudent);
+  const result = moveStudentBetweenSections([enrollmentCourse], students, enrollmentStudent.id, 'section-enrollment-1', 'section-enrollment-2', enrollmentTeacherId);
+  assert.equal(result.success, true);
+  const [source, destination] = result.courses![0].sections;
+  assert.deepEqual(source.excludedStudentIds, [enrollmentStudent.id]);
+  assert.deepEqual(destination.includedStudentIds, [enrollmentStudent.id]);
+  assert.equal(studentMatchesSection(enrollmentStudent, source), false);
+  assert.equal(studentMatchesSection(enrollmentStudent, destination), true);
+  assert.deepEqual(enrollmentStudent, before);
+});
+
+test('move rejects another Course, unauthorized destination and invalid source', () => {
+  const otherCourse = { ...enrollmentCourse, id: 'other-course', sections: [{ ...enrollmentCourse.sections[1], id: 'other-section', courseId: 'other-course' }] };
+  assert.match(moveStudentBetweenSections([enrollmentCourse, otherCourse], students, enrollmentStudent.id, 'section-enrollment-1', 'other-section', enrollmentTeacherId).error || '', /เดียวกัน/);
+  const blocked = { ...enrollmentCourse, sections: [enrollmentCourse.sections[0], { ...enrollmentCourse.sections[1], teacherId: 'other', primaryTeacherId: 'other' }] };
+  assert.match(moveStudentBetweenSections([blocked], students, enrollmentStudent.id, 'section-enrollment-1', 'section-enrollment-2', enrollmentTeacherId).error || '', /ไม่มีสิทธิ์/);
+  assert.match(moveStudentBetweenSections([enrollmentCourse], students, exceptionalStudent.id, 'section-enrollment-1', 'section-enrollment-2', enrollmentTeacherId).error || '', /ต้นทาง/);
+});
+
+test('co-Teacher can manage an assigned Section without seeing unrelated Sections', () => {
+  const coTeacherId = 'co-teacher-test';
+  const assigned = { ...enrollmentCourse.sections[0], coTeacherIds: [coTeacherId] };
+  assert.equal(teacherCanManageSection(assigned, coTeacherId), true);
+  assert.equal(teacherCanManageSection(enrollmentCourse.sections[1], coTeacherId), false);
+  const projected = coursesForTeacher([{ ...enrollmentCourse, sections: [assigned, enrollmentCourse.sections[1]] }], coTeacherId);
+  assert.deepEqual(projected[0].sections.map((section) => section.id), [assigned.id]);
+});
+
+test('restoring a cohort Student clears exclusion without redundant inclusion', () => {
+  const excluded = { ...enrollmentCourse, sections: [{ ...enrollmentCourse.sections[0], excludedStudentIds: [enrollmentStudent.id] }, enrollmentCourse.sections[1]] };
+  const result = addStudentToSection([excluded], students, enrollmentStudent.id, 'section-enrollment-1', enrollmentTeacherId);
+  assert.equal(result.success, true);
+  assert.deepEqual(result.courses![0].sections[0].includedStudentIds, []);
+  assert.deepEqual(result.courses![0].sections[0].excludedStudentIds, []);
+});
+
+test('moving an individually included Student removes their source inclusion', () => {
+  const included = { ...enrollmentCourse, sections: [{ ...enrollmentCourse.sections[0], includedStudentIds: [exceptionalStudent.id] }, enrollmentCourse.sections[1]] };
+  const result = moveStudentBetweenSections([included], students, exceptionalStudent.id, 'section-enrollment-1', 'section-enrollment-2', enrollmentTeacherId);
+  assert.equal(result.success, true);
+  assert.deepEqual(result.courses![0].sections[0].includedStudentIds, []);
+  assert.deepEqual(result.courses![0].sections[0].excludedStudentIds, []);
+  assert.deepEqual(result.courses![0].sections[1].includedStudentIds, [exceptionalStudent.id]);
+});
+
+test('Section count reflects effective roster while cohort preview remains unchanged', () => {
+  const result = moveStudentBetweenSections([enrollmentCourse], students, enrollmentStudent.id, 'section-enrollment-1', 'section-enrollment-2', enrollmentTeacherId);
+  const [source, destination] = result.courses![0].sections;
+  assert.equal(sectionStudentCount(students, source), students.filter((student) => student.accountStatus === 'active' && studentMatchesSection(student, source)).length);
+  assert.equal(sectionStudentCount(students, destination), students.filter((student) => student.accountStatus === 'active' && studentMatchesSection(student, destination)).length);
+  assert.equal(courseStudentCount(students, source.cohorts || []), courseStudentCount(students, enrollmentCourse.sections[0].cohorts || []));
+});
+
+test('saved Section edits and migration preserve normalized overrides and stable IDs', () => {
+  const withOverride: Course = { ...enrollmentCourse, sections: [{ ...enrollmentCourse.sections[0], includedStudentIds: [exceptionalStudent.id, exceptionalStudent.id] }, enrollmentCourse.sections[1]] };
+  const migrated = migrateCourses([withOverride], academic);
+  assert.deepEqual(migrated[0].sections[0].includedStudentIds, [exceptionalStudent.id]);
+  const input: SectionInput = { courseId: withOverride.id, sectionNumber: 1, semester: 1, academicYear: 2569, primaryTeacherId: enrollmentTeacherId, coTeacherIds: [], cohorts: withOverride.sections[0].cohorts!, status: 'active' };
+  const saved = saveSection(migrated, input, 'section-enrollment-1');
+  assert.deepEqual(saved[0].sections.find((section) => section.id === 'section-enrollment-1')?.includedStudentIds, [exceptionalStudent.id]);
+});
+
+test('historical exam roster is frozen before override while upcoming exam stays dynamic', () => {
+  const baseExam = { ...initialExamSessions[0], courseId: enrollmentCourse.id, sectionNo: '1' };
+  const historical = { ...baseExam, id: 'historical', status: 'completed' as const };
+  const upcoming = { ...baseExam, id: 'future', status: 'upcoming' as const };
+  const frozen = snapshotAffectedExamRosters([historical, upcoming], [enrollmentCourse], students, ['section-enrollment-1']);
+  assert.ok(frozen[0].eligibleStudentIds?.includes(enrollmentStudent.id));
+  assert.equal(frozen[1].eligibleStudentIds, undefined);
+  const moved = moveStudentBetweenSections([enrollmentCourse], students, enrollmentStudent.id, 'section-enrollment-1', 'section-enrollment-2', enrollmentTeacherId).courses!;
+  assert.equal(studentMatchesExamSection(enrollmentStudent, frozen[0], moved[0].sections[0]), true);
+  assert.equal(studentMatchesExamSection(enrollmentStudent, frozen[1], moved[0].sections[0]), false);
+  assert.ok(coursesForStudent(moved, enrollmentStudent, frozen).some((course) => course.sections.some((section) => section.id === 'section-enrollment-1')));
+});
+
+test('ambiguous legacy exam Section number blocks unsafe individual roster changes', () => {
+  const duplicate = { ...enrollmentCourse.sections[0], id: 'section-enrollment-next-year', academicYear: 2570 };
+  const ambiguous = { ...enrollmentCourse, sections: [...enrollmentCourse.sections, duplicate] };
+  const exam = { ...initialExamSessions[0], courseId: enrollmentCourse.id, sectionNo: '1' };
+  assert.match(enrollmentExamReferenceError([exam], [ambiguous], ['section-enrollment-1']) || '', /Section ID/);
+  assert.equal(enrollmentExamReferenceError([exam], [enrollmentCourse], ['section-enrollment-1']), undefined);
 });
