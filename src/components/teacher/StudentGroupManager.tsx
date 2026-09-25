@@ -44,7 +44,7 @@ export const StudentGroupManager: React.FC = () => {
   const studentContext = (student: Student) => {
     const major = academicState.majors.find((item) => item.id === student.majorId);
     const group = academicState.classGroups.find((item) => item.id === student.classGroupId);
-    return `${major?.code || 'ไม่พบสาขาวิชา'} • ${student.admissionYear ? `ปีเข้า ${getAdmissionCode(student.admissionYear)}` : 'ไม่ทราบปีเข้า'} • ${group?.code || 'ยังไม่กำหนดกลุ่มเรียน'}`;
+    return `${major?.code || 'ไม่พบสาขาวิชา'} • ${student.admissionYear ? `ปีที่เข้าศึกษา ${getAdmissionCode(student.admissionYear)}` : 'ไม่ทราบปีที่เข้าศึกษา'} • ${group?.code || 'ยังไม่กำหนดกลุ่มเรียน'}`;
   };
   const closeModal = () => { setModal(null); setError(''); };
   const openMove = (studentId = '', targetId = '', sourceId = sectionId) => {
@@ -104,20 +104,20 @@ export const StudentGroupManager: React.FC = () => {
           <p className="mt-4 text-xs font-semibold text-gray-700">กลุ่มเรียนที่ครอบคลุม</p><div className="mt-2 flex flex-wrap gap-2">{(selectedSection.cohorts || []).map((cohort) => {
             const major = academicState.majors.find((item) => item.id === cohort.majorId);
             const codes = cohort.classGroupIds?.map((id) => academicState.classGroups.find((group) => group.id === id)?.code).filter(Boolean);
-            return <span key={`${cohort.majorId}-${cohort.admissionYear}`} className="rounded-lg border border-blue-100 bg-blue-50 px-2.5 py-1.5 text-xs font-semibold text-blue-700">{major?.code || 'ไม่พบสาขาวิชา'} • ปีเข้า {getAdmissionCode(cohort.admissionYear)} • {codes?.length ? codes.join(', ') : 'ทุกกลุ่มเรียน'}</span>;
+            return <span key={`${cohort.majorId}-${cohort.admissionYear}`} className="rounded-lg border border-blue-100 bg-blue-50 px-2.5 py-1.5 text-xs font-semibold text-blue-700">{major?.code || 'ไม่พบสาขาวิชา'} • ปีที่เข้าศึกษา {getAdmissionCode(cohort.admissionYear)} • {codes?.length ? codes.join(', ') : 'ทุกกลุ่มเรียน'}</span>;
           })}{!selectedSection.cohorts?.length && <span className="text-xs text-amber-700">ยังไม่ได้กำหนดกลุ่มนักศึกษา</span>}</div>
           {!destinations.length && <p className="mt-3 text-[11px] text-gray-500">การย้ายต้องมี Section อื่นในรายวิชาและภาคการศึกษาเดียวกันที่คุณได้รับมอบหมาย</p>}
         </section>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><h3 className="text-base font-bold text-gray-900">รายชื่อนักศึกษาใน Section</h3><label className="relative block w-full sm:w-80"><span className="sr-only">ค้นหานักศึกษาใน Section</span><Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" /><input type="search" placeholder="ค้นหารหัสนักศึกษา / ชื่อ / อีเมล..." value={rosterSearch} onChange={(event) => setRosterSearch(event.target.value)} className="w-full rounded-xl border border-gray-200 bg-white py-2 pl-9 pr-4 text-xs outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" /></label></div>
-        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xs"><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-xs"><thead className="border-b border-gray-200 bg-gray-50 font-semibold text-gray-600"><tr><th className="px-4 py-3">รหัสนักศึกษา</th><th className="px-4 py-3">ชื่อ-นามสกุล</th><th className="px-4 py-3">สาขาวิชา / กลุ่มเรียน</th><th className="px-4 py-3">ปีเข้า / ชั้นปี</th><th className="px-4 py-3">สถานะบัญชี</th><th className="px-4 py-3">การดำเนินการ</th></tr></thead><tbody className="divide-y divide-gray-100">{filteredRoster.map((student) => {
+        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xs"><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-xs"><thead className="border-b border-gray-200 bg-gray-50 font-semibold text-gray-600"><tr><th className="px-4 py-3">รหัสนักศึกษา</th><th className="px-4 py-3">ชื่อ-นามสกุล</th><th className="px-4 py-3">สาขาวิชา / กลุ่มเรียน</th><th className="px-4 py-3">ปีที่เข้าศึกษา / ชั้นปี</th><th className="px-4 py-3">สถานะบัญชี</th><th className="px-4 py-3">การดำเนินการ</th></tr></thead><tbody className="divide-y divide-gray-100">{filteredRoster.map((student) => {
           const level = student.admissionYear ? calculateYearLevelFromAdmissionYear(student.admissionYear) : null;
           const submission = submissions.find((item) => item.examId === selectedExam?.id && item.studentId === student.id);
-          const eligibleForExam = selectedExam && studentMatchesExamSection(student, selectedExam, selectedSection);
+          const eligibleForExam = selectedExam && studentMatchesExamSection(student, selectedExam, selectedSection, now);
           return <tr key={student.id} className="hover:bg-gray-50/70">
             <td className="px-4 py-3 font-mono font-medium text-gray-800">{student.studentCode}</td>
             <td className="px-4 py-3"><p className="font-semibold text-gray-900">{student.fullName}</p><p className="text-[11px] text-gray-500">{student.email}</p></td>
             <td className="px-4 py-3 text-gray-700">{studentContext(student)}</td>
-            <td className="px-4 py-3 text-gray-700">{student.admissionYear ? `ปีเข้า ${getAdmissionCode(student.admissionYear)}` : '—'}<p className="text-[11px] text-gray-500">{level?.formattedYearLevel || '—'}</p></td>
+            <td className="px-4 py-3 text-gray-700">{student.admissionYear ? `ปีที่เข้าศึกษา ${getAdmissionCode(student.admissionYear)}` : '—'}<p className="text-[11px] text-gray-500">{level?.formattedYearLevel || '—'}</p></td>
             <td className="px-4 py-3"><AccountStatusBadge status={student.accountStatus} /><div className="mt-1">{eligibleForExam ? <ExamSubmissionStatusBadge status={submission?.status === 'submitted' || submission?.status === 'late' ? submission.status : selectedExam && getEffectiveExamStatus(selectedExam, now) === 'in_progress' ? 'in_progress' : 'not_started'} /> : <span className="text-[11px] text-gray-400">ไม่มีการสอบล่าสุด</span>}</div></td>
             <td className="px-4 py-3"><button type="button" onClick={() => openMove(student.id)} disabled={!destinations.length} className="rounded-lg px-2 py-1 font-semibold text-blue-700 hover:bg-blue-50 disabled:text-gray-400">ย้าย</button></td>
           </tr>;

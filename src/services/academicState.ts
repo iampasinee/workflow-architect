@@ -468,8 +468,8 @@ export const validateAcademicInput = (
   if (tier === 'majors' && !state.departments.some((department) => department.id === input.departmentId)) return 'กรุณาเลือกภาควิชา';
   if (tier === 'classGroups') {
     if (!input.majorId || !state.majors.some((major) => major.id === input.majorId)) return 'กรุณาเลือกสาขาวิชา';
-    if (!Number.isSafeInteger(input.admissionYear) || !input.admissionYear || input.admissionYear < 2500 || input.admissionYear > academicSettings.currentAcademicYear) return 'กรุณาเลือกปีเข้าที่ถูกต้อง';
-    if (!/^[A-Z0-9-]{1,30}$/.test(effectiveCode)) return 'ไม่สามารถสร้างรหัสกลุ่มได้ กรุณาตรวจสอบสาขาวิชาและปีเข้า';
+    if (!Number.isSafeInteger(input.admissionYear) || !input.admissionYear || input.admissionYear < 2500 || input.admissionYear > academicSettings.currentAcademicYear) return 'กรุณาเลือกปีที่เข้าศึกษาที่ถูกต้อง';
+    if (!/^[A-Z0-9-]{1,30}$/.test(effectiveCode)) return 'ไม่สามารถสร้างรหัสกลุ่มได้ กรุณาตรวจสอบสาขาวิชาและปีที่เข้าศึกษา';
   }
   if (tier === 'departments' && (!existing || !('facultyId' in existing) || existing.facultyId !== input.facultyId) &&
     !isAcademicPathActive(state, 'faculties', input.facultyId)) return 'คณะที่เลือกถูกปิดใช้งาน';
@@ -554,6 +554,6 @@ export const validateStudentClassGroup = (
   if (!student.classGroupId) return undefined;
   const group = state.classGroups.find((item) => item.id === student.classGroupId);
   if (!group) return 'ไม่พบกลุ่มเรียนที่เลือก';
-  if (group.majorId !== student.majorId || group.admissionYear !== student.admissionYear) return 'กลุ่มเรียนต้องตรงกับสาขาวิชาและปีเข้าของนักศึกษา';
+  if (group.majorId !== student.majorId || group.admissionYear !== student.admissionYear) return 'กลุ่มเรียนต้องตรงกับสาขาวิชาและปีที่เข้าศึกษาของนักศึกษา';
   if (requireActive && !isAcademicPathActive(state, 'classGroups', group.id)) return 'กลุ่มเรียนที่เลือกถูกปิดใช้งาน';
 };

@@ -36,7 +36,10 @@ import {
   CheatDetectionRules
 } from '../types';
 import { getTranslation } from '../i18n/translations';
-import { canAdjustExamTime, canEditExamSeats, canEditExamSetup, canReopenExamSubmissions, canSubmitToExam, getEffectiveExamStatus } from '../services/examStatus';
+import { canAdjustExamTime, canEditExamSeats, canEditExamSetup, canReopenExamSubmissions, getEffectiveExamStatus } from '../services/examStatus';
+import { getEffectiveNow } from '../services/demoTime';
+import { canSubmitStudentAttempt, demoSubmissionStorageKey, isDemoSubmissionRetry, recordStudentSubmission } from '../services/studentDemoRetry';
+import { useExamClock } from '../utils/useExamClock';
 import { getAdminRouteFromHash } from '../utils/adminRoutes';
 import { AcademicInput, AcademicResult, AcademicState, AcademicTier } from '../types/academic';
 import {
@@ -97,7 +100,7 @@ interface AppContextType {
 
   // Frontend-only authentication mock state
   mockAuthUsers: MockAuthUser[];
-  completeMockRegistration: (userId: string, faceStatus: FaceEnrollmentStatus) => { success: boolean; error?: string };
+  completeMockRegistration: (userId: string, faceStatus: FaceEnrollmentStatus, password: string, confirmation: string) => { success: boolean; error?: string };
 
   // Active Violation for Student ST8 Overlay
   activeViolationAlert: Violation | null;
@@ -199,6 +202,7 @@ export const defaultSecurityRules: CheatDetectionRules = {
 };
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const examNow = useExamClock();
   // Website language state (default: 'th')
   const [language, setLanguageState] = useState<AppLanguage>('th');
 
@@ -295,6 +299,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [submissions, setSubmissions] = useState<Submission[]>(() => {
     return safeParse('securelab_submissions', initialSubmissions);
   });
+  const [demoSubmissionAttempts, setDemoSubmissionAttempts] = useState<Submission[]>(() =>
+    safeParse(demoSubmissionStorageKey, []));
 
   const [violations, setViolations] = useState<Violation[]>(() => {
     return safeParse('securelab_violations', initialViolations);
@@ -326,8 +332,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [currentAdmin, setCurrentAdmin] = useState<Admin | null>(initialAdmins[0]);
   const [currentExamId, setCurrentExamId] = useState<string>('exam_0001');
   const courses = useMemo(() => role === 'teacher' ? coursesForTeacher(storedCourses, currentTeacher?.id)
-    : role === 'student' ? coursesForStudent(storedCourses, derivedCurrentStudent, storedExamSessions) : storedCourses,
-  [role, storedCourses, currentTeacher?.id, derivedCurrentStudent, storedExamSessions]);
+    : role === 'student' ? coursesForStudent(storedCourses, derivedCurrentStudent, storedExamSessions, examNow) : storedCourses,
+  [role, storedCourses, currentTeacher?.id, derivedCurrentStudent, storedExamSessions, examNow]);
   const examSessions = useMemo(() => role === 'admin' || !role ? storedExamSessions : storedExamSessions.filter((exam) =>
     courses.some((course) => course.id === exam.courseId && course.sections.some((section) => section.sectionNo === exam.sectionNo))),
   [role, storedExamSessions, courses]);
@@ -336,9 +342,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (role !== 'teacher') return students;
     const sections = courses.flatMap((course) => course.sections);
     return students.filter((student) => sections.some((section) => studentMatchesSection(student, section)) ||
-      storedExamSessions.some((exam) => getEffectiveExamStatus(exam) !== 'upcoming' && exam.eligibleStudentIds?.includes(student.id) &&
+      storedExamSessions.some((exam) => getEffectiveExamStatus(exam, examNow) !== 'upcoming' && exam.eligibleStudentIds?.includes(student.id) &&
         courses.some((course) => course.id === exam.courseId && course.sections.some((section) => section.sectionNo === exam.sectionNo))));
-  }, [role, students, courses, currentStudent?.id, storedExamSessions]);
+  }, [role, students, courses, currentStudent?.id, storedExamSessions, examNow]);
   const studentDirectory = role === 'teacher' ? students : visibleStudents;
 
   // Sync to localStorage
@@ -388,6 +394,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [submissions]);
 
   useEffect(() => {
+    localStorage.setItem(demoSubmissionStorageKey, JSON.stringify(demoSubmissionAttempts));
+  }, [demoSubmissionAttempts]);
+
+  useEffect(() => {
     localStorage.setItem('securelab_violations', JSON.stringify(violations));
   }, [violations]);
 
@@ -404,8 +414,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
-  const completeMockRegistration = (userId: string, faceStatus: FaceEnrollmentStatus) => {
-    const result = completeMockRegistrationState(mockAuthUsers, userId, faceStatus);
+  const completeMockRegistration = (userId: string, faceStatus: FaceEnrollmentStatus, password: string, confirmation: string) => {
+    const result = completeMockRegistrationState(mockAuthUsers, userId, faceStatus, password, confirmation);
     if (result.success) setMockAuthUsers(result.users);
     return { success: result.success, error: result.error };
   };
@@ -431,7 +441,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (existingGroup && (existingGroup.majorId !== input.majorId || existingGroup.admissionYear !== input.admissionYear) &&
       (students.some((student) => student.classGroupId === id) || storedCourses.some((course) =>
         course.sections.some((section) => section.cohorts?.some((cohort) => cohort.classGroupIds?.includes(id)))))) {
-      return academicFailure('ไม่สามารถเปลี่ยนสาขาวิชาหรือปีเข้าของกลุ่มที่มีนักศึกษาหรือตอนเรียนอ้างอิงอยู่');
+      return academicFailure('ไม่สามารถเปลี่ยนสาขาวิชาหรือปีที่เข้าศึกษาของกลุ่มที่มีนักศึกษาหรือตอนเรียนอ้างอิงอยู่');
     }
     const error = validateAcademicInput(academicState, tier, input, id);
     if (error) return academicFailure(error);
@@ -501,7 +511,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const selected = students.filter((student) => studentIds.includes(student.id));
     if (!selected.length) return academicFailure('กรุณาเลือกนักศึกษาอย่างน้อย 1 คน');
     if (selected.some((student) => student.majorId !== group.majorId || student.admissionYear !== group.admissionYear)) {
-      return academicFailure('นักศึกษาที่เลือกต้องมีสาขาวิชาและปีเข้าตรงกับกลุ่มเรียน');
+      return academicFailure('นักศึกษาที่เลือกต้องมีสาขาวิชาและปีที่เข้าศึกษาตรงกับกลุ่มเรียน');
     }
     const reassignment = selected.filter((student) => student.classGroupId && student.classGroupId !== group.id);
     if (reassignment.length && !allowReassign) return academicFailure('พบนักศึกษาที่อยู่ในกลุ่มอื่น กรุณายืนยันการย้ายกลุ่ม');
@@ -862,6 +872,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     targetStudentId?: string,
     reason: string = 'อนุญาตเป็นกรณีพิเศษ'
   ) => {
+    // Reopening is persisted exam configuration, so its expiry always uses real time.
     const now = new Date();
     const exam = storedExamSessions.find((item) => item.id === examId);
     if (!exam || !canReopenExamSubmissions(exam, now)) {
@@ -980,7 +991,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     );
     const reopening = exam?.reopenedStudents?.[studentId] || exam?.reopenedStudents?.['*'];
     const hasActiveReopening = Boolean(
-      reopening && new Date(reopening.reopenedUntil).getTime() > Date.now()
+      reopening && new Date(reopening.reopenedUntil).getTime() > getEffectiveNow().getTime()
     );
     const hasFinalSubmission =
       existingSubmission?.status === 'submitted' || existingSubmission?.status === 'late';
@@ -990,13 +1001,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return false;
     }
 
-    if (!exam || !canSubmitToExam(exam, new Date(), hasActiveReopening)) {
+    if (!exam || !canSubmitStudentAttempt(exam, getEffectiveNow(), hasActiveReopening, hasFinalSubmission)) {
       showToast('ไม่อนุญาตให้อัปโหลด', 'อัปโหลดไฟล์ได้เฉพาะระหว่างการสอบที่กำลังดำเนินการ', 'error');
-      return false;
-    }
-
-    if (hasFinalSubmission && !hasActiveReopening) {
-      showToast('การส่งถูกล็อก', 'กรุณาขอให้อาจารย์เปิดการส่งอีกครั้งก่อนอัปโหลดไฟล์ทดแทน', 'warning');
       return false;
     }
 
@@ -1028,10 +1034,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       submittedAt,
     };
 
-    setSubmissions(prev => {
-      const filtered = prev.filter(s => !(s.examId === examId && s.studentId === studentId));
-      return [...filtered, newSub];
-    });
+    if (isDemoSubmissionRetry(hasFinalSubmission, hasActiveReopening)) {
+      setDemoSubmissionAttempts((previous) => recordStudentSubmission(submissions, previous, newSub, true).demoAttempts);
+    } else {
+      setSubmissions((previous) => recordStudentSubmission(previous, demoSubmissionAttempts, newSub, false).canonical);
+    }
 
     if (anyDamaged) {
       showToast('ตรวจสอบความสมบูรณ์ไม่ผ่าน', 'มีไฟล์ว่างหรือเสียหาย กรุณาอัปโหลดใหม่', 'error');
@@ -1104,6 +1111,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setExamSessions(initialExamSessions);
     setSeatAssignments(initialSeatAssignments);
     setSubmissions(initialSubmissions);
+    setDemoSubmissionAttempts([]);
     setViolations(initialViolations);
     setSecurityRules(defaultSecurityRules);
     setAuditLogs([]);

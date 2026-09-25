@@ -172,7 +172,7 @@ export const CourseExamSessionManager: React.FC = () => {
                     const course = courses.find((candidate) => candidate.id === session.courseId);
                     const room = rooms.find((candidate) => candidate.id === session.roomId);
                     const effectiveStatus = getEffectiveExamStatus(session, now);
-                    const editable = canEditExamSetup(session, now);
+                    const editable = canEditExamSetup(session, new Date());
                     return (
                       <tr key={session.id} className="hover:bg-gray-50/70">
                         <td className="px-5 py-4"><p className="font-bold text-gray-900">{session.examName || `${course?.courseCode} การสอบ`}</p><p className="mt-1 text-[11px] text-gray-500">{course?.courseCode} — {course?.courseName} • Section {session.sectionNo}</p></td>

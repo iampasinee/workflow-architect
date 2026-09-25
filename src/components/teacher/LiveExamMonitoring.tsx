@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
   Clock,
@@ -39,9 +39,11 @@ import { MonitoringCalendar } from './MonitoringCalendar';
 import { MonitoringDatePickerPopover } from './MonitoringDatePickerPopover';
 import { useExamClock } from '../../utils/useExamClock';
 import { canAdjustExamTime, canReopenExamSubmissions, examStatusLabels } from '../../services/examStatus';
+import { getDemoTimeState, subscribeDemoTime } from '../../services/demoTime';
 
 export const LiveExamMonitoring: React.FC = () => {
   const now = useExamClock();
+  const demoTime = useSyncExternalStore(subscribeDemoTime, getDemoTimeState, getDemoTimeState);
   const [selectedExamSessionId, setSelectedExamSessionId] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState(() => getLocalDateInputValue());
   const [monitoringView, setMonitoringView] = useState<MonitoringView>(defaultMonitoringView);
@@ -49,6 +51,12 @@ export const LiveExamMonitoring: React.FC = () => {
   const [courseFilter, setCourseFilter] = useState('');
   const [roomFilter, setRoomFilter] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+
+  useEffect(() => {
+    setSelectedDate(getLocalDateInputValue(demoTime.enabled && demoTime.simulatedNow !== null
+      ? new Date(demoTime.simulatedNow) : new Date()));
+    setMonitoringView('daily');
+  }, [demoTime.enabled, demoTime.simulatedNow]);
 
   if (selectedExamSessionId) {
     return (
@@ -168,7 +176,7 @@ const DailyExamOverview: React.FC<DailyExamOverviewProps> = ({
 
   const renderExamCard = ({ exam, course, section }: TeacherMonitoringExam) => {
     const room = rooms.find((candidate) => candidate.id === exam.roomId);
-    const eligibleStudents = students.filter((student) => studentMatchesExamSection(student, exam, section));
+    const eligibleStudents = students.filter((student) => studentMatchesExamSection(student, exam, section, now));
     const enteredStudentIds = new Set(seatAssignments
       .filter((assignment) => assignment.examId === exam.id)
       .map((assignment) => assignment.studentId));
@@ -253,7 +261,7 @@ const DailyExamOverview: React.FC<DailyExamOverviewProps> = ({
 
       {monitoringView === 'calendar' ? <MonitoringCalendar exams={authorizedExams} selectedDate={selectedDate} onSelectDate={onSelectedDateChange} onShowDaily={() => onMonitoringViewChange('daily')} /> : <>
         <section className="flex flex-col gap-4 rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 to-white p-4 shadow-xs lg:flex-row lg:items-center lg:justify-between">
-          <div><p className="text-xs font-bold text-blue-600">กำหนดการสอบประจำวันที่ {formatThaiDate(selectedDate)}</p><h2 className="mt-1 text-xl font-bold text-gray-950">{selectedDate === getLocalDateInputValue() ? 'วันนี้' : 'วันที่เลือก'}มีการสอบ {statusCounts.all} รายการ</h2><p className="mt-1 flex items-center gap-1.5 text-[11px] text-gray-500"><GraduationCap className="h-4 w-4 text-blue-600" />อาจารย์ผู้คุมสอบ: <strong className="text-gray-700">{currentTeacher?.fullName || '—'}</strong> (แสดงเฉพาะรายวิชาและตอนเรียนที่ท่านได้รับมอบหมาย)</p></div>
+          <div><p className="text-xs font-bold text-blue-600">กำหนดการสอบประจำวันที่ {formatThaiDate(selectedDate)}</p><h2 className="mt-1 text-xl font-bold text-gray-950">{selectedDate === getLocalDateInputValue(now) ? 'วันนี้' : 'วันที่เลือก'}มีการสอบ {statusCounts.all} รายการ</h2><p className="mt-1 flex items-center gap-1.5 text-[11px] text-gray-500"><GraduationCap className="h-4 w-4 text-blue-600" />อาจารย์ผู้คุมสอบ: <strong className="text-gray-700">{currentTeacher?.fullName || '—'}</strong> (แสดงเฉพาะรายวิชาและตอนเรียนที่ท่านได้รับมอบหมาย)</p></div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">{([['all', 'ทั้งหมด'], ['in_progress', 'กำลังสอบ'], ['upcoming', 'กำลังจะเริ่ม'], ['completed', 'เสร็จสิ้น']] as Array<['all' | ExamSessionStatus, string]>).map(([status, label]) => <button key={status} type="button" onClick={() => onStatusFilterChange(status)} className={`min-w-24 rounded-xl border px-3 py-2 text-center transition-all ${statusFilter === status ? 'border-blue-500 bg-white text-blue-700 ring-2 ring-blue-500/15' : 'border-gray-200 bg-white/80 text-gray-600 hover:border-blue-200'}`}><span className="block text-[10px] font-medium">{label}</span><strong className="mt-0.5 block text-lg text-gray-900">{statusCounts[status]}</strong></button>)}</div>
         </section>
 
@@ -268,7 +276,7 @@ const DailyExamOverview: React.FC<DailyExamOverviewProps> = ({
         </section>
 
         <section className="grid gap-4 lg:grid-cols-2" aria-live="polite">
-          {filteredExams.length > 0 ? filteredExams.map(renderExamCard) : <div className="rounded-2xl border border-dashed border-gray-300 bg-white px-6 py-14 text-center lg:col-span-2"><CalendarDays className="mx-auto h-10 w-10 text-gray-300" /><h2 className="mt-3 text-base font-bold text-gray-900">{examsOnSelectedDate.length ? 'ไม่พบรายการตามตัวกรอง' : 'ไม่มีการสอบในวันที่เลือก'}</h2><p className="mt-1 text-xs text-gray-500">ลองเลือกวันที่อื่น หรือปรับตัวกรอง</p><div className="mt-4 flex flex-wrap justify-center gap-2"><button type="button" onClick={() => { onSelectedDateChange(getLocalDateInputValue()); clearFilters(); }} className="min-h-9 rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white hover:bg-blue-700">กลับไปวันนี้</button><button type="button" onClick={() => onMonitoringViewChange('calendar')} className="min-h-9 rounded-xl border border-gray-300 bg-white px-4 text-xs font-semibold text-gray-700 hover:bg-gray-50">เปิดปฏิทิน</button></div></div>}
+          {filteredExams.length > 0 ? filteredExams.map(renderExamCard) : <div className="rounded-2xl border border-dashed border-gray-300 bg-white px-6 py-14 text-center lg:col-span-2"><CalendarDays className="mx-auto h-10 w-10 text-gray-300" /><h2 className="mt-3 text-base font-bold text-gray-900">{examsOnSelectedDate.length ? 'ไม่พบรายการตามตัวกรอง' : 'ไม่มีการสอบในวันที่เลือก'}</h2><p className="mt-1 text-xs text-gray-500">ลองเลือกวันที่อื่น หรือปรับตัวกรอง</p><div className="mt-4 flex flex-wrap justify-center gap-2"><button type="button" onClick={() => { onSelectedDateChange(getLocalDateInputValue(now)); clearFilters(); }} className="min-h-9 rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white hover:bg-blue-700">กลับไปวันนี้</button><button type="button" onClick={() => onMonitoringViewChange('calendar')} className="min-h-9 rounded-xl border border-gray-300 bg-white px-4 text-xs font-semibold text-gray-700 hover:bg-gray-50">เปิดปฏิทิน</button></div></div>}
         </section>
       </>}
     </div>
@@ -355,10 +363,11 @@ const ExamMonitoringDetail: React.FC<ExamMonitoringDetailProps> = ({ examSession
   }
 
   const section = course.sections.find((candidate) => candidate.sectionNo === activeExam.sectionNo);
-  const canAdjustTime = canAdjustExamTime(activeExam, now);
-  const canReopen = canReopenExamSubmissions(activeExam, now);
+  // Persisted schedule operations remain governed by real time in demo mode.
+  const canAdjustTime = canAdjustExamTime(activeExam, new Date());
+  const canReopen = canReopenExamSubmissions(activeExam, new Date());
   const eligibleStudentCount = section
-    ? students.filter((student) => studentMatchesExamSection(student, activeExam, section)).length
+    ? students.filter((student) => studentMatchesExamSection(student, activeExam, section, now)).length
     : 0;
   const examViolations = violations.filter((violation) => violation.examId === activeExam.id);
   const submittedCount = new Set(submissions
@@ -368,7 +377,7 @@ const ExamMonitoringDetail: React.FC<ExamMonitoringDetailProps> = ({ examSession
   const hasActiveReopening = (studentId: string) => {
     const reopening =
       activeExam?.reopenedStudents?.[studentId] || activeExam?.reopenedStudents?.['*'];
-    return Boolean(reopening && new Date(reopening.reopenedUntil).getTime() > Date.now());
+    return Boolean(reopening && new Date(reopening.reopenedUntil).getTime() > now.getTime());
   };
 
   // Compute student status for each seat

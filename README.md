@@ -22,12 +22,15 @@ npm run dev
 | `npm install` | ติดตั้ง dependencies จาก lockfile |
 | `npm run dev` | เปิด Vite ที่ port 3000 และ LAN |
 | `npm run lint` | ตรวจ TypeScript ด้วย `tsc --noEmit` |
-| `npm run test:auth` | ทดสอบโดเมนอีเมล การแยกบทบาท การลงทะเบียนใบหน้า mock และ auth migration |
+| `npm run test:auth` | ทดสอบโดเมนอีเมล การแยกบทบาท รหัสผ่านจำลอง การลงทะเบียนใบหน้า และ auth migration |
 | `npm run test:academic` | ทดสอบ academic model, migration, Class Group, Teacher affiliation และ validation |
 | `npm run test:courses` | ทดสอบ Course/Section, teacher assignment, cohort collision และ portal eligibility |
 | `npm run test:rooms` | ทดสอบชั้น ห้อง ผังที่นั่ง อุปกรณ์ การย้ายข้อมูล และการป้องกันข้อมูลที่ถูกอ้างอิง |
 | `npm run test:exam-wizard` | ทดสอบการสร้าง/แก้ไขการสอบ ร่างการสอบ สิทธิ์ผู้สอน และการตรวจสอบเวลา/ห้องสอบ |
 | `npm run test:exam-management` | ทดสอบการค้นหาและตัวกรองรายการสอบของอาจารย์ |
+| `npm run test:demo-time` | ทดสอบเวลาเดโม, preset, guard และสถานะข้ามหน้า |
+| `npm run test:student-demo` | ทดสอบการเข้าสอบและส่งซ้ำในโหมดทดสอบโดยไม่แก้ submission หลัก |
+| `npm run test:exam-status` | ทดสอบสถานะสอบจากวันเวลาและกฎการเข้าสอบ |
 | `npm run test:monitoring` | ทดสอบสิทธิ์และข้อมูลปฏิทิน/ภาพรวมการติดตามสอบ |
 | `npm run build` | สร้าง production bundle ใน `dist/` |
 | `npm run preview` | เปิด production bundle ในเครื่อง |
@@ -40,7 +43,7 @@ npm run dev
 - `src/components/teacher/`: courses, exams, monitoring, integrity และ reopening
 - `src/components/admin/`: dashboard, users, academic structure, Course/Section, rooms, biometric, security, audit และ profile
 - `src/components/common/`, `src/components/simulation/`: shared UI และเครื่องมือจำลอง
-- `src/components/auth/`: Auth landing, mock Google account selector และ Registration 4 ขั้น
+- `src/components/auth/`: Auth landing, mock Google account selector และ Registration 5 ขั้น
 - `src/context/AppContext.tsx`: state, CRUD, persistence และ forward migration
 - `src/types.ts`, `src/types/`: domain models
 - `src/data/`: mock/seed data
@@ -52,6 +55,7 @@ npm run dev
 - `src/services/examWizard.ts`: state ของ Wizard, validation, policy mock และร่างการสอบ
 - `src/services/teacherExamManagement.ts`: ตัวกรองรายการสอบของอาจารย์
 - `src/services/teacherMonitoring.ts`: สิทธิ์ผู้สอน การสรุปตารางสอบ และตัวกรองติดตามสอบ
+- `src/services/demoTime.ts`, `src/utils/useExamClock.ts`: เวลาเดโมชั่วคราวและนาฬิกากลางของหน้าเว็บ
 - `src/services/stagedUploadStorage.ts`: IndexedDB staged-file persistence
 - `src/utils/academicYear.ts`: current academic year, admission code และ derived year level
 
@@ -70,9 +74,11 @@ Sidebar ผู้ดูแลระบบไม่มีหน้าจัดก
 
 โดเมน `@itm.kmutnb.ac.th` ระบุเพียงว่าเป็นบัญชีบุคลากร ระบบต้องแยก Teacher/Admin จาก mock account record อีกครั้ง และบัญชี Admin ต้องถูก provision ไว้ล่วงหน้า ไม่มี public self-registration สำหรับ Admin
 
-Registration มี 4 ขั้น: บัญชี Google → ข้อมูลผู้ใช้ → ใบหน้า → ยืนยัน ขั้นใบหน้าเป็นข้อบังคับแต่เก็บเฉพาะ `FaceEnrollmentStatus` แบบ mock ไม่เปิดกล้องจริง ไม่เก็บภาพ และไม่ทำ biometric matching เมื่อลงทะเบียนสำเร็จ ระบบจะกลับไป Login โดยไม่สร้าง production session
+Student Registration มี 5 ขั้น: บัญชี Google จำลอง → ตั้งรหัสผ่าน → ข้อมูลนักศึกษา → ใบหน้า → ตรวจสอบและยืนยัน Teacher ใช้ขั้นตอนเดียวกัน โดยขั้นข้อมูลเป็นข้อมูลอาจารย์ รหัสผ่านต้องยาวอย่างน้อย 8 ตัว มีตัวอักษรอังกฤษและตัวเลข ยืนยันให้ตรงกัน และห้ามมีช่องว่างต้น/ท้าย ขั้นใบหน้าเป็นข้อบังคับ: กดเริ่มสแกนแล้วระบบจำลองภารกิจ 6 ท่าทางทีละขั้น เมื่อครบจะได้ `verified_mock` และไปหน้า Review ได้ทันที ไม่มีรายการตรวจสอบชุดที่สอง เก็บเฉพาะ `FaceEnrollmentStatus` แบบ mock ไม่เปิดกล้องจริง ไม่เก็บภาพ และไม่ทำ biometric matching เมื่อลงทะเบียนสำเร็จ ระบบจะกลับไป Login โดยไม่สร้าง production session
 
-สำหรับนักศึกษา `parseStudentUniversityEmail()` จะตัด `s` เพื่อสร้าง Student ID และใช้สองหลักแรกเป็น `admissionYear` เช่น `67 → 2567` ช่องรหัสนักศึกษา ปีเข้า และชั้นปีเป็น read-only ส่วน Major และ Class Group ยังเลือกจากข้อมูลวิชาการจริง Class Group แสดงเฉพาะกลุ่ม active ที่ตรงกับ `majorId + admissionYear` และจะถูกล้างเมื่อเปลี่ยน Major
+หน้า Login จำลองตรวจอีเมลและรหัสผ่านจากข้อมูล auth mock เดียวกัน บัญชีเดโมที่ลงทะเบียนก่อนเพิ่มขั้นรหัสผ่านใช้ `SecureLab123` เพื่อความเข้ากันได้เท่านั้น การเปลี่ยนบัญชีในขั้นลงทะเบียนจะล้างรหัสผ่านชั่วคราวของบัญชีก่อนหน้า และหน้า Review แสดงเพียงสถานะว่าตั้งรหัสผ่านแล้ว
+
+สำหรับนักศึกษา `parseStudentUniversityEmail()` จะตัด `s` เพื่อสร้าง Student ID และใช้สองหลักแรกเป็น `admissionYear` เช่น `67 → 2567` ช่องรหัสนักศึกษา ปีที่เข้าศึกษา และชั้นปีเป็น read-only ส่วน Major และ Class Group ยังเลือกจากข้อมูลวิชาการจริง Class Group แสดงเฉพาะกลุ่ม active ที่ตรงกับ `majorId + admissionYear` และจะถูกล้างเมื่อเปลี่ยน Major
 
 ## การจัดการผู้ใช้งาน
 
@@ -115,22 +121,22 @@ Class Group ผูกกับ `majorId + admissionYear` และเก็บ s
 ปุ่ม `เพิ่มโครงสร้างการศึกษา` เปิด Wizard 5 ขั้น:
 
 ```text
-คณะ → ภาควิชา → สาขาวิชา → ปีเข้าและกลุ่มเรียน → ตรวจสอบและบันทึก
+คณะ → ภาควิชา → สาขาวิชา → ปีที่เข้าศึกษาและกลุ่มเรียน → ตรวจสอบและบันทึก
 ```
 
 แต่ละขั้นเลือกข้อมูลเดิมหรือสร้างใหม่ได้ Wizard แสดง preview ของรหัสกลุ่ม ตรวจข้อมูลทั้งหมดบน state ชั่วคราว และ commit ครั้งเดียวเมื่อยืนยัน รายการที่ไม่ผ่าน validation จะไม่ถูกบันทึกบางส่วน
 
-## ปีเข้าและชั้นปี
+## ปีที่เข้าศึกษาและชั้นปี
 
-`admissionYear` เก็บเป็นปีพุทธศักราชเต็ม เช่น `2567` และแสดงเป็น `ปีเข้า 67` ใน UI ห้ามใช้คำว่า `รุ่น` ชั้นปีไม่ใช่ master data และคำนวณจาก:
+`admissionYear` เก็บเป็นปีพุทธศักราชเต็ม เช่น `2567` และแสดงเป็น `ปีที่เข้าศึกษา 67` ใน UI ห้ามใช้คำว่า `รุ่น` ชั้นปีไม่ใช่ master data และคำนวณจาก:
 
 ```text
 yearLevel = currentAcademicYear - admissionYear + 1
 ```
 
-`academicSettings.currentAcademicYear` ใน `src/utils/academicYear.ts` เป็นแหล่งปีการศึกษากลาง ห้ามคำนวณจากปีปฏิทินของอุปกรณ์ Student ID ใช้แนะนำปีเข้าในฟอร์ม Admin ได้ แต่ `admissionYear` ที่บันทึกแยกต่างหากยังเป็น canonical source สำหรับ Student Registration ระบบอนุมาน Student ID และ `admissionYear` จากอีเมลมหาวิทยาลัยครั้งเดียวในขั้นลงทะเบียน แล้วบันทึกลง canonical fields เดิม
+`academicSettings.currentAcademicYear` ใน `src/utils/academicYear.ts` เป็นแหล่งปีการศึกษากลาง ห้ามคำนวณจากปีปฏิทินของอุปกรณ์ Student ID ใช้แนะนำปีที่เข้าศึกษาในฟอร์ม Admin ได้ แต่ `admissionYear` ที่บันทึกแยกต่างหากยังเป็น canonical source สำหรับ Student Registration ระบบอนุมาน Student ID และ `admissionYear` จากอีเมลมหาวิทยาลัยครั้งเดียวในขั้นลงทะเบียน แล้วบันทึกลง canonical fields เดิม
 
-Student Management มีโหมด `นักศึกษาทั้งหมด` สำหรับค้นหาเร็ว และ `แยกตามปีเข้า` สำหรับกรองคณะ ภาควิชา สาขาวิชา ปีเข้า ชั้นปี และกลุ่มเรียน ตารางแสดงกลุ่มที่กำหนดหรือ `ยังไม่กำหนด` และ CSV ส่งออกรายการทั้งหมดที่ผ่านตัวกรอง
+Student Management มีโหมด `นักศึกษาทั้งหมด` สำหรับค้นหาเร็ว และ `แยกตามปีที่เข้าศึกษา` สำหรับกรองคณะ ภาควิชา สาขาวิชา ปีที่เข้าศึกษา ชั้นปี และกลุ่มเรียน ตารางแสดงกลุ่มที่กำหนดหรือ `ยังไม่กำหนด` และ CSV ส่งออกรายการทั้งหมดที่ผ่านตัวกรอง
 
 ## Course และ Section
 
@@ -144,7 +150,7 @@ type SectionCohort = {
 };
 ```
 
-`classGroupIds` ว่างหมายถึงทั้ง cohort สาขาวิชา+ปีเข้า และสามารถเลือก RA, RB หรือ RA+RB ใน Section เดียวได้ Class Group กับ Section เป็นคนละแนวคิด ระบบตรวจ overlap/collision ของนักศึกษาระหว่าง Section ในรายวิชาและภาคการศึกษาเดียวกัน Teacher Portal และ Student eligibility ถูก project จาก Section assignment โดยใช้ stable IDs
+`classGroupIds` ว่างหมายถึงทั้ง cohort สาขาวิชา+ปีที่เข้าศึกษา และสามารถเลือก RA, RB หรือ RA+RB ใน Section เดียวได้ Class Group กับ Section เป็นคนละแนวคิด ระบบตรวจ overlap/collision ของนักศึกษาระหว่าง Section ในรายวิชาและภาคการศึกษาเดียวกัน Teacher Portal และ Student eligibility ถูก project จาก Section assignment โดยใช้ stable IDs
 
 หน้า Teacher `จัดการรายวิชา & กลุ่มเรียน` แสดงรายวิชาที่ได้รับมอบหมายก่อน จากนั้นเลือก Section เพื่อดูรายชื่อและค้นหานักศึกษา อาจารย์เพิ่มนักศึกษาที่มีอยู่แล้วหรือย้ายระหว่าง Section ของรายวิชา/ภาคการศึกษาเดียวกันได้เมื่อได้รับมอบหมายทั้งต้นทางและปลายทาง โดยไม่แก้ Student master data การเป็นสมาชิกใช้ cohort เป็นหลัก และเก็บเฉพาะ `includedStudentIds` / `excludedStudentIds` รายคนบน Section เป็นข้อยกเว้น ข้อมูลนี้อยู่ใน `securelab_courses` เดิม; Section เก่าจะมีรายการข้อยกเว้นว่างหลัง migration
 
@@ -165,6 +171,12 @@ type SectionCohort = {
 หน้า `ติดตามการสอบ` ใช้การสอบที่อาจารย์มีสิทธิ์จาก Course/Section เดิม ภาพรวมรายวันแสดงตัวนับตามสถานะ ค้นหาและกรองรายการได้ และเปิดรายละเอียดการสอบเดิมเพื่อดูความคืบหน้า ส่วนปฏิทินเต็มหน้าและตัวเลือกวันที่แบบย่อแสดงเฉพาะวันที่กับจำนวนรอบสอบ (`N รอบ`) ไม่ใช้จุดสีหรือสรุปสถานะในช่องวัน
 
 ตัวเลือกวันที่และปฏิทินใช้วันที่ที่เลือกร่วมกัน การเลือกวันจะกลับสู่ภาพรวมรายวันและไม่เปิดรายละเอียดการสอบอัตโนมัติ สถานะการสอบยังอยู่ในภาพรวมรายวันและหน้ารายละเอียด
+
+## เวลาเดโมสำหรับทดสอบหน้าเว็บ
+
+หน้า Student ไม่แสดงแผงหรือปุ่มเลือกเวลาเดโมแล้ว แต่ `demoTime.ts` และ `useExamClock.ts` ยังรองรับการจำลองเวลาภายในสำหรับการทดสอบ frontend โดยไม่แก้ตารางสอบหรือข้อมูลโดเมน โหมดทดสอบการส่งซ้ำยังทำงานได้แม้เวลาสอบจริงผ่านไป หน้า Teacher/Admin ยังคงใช้สถานะสอบจากนาฬิกากลางตามเดิม
+
+สถานะเวลาเดโมอยู่ในหน่วยความจำของแท็บเท่านั้น รีเฟรชแล้วกลับเป็นเวลาจริง ไม่เขียนลง `ExamSession`, `localStorage` หรือข้อมูลโดเมนอื่น ความสามารถภายในนี้ปิดได้ด้วย `DEMO_TIME_ENABLED` ใน `src/services/demoTime.ts` การแก้ไขตารางสอบหรือเปิดรับส่งใหม่ซึ่งบันทึกข้อมูลจริงยังตรวจตามเวลาจริง ไม่ใช่เวลาเดโม นี่เป็นเพียงเครื่องมือทดสอบ frontend ไม่ใช่การบังคับเวลาใน production; ระบบจริงต้องใช้เวลาอ้างอิงจาก server และตรวจช่วงสอบใน backend
 
 ## ห้องสอบและเครื่องคอมพิวเตอร์
 
@@ -195,9 +207,11 @@ Rename เปลี่ยนเฉพาะ `submissionName` โดยคง `or
 
 การส่งด้วยตนเองมี confirmation dialog เมื่อหมดเวลา ระบบส่งไฟล์พร้อมใช้โดยอัตโนมัติและให้ grace period 10 วินาทีแก่ไฟล์ที่กำลังอัปโหลด หากไม่มีไฟล์พร้อมส่งจะแสดงสถานะไม่พบไฟล์ Teachers สามารถ reopen submission ตาม flow เดิม
 
+ใน frontend demo (`FRONTEND_DEMO_MODE` ผูกกับ `DEMO_TIME_ENABLED`) นักศึกษาที่ส่งแล้วสามารถเข้าสอบเดิมและทดลองส่งใหม่ได้แม้พ้นเวลาสอบ รอบใหม่ใช้ staging key แยกเพื่อเริ่มจากไฟล์และ checklist ว่าง ผลการทดลองส่งซ้ำเก็บแยกใน `securelab_demo_submission_attempts_v1` และไม่แทน submission หลักใน `securelab_submissions` เมื่อปิด demo mode จะกลับไปใช้กฎล็อกการส่งขั้นสุดท้ายและการเปิดรับส่งใหม่โดยอาจารย์ตามเดิม พฤติกรรมนี้ใช้ทดสอบ frontend เท่านั้น ไม่ใช่การอนุญาตส่งซ้ำในระบบจริง
+
 ## Persistence และข้อจำกัด
 
-Application state เก็บใน `localStorage`; สถานะบัญชี Registration mock เก็บใน `securelab_mock_auth_users_v1`; staged blobs และ sequence counters เก็บใน IndexedDB `securelab-staged-uploads` browser storage เป็นเพียง mock persistence ไม่ใช่ production database หรือ security boundary
+Application state เก็บใน `localStorage`; สถานะบัญชีและรหัสผ่านจำลองเก็บใน `securelab_mock_auth_users_v1`; staged blobs และ sequence counters เก็บใน IndexedDB `securelab-staged-uploads` browser storage เป็นเพียง mock persistence ไม่ใช่ production database หรือ security boundary รหัสผ่านใน browser เป็น plaintext แบบจำลอง ไม่ปลอดภัยสำหรับใช้งานจริง ระบบ production ต้องใช้ backend ตรวจสอบบัญชี จัดการ session และ hash รหัสผ่านฝั่งเซิร์ฟเวอร์ด้วย Argon2/bcrypt หรือเทียบเท่า พร้อมกระบวนการเปลี่ยน/รีเซ็ตรหัสผ่านที่ปลอดภัย
 
 Auth migration ยอมรับอีเมลนักศึกษา mock รูปแบบเดิมผ่าน stable auth ID แล้วเปลี่ยนไปใช้รูปแบบที่ขึ้นต้นด้วย `s` โดยไม่อนุญาตให้ persisted data เปลี่ยน role หรือ subject identity สถานะ `registered` จะสมบูรณ์ได้เมื่อสถานะใบหน้าเป็น `verified_mock` เท่านั้น
 

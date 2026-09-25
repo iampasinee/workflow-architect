@@ -346,7 +346,7 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
           <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:col-span-2"><p className="text-xs font-semibold text-gray-800">Cohort / กลุ่มเรียนของ Section</p><div className="mt-3 flex flex-wrap gap-2">{selectedSection?.cohorts?.map((cohort) => {
             const major = academicState.majors.find((item) => item.id === cohort.majorId);
             const groups = cohort.classGroupIds?.map((id) => academicState.classGroups.find((item) => item.id === id)?.code).filter(Boolean);
-            return <span key={`${cohort.majorId}-${cohort.admissionYear}`} className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">{major?.code || 'ไม่ระบุสาขา'} • ปีเข้า {getAdmissionCode(cohort.admissionYear)}{groups?.length ? ` • ${groups.join(', ')}` : ' • ทั้ง cohort'}</span>;
+            return <span key={`${cohort.majorId}-${cohort.admissionYear}`} className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">{major?.code || 'ไม่ระบุสาขา'} • ปีที่เข้าศึกษา {getAdmissionCode(cohort.admissionYear)}{groups?.length ? ` • ${groups.join(', ')}` : ' • ทั้ง cohort'}</span>;
           }) || <span className="text-xs text-gray-500">ไม่มีข้อมูล cohort</span>}</div></div>
         </div>
         <ErrorText message={errors.students} />

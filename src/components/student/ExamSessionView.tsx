@@ -12,7 +12,6 @@ import {
   AlertCircle,
   AlertTriangle,
   ArrowRight,
-  ShieldCheck,
   HardDrive,
   FileCheck,
   LogOut,
@@ -27,9 +26,12 @@ import {
 import { Badge } from '../common/Badge';
 import { Modal } from '../common/Modal';
 import { StudentExamProgressStepper } from './StudentExamProgressStepper';
+import { SecureLabBrandHeader } from '../common/SecureLabBrandHeader';
 import { formatFileSize } from '../../utils/fileSize';
-import { canSubmitToExam, getEffectiveExamStatus } from '../../services/examStatus';
+import { getEffectiveExamStatus } from '../../services/examStatus';
 import { useExamClock } from '../../utils/useExamClock';
+import { getEffectiveNow } from '../../services/demoTime';
+import { canSubmitStudentAttempt, FRONTEND_DEMO_MODE, getStudentAttemptStagingKey, isDemoSubmissionRetry } from '../../services/studentDemoRetry';
 import { StagedUploadRecord, StagedUploadStatus } from '../../types/stagedUpload';
 import {
   deleteStagedUpload,
@@ -108,17 +110,18 @@ export const ExamSessionView: React.FC = () => {
   const isRegisteredStudent = registeredStudent?.accountStatus === 'active';
   const hasFinalSubmission =
     existingSubmission?.status === 'submitted' || existingSubmission?.status === 'late';
+  const demoRetry = isDemoSubmissionRetry(hasFinalSubmission, hasActiveReopening);
   const hasUploadPermission = Boolean(
     isRegisteredStudent &&
-    activeExam && canSubmitToExam(activeExam, now, hasActiveReopening) &&
-    (!hasFinalSubmission || hasActiveReopening)
+    activeExam && canSubmitStudentAttempt(activeExam, now, hasActiveReopening, hasFinalSubmission)
   );
 
   // Sub-step inside session: 'upload' (ST4/ST5), 'checking' (ST6), 'success' (ST7)
   const [sessionStep, setSessionStep] = useState<'upload' | 'checking' | 'success'>(() => {
-    if (existingSubmission?.status === 'submitted') return 'success';
+    if (existingSubmission?.status === 'submitted' && !FRONTEND_DEMO_MODE) return 'success';
     return 'upload';
   });
+  const [attemptReceipt, setAttemptReceipt] = useState<{ submittedAt: string; files: StagedUploadRecord[] } | null>(null);
   const isThai = language === 'th';
   const localizedThaiExamCopy = activeExam ? thaiExamCopy[activeExam.id] : undefined;
 
@@ -132,7 +135,7 @@ export const ExamSessionView: React.FC = () => {
   useEffect(() => {
     if (!hasActiveReopening) return;
 
-    setRemainingSeconds(Math.max(1, Math.ceil((reopeningExpiresAt - Date.now()) / 1000)));
+    setRemainingSeconds(Math.max(1, Math.ceil((reopeningExpiresAt - getEffectiveNow().getTime()) / 1000)));
     setIsTimeExpired(false);
     autoSubmissionAttemptedRef.current = false;
     setTimeoutStatus('idle');
@@ -189,7 +192,11 @@ export const ExamSessionView: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadTimersRef = useRef<Map<string, number>>(new Map());
   const graceTimerRef = useRef<number | null>(null);
-  const stagingSessionKey = `${activeExam?.id || 'no-exam'}:${currentStudent?.id || 'no-student'}`;
+  const [demoAttemptId] = useState(() => globalThis.crypto?.randomUUID?.() || `attempt_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`);
+  const stagingSessionKey = getStudentAttemptStagingKey(
+    activeExam?.id || 'no-exam', currentStudent?.id || 'no-student',
+    hasFinalSubmission, hasActiveReopening, demoAttemptId,
+  );
   const canUpload = hasUploadPermission && (!isTimeExpired || hasActiveReopening);
 
   const uploadLockedMessage = (() => {
@@ -198,15 +205,10 @@ export const ExamSessionView: React.FC = () => {
         ? 'เฉพาะนักศึกษาที่ลงทะเบียนและมีบัญชีใช้งานอยู่เท่านั้นที่สามารถอัปโหลดไฟล์ได้'
         : 'Only registered students with an active account may upload files.';
     }
-    if (!activeExam || !canSubmitToExam(activeExam, now, hasActiveReopening)) {
+    if (!activeExam || !canSubmitStudentAttempt(activeExam, now, hasActiveReopening, hasFinalSubmission)) {
       return isThai
         ? 'สามารถอัปโหลดไฟล์ได้เฉพาะระหว่างการสอบที่กำลังดำเนินการ'
         : 'File uploads are only available while the exam is in progress.';
-    }
-    if (hasFinalSubmission && !hasActiveReopening) {
-      return isThai
-        ? 'ไฟล์คำตอบถูกล็อกแล้ว กรุณาขอให้อาจารย์เปิดรับการส่งใหม่'
-        : 'Your final submission is locked. Ask the instructor to reopen it before uploading a replacement.';
     }
     return isThai
       ? 'หมดเวลาการอัปโหลดแล้ว กรุณาขอให้อาจารย์เปิดรับการส่งใหม่'
@@ -596,6 +598,7 @@ export const ExamSessionView: React.FC = () => {
             }))
           );
           if (accepted) {
+            setAttemptReceipt({ submittedAt: new Date().toISOString(), files: readyFiles });
             markFilesSubmitted(readyFiles);
             setSessionStep('success');
           } else {
@@ -667,6 +670,7 @@ export const ExamSessionView: React.FC = () => {
     );
 
     if (accepted) {
+      setAttemptReceipt({ submittedAt: new Date().toISOString(), files: filesToSubmit });
       markFilesSubmitted(filesToSubmit);
       setTimeoutStatus('submitted');
       setSessionStep('success');
@@ -784,85 +788,34 @@ export const ExamSessionView: React.FC = () => {
   return (
     <div className="flex min-h-screen flex-col justify-between overflow-visible bg-gray-50 text-gray-900">
       <div className="sticky top-0 z-50 w-full bg-white shadow-sm">
-        {/* ST4 / FOCUS MODE HEADER BAR */}
-        <header className="relative z-10 bg-white border-b border-gray-200 px-6 py-3.5">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
-          {/* Left: Station & Student */}
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-200 text-blue-700 flex items-center justify-center font-bold font-mono text-sm">
-              {seatNo}
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-gray-900 text-sm">
-                  {currentStudent?.fullName}
-                </span>
-                <span className="text-xs font-mono text-gray-500">
-                  ({currentStudent?.studentCode})
-                </span>
-                <span className="hidden sm:inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              </div>
-              <div className="text-[11px] text-gray-500 font-mono flex items-center gap-2">
-                <span>{seatStation?.machineNo || 'PC-301-01'}</span>
-                <span>•</span>
-                <span>IP: {seatStation?.ip || '192.168.10.11'}</span>
-                <span>•</span>
-                <span>{room?.labName}</span>
-              </div>
-            </div>
+        <SecureLabBrandHeader examControls={<>
+          <div className="min-w-0 text-xs text-gray-600 lg:mr-auto">
+            <p className="font-bold text-gray-900">{course?.courseCode || '—'} • {room?.labName || '—'} • {isThai ? 'ที่นั่ง' : 'Seat'} {seatNo}</p>
+            <p className="mt-1">{seatStation?.machineNo || 'PC-301-01'} • IP: {seatStation?.ip || '192.168.10.11'}</p>
           </div>
-
-          {/* Center: Prominent Live Countdown Timer */}
-          <div className="flex items-center gap-3 self-center md:self-auto">
-            <div
-              className={`px-5 py-2 rounded-2xl border flex items-center gap-3 shadow-xs ${getTimerColorClass()}`}
-            >
-              <Clock className="w-5 h-5 animate-pulse" />
-              <div>
-                <span className="text-[10px] uppercase font-bold tracking-wider block leading-none">
-                  {isTimeExpired
-                    ? (isThai ? 'หมดเวลาการส่งข้อสอบแล้ว' : 'Submission Period Ended')
-                    : (isThai ? 'เวลาส่งข้อสอบที่เหลืออยู่' : 'Remaining Submission Time')}
-                </span>
-                <span className="text-2xl font-bold font-mono tracking-tight leading-tight">
-                  {formatTime(remainingSeconds)}
-                </span>
-              </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className={`flex items-center gap-1 rounded-xl border px-2 py-2 sm:gap-2 sm:px-3 ${getTimerColorClass()}`}>
+                <Clock className="h-4 w-4 shrink-0" />
+                <span className="text-[10px] font-semibold sm:text-xs">{isTimeExpired ? 'หมดเวลาการส่งข้อสอบแล้ว' : 'เวลาส่งข้อสอบที่เหลืออยู่'}</span>
+                <span className="font-mono text-xs font-bold sm:text-sm">{formatTime(remainingSeconds)}</span>
             </div>
-
             {activeExam?.adjustedMinutes && activeExam.adjustedMinutes !== 0 ? (
-              <Badge variant="warning" size="sm">
-                {isThai ? 'ปรับเวลา: ' : 'Adj: '}
-                {activeExam.adjustedMinutes > 0 ? `+${activeExam.adjustedMinutes}m` : `${activeExam.adjustedMinutes}m`}
-              </Badge>
+              <Badge variant="warning" size="sm">{isThai ? 'ปรับเวลา: ' : 'Adj: '}{activeExam.adjustedMinutes > 0 ? `+${activeExam.adjustedMinutes}m` : `${activeExam.adjustedMinutes}m`}</Badge>
             ) : null}
-          </div>
-
-          {/* Right: Course context & Focus Mode badge */}
-          <div className="hidden lg:flex items-center gap-3 text-right">
-            <div>
-              <div className="text-xs font-bold text-gray-900">
-                {isThai ? `โหมดสอบล็อกหน้าจอ: ${course?.courseCode}` : `${course?.courseCode} Exam Focus Mode`}
-              </div>
-              <div className="text-[11px] text-emerald-600 flex items-center gap-1 justify-end font-medium">
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span>{isThai ? 'ระบบตรวจจับพฤติกรรมทุจริตทำงาน' : 'Anti-Cheating Sensor Active'}</span>
-              </div>
-            </div>
             <button
+              type="button"
               onClick={() => showToast(
                 isThai ? 'แจ้งอาจารย์ผู้คุมสอบแล้ว' : 'Proctor Notified',
-                isThai ? `ส่งสัญญาณขอความช่วยเหลือจากที่นั่ง ${seatNo} ไปยังอาจารย์แล้ว` : 'The laboratory proctor has been signaled to assist workstation ' + seatNo,
-                'info'
+                isThai ? `ส่งสัญญาณขอความช่วยเหลือจากที่นั่ง ${seatNo} ไปยังอาจารย์แล้ว` : `The laboratory proctor has been signaled to assist workstation ${seatNo}`,
+                'info',
               )}
-              className="px-3 py-1.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-xs text-gray-700 border border-gray-200 flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-gray-200 bg-gray-100 px-2 text-[11px] font-semibold text-gray-700 hover:bg-gray-200 focus-visible:outline-2 focus-visible:outline-blue-600 sm:gap-1.5 sm:px-3 sm:text-xs"
             >
-              <HelpCircle className="w-3.5 h-3.5 text-amber-500" />
-              <span>{isThai ? 'เรียกอาจารย์' : 'Call Proctor'}</span>
+              <HelpCircle className="h-4 w-4 text-amber-500" />
+              {isThai ? 'เรียกอาจารย์' : 'Call Proctor'}
             </button>
           </div>
-        </div>
-        </header>
+        </>} />
 
         <StudentExamProgressStepper
           currentStep={progressCurrentStep}
@@ -900,6 +853,7 @@ export const ExamSessionView: React.FC = () => {
         {/* STEP 1: Upload Workspace (ST4 & ST5) */}
         {sessionStep === 'upload' && (
           <div className="scroll-mt-[176px] space-y-6">
+            {demoRetry && <p className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-semibold text-blue-700">โหมดทดสอบ: สามารถทดลองส่งใหม่ได้ โดยไม่แก้ไขผลการส่งเดิม</p>}
             {!canUpload && (
               <div className="flex scroll-mt-[176px] items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-800">
                 <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
@@ -1404,8 +1358,8 @@ export const ExamSessionView: React.FC = () => {
               <div className="flex justify-between py-1 border-b border-gray-200">
                 <span className="text-gray-500">{isThai ? 'เวลาที่บันทึกการส่ง:' : 'Submission Timestamp:'}</span>
                 <span className="font-mono text-emerald-700 font-semibold">
-                  {existingSubmission?.submittedAt
-                    ? new Date(existingSubmission.submittedAt).toISOString()
+                  {attemptReceipt?.submittedAt || existingSubmission?.submittedAt
+                    ? new Date(attemptReceipt?.submittedAt || existingSubmission!.submittedAt!).toISOString()
                     : new Date().toISOString()}
                 </span>
               </div>
@@ -1414,11 +1368,11 @@ export const ExamSessionView: React.FC = () => {
                   {isThai ? 'ไฟล์ที่ส่ง:' : 'Submitted Files:'}
                 </span>
                 <div className="space-y-1.5">
-                  {(existingSubmission?.files || []).map((file) => (
-                    <div key={file.fileName} className="flex items-center justify-between gap-3 rounded-lg bg-white border border-gray-200 px-3 py-2">
-                      <span className="font-mono font-medium text-gray-800 truncate">{file.fileName}</span>
+                  {(attemptReceipt?.files || existingSubmission?.files || []).map((file) => (
+                    <div key={'submissionName' in file ? file.submissionName : file.fileName} className="flex items-center justify-between gap-3 rounded-lg bg-white border border-gray-200 px-3 py-2">
+                      <span className="font-mono font-medium text-gray-800 truncate">{'submissionName' in file ? file.submissionName : file.fileName}</span>
                       <span className="font-mono text-gray-500 shrink-0">
-                        {formatFileSize(file.sizeKb * 1024)}
+                        {formatFileSize('sizeBytes' in file ? file.sizeBytes : file.sizeKb * 1024)}
                       </span>
                     </div>
                   ))}

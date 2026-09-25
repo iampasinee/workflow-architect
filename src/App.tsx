@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { ToastContainer } from './components/common/ToastContainer';
 import { Header } from './components/common/Header';
+import { SecureLabBrandHeader } from './components/common/SecureLabBrandHeader';
 import { SimulationToolbar } from './components/simulation/SimulationToolbar';
 
 // Auth
@@ -105,6 +106,7 @@ const MainRouter: React.FC = () => {
         {!isExamSessionStep && (
           <>
             <div className="sticky top-0 z-50 w-full bg-white">
+              <SecureLabBrandHeader />
               <StudentExamProgressStepper currentStep={earlyProgressStep} />
             </div>
 

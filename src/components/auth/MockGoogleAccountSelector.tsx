@@ -7,6 +7,7 @@ interface MockGoogleAccountSelectorProps {
   onChange: (email: string) => void;
   onContinue: () => void;
   actionLabel: string;
+  hideContinue?: boolean;
 }
 
 export const MockGoogleAccountSelector: React.FC<MockGoogleAccountSelectorProps> = ({
@@ -14,6 +15,7 @@ export const MockGoogleAccountSelector: React.FC<MockGoogleAccountSelectorProps>
   onChange,
   onContinue,
   actionLabel,
+  hideContinue = false,
 }) => (
   <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
     <div className="flex items-start gap-3">
@@ -28,8 +30,8 @@ export const MockGoogleAccountSelector: React.FC<MockGoogleAccountSelectorProps>
       <option value="">เลือกบัญชี</option>
       {mockGoogleAccountOptions.map((option) => <option key={option.email} value={option.email}>{option.email} — {option.label}</option>)}
     </select>
-    <button type="button" onClick={onContinue} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
+    {!hideContinue && <button type="button" onClick={onContinue} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
       <FlaskConical className="h-4 w-4" />{actionLabel}
-    </button>
+    </button>}
   </div>
 );

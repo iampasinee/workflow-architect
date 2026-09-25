@@ -3,6 +3,7 @@ import React from 'react';
 import { useApp } from '../../context/AppContext';
 import { ShieldCheck, LogOut, Bell, ChevronRight, Menu } from 'lucide-react';
 import { Badge } from './Badge';
+import { DemoTimeIndicator } from '../simulation/DemoTimeControl';
 
 interface HeaderProps {
   onAdminMenuToggle?: () => void;
@@ -92,7 +93,7 @@ export const Header: React.FC<HeaderProps> = ({ onAdminMenuToggle, onTeacherMenu
               </span>
             </div>
             <span className="text-[11px] text-gray-400 font-medium leading-none">
-              {isThai ? 'ระบบจัดการการสอบแล็บคอมพิวเตอร์' : 'Lab Exam & Integrity System'}
+              {role === 'student' ? 'ระบบจัดการการสอบในห้องปฏิบัติการ' : isThai ? 'ระบบจัดการการสอบแล็บคอมพิวเตอร์' : 'Lab Exam & Integrity System'}
             </span>
           </div>
         </div>
@@ -108,6 +109,10 @@ export const Header: React.FC<HeaderProps> = ({ onAdminMenuToggle, onTeacherMenu
 
       {/* Right User & Actions */}
       <div className="flex items-center gap-3">
+        {role !== 'student' && <>
+          <DemoTimeIndicator compact className="max-w-24 lg:hidden" />
+          <DemoTimeIndicator className="hidden max-w-44 lg:inline-flex" />
+        </>}
         {/* Violation alert counter for teacher */}
         {role === 'teacher' && (
           <button

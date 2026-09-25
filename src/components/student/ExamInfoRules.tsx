@@ -14,7 +14,9 @@ import {
   HardDrive
 } from 'lucide-react';
 import { Badge } from '../common/Badge';
-import { canSubmitToExam, examStatusLabels, getEffectiveExamStatus } from '../../services/examStatus';
+import { canStartStudentExam, examStatusLabels, getEffectiveExamStatus } from '../../services/examStatus';
+import { studentMatchesExamSection } from '../../services/courseState';
+import { FRONTEND_DEMO_MODE } from '../../services/studentDemoRetry';
 import { useExamClock } from '../../utils/useExamClock';
 
 export const ExamInfoRules: React.FC = () => {
@@ -43,9 +45,17 @@ export const ExamInfoRules: React.FC = () => {
     ? activeExam?.reopenedStudents?.[currentStudent.id] || activeExam?.reopenedStudents?.['*']
     : undefined;
   const hasActiveReopening = Boolean(reopening && new Date(reopening.reopenedUntil) > now);
-  const canStartExam = Boolean(activeExam && canSubmitToExam(activeExam, now, hasActiveReopening));
   const course = courses.find((c) => c.id === activeExam?.courseId);
   const room = rooms.find((r) => r.id === activeExam?.roomId);
+  const section = course?.sections.find((candidate) => candidate.sectionNo === activeExam?.sectionNo);
+  const canStartExam = Boolean(activeExam && currentStudent && canStartStudentExam(activeExam, now, {
+    rulesAccepted: agreed,
+    hasFaceReference: Boolean(currentStudent.faceReferenceUrl),
+    accountActive: currentStudent.accountStatus === 'active',
+    isEligible: studentMatchesExamSection(currentStudent, activeExam, section, now),
+    hasActiveReopening,
+    allowDemoTimeBypass: FRONTEND_DEMO_MODE,
+  }));
 
   // Find assigned seat for current student
   const myAssignment = seatAssignments.find(
@@ -56,9 +66,8 @@ export const ExamInfoRules: React.FC = () => {
   const seatStation = room?.seats.find((s) => s.seatNo === seatNo);
 
   const handleStartExam = () => {
-    if (!agreed) return;
-    if (!activeExam || !canSubmitToExam(activeExam, new Date(), Boolean(reopening && new Date(reopening.reopenedUntil) > new Date()))) {
-      showToast('ยังไม่สามารถเข้าสอบได้', 'เข้าสอบได้เฉพาะช่วงเวลาสอบหรือช่วงที่อาจารย์เปิดรับส่งใหม่', 'warning');
+    if (!activeExam || !canStartExam) {
+      showToast('ยังไม่สามารถเข้าสอบได้', 'โปรดตรวจสอบเวลา ตัวตน สิทธิ์สอบ และการยอมรับกติกา', 'warning');
       return;
     }
     showToast(
@@ -70,7 +79,7 @@ export const ExamInfoRules: React.FC = () => {
   };
 
   return (
-    <div className="relative mx-auto mt-3 mb-6 flex max-h-[calc(100dvh-84px)] w-[calc(100%-2rem)] max-w-[1180px] scroll-mt-[92px] flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white p-4 text-left shadow-xl sm:mt-4 sm:p-6 lg:w-[calc(100%-3rem)]">
+    <div className="relative mx-auto mt-3 mb-6 flex max-h-[calc(100dvh-156px)] w-[calc(100%-2rem)] max-w-[1180px] scroll-mt-[156px] flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white p-4 text-left shadow-xl sm:mt-4 sm:p-6 lg:w-[calc(100%-3rem)]">
       {/* Top Banner */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-gray-100 gap-3 shrink-0">
         <div>
@@ -255,7 +264,7 @@ export const ExamInfoRules: React.FC = () => {
           </span>
           <button
             type="button"
-            disabled={!agreed || !canStartExam}
+            disabled={!canStartExam}
             onClick={handleStartExam}
             className="w-full sm:w-auto px-8 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
           >

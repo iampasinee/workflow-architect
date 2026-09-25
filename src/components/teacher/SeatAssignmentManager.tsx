@@ -17,10 +17,8 @@ import {
 } from 'lucide-react';
 import { Badge, MachineStatusBadge } from '../common/Badge';
 import { canEditExamSeats } from '../../services/examStatus';
-import { useExamClock } from '../../utils/useExamClock';
 
 export const SeatAssignmentManager: React.FC = () => {
-  const now = useExamClock();
   const {
     examSessions,
     courses,
@@ -37,7 +35,7 @@ export const SeatAssignmentManager: React.FC = () => {
   const isThai = language === 'th';
 
   const activeExam = examSessions[0];
-  const canEditSeats = Boolean(activeExam && canEditExamSeats(activeExam, now));
+  const canEditSeats = Boolean(activeExam && canEditExamSeats(activeExam, new Date()));
   const room = rooms.find((r) => r.id === activeExam?.roomId) || rooms[0];
   const activeSection = courses.find((course) => course.id === activeExam?.courseId)?.sections
     .find((section) => section.sectionNo === activeExam?.sectionNo);

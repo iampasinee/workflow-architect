@@ -51,3 +51,17 @@ export const canSubmitToExam = (
 ): boolean => getEffectiveExamStatus(exam, now) === 'in_progress' || (
   hasActiveReopening && now >= examDateTime(exam.examDate, exam.startTime)
 );
+
+export const canStartStudentExam = (
+  exam: ScheduledExam,
+  now: Date,
+  guards: {
+    rulesAccepted: boolean;
+    hasFaceReference: boolean;
+    accountActive: boolean;
+    isEligible: boolean;
+    hasActiveReopening?: boolean;
+    allowDemoTimeBypass?: boolean;
+  },
+): boolean => guards.rulesAccepted && guards.hasFaceReference && guards.accountActive && guards.isEligible &&
+  (guards.allowDemoTimeBypass || canSubmitToExam(exam, now, guards.hasActiveReopening));

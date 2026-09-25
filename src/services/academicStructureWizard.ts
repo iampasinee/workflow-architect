@@ -140,7 +140,7 @@ export const buildAcademicStructureTransaction = (
   const yearResult = draft.admissionYear
     ? calculateYearLevelFromAdmissionYear(draft.admissionYear, academicSettings.currentAcademicYear)
     : undefined;
-  if (!yearResult?.isValid) return failure('กรุณาเลือกปีเข้าที่ถูกต้อง', 4);
+  if (!yearResult?.isValid) return failure('กรุณาเลือกปีที่เข้าศึกษาที่ถูกต้อง', 4);
   if (!Number.isSafeInteger(draft.groupCount) || draft.groupCount < 1 || draft.groupCount > 20) {
     return failure('จำนวนกลุ่มเรียนต้องเป็นจำนวนเต็มตั้งแต่ 1 ถึง 20 กลุ่ม', 4);
   }

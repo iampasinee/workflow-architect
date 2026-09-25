@@ -240,7 +240,7 @@ export const FacultiesAndGroupsPage: React.FC = () => {
               <span className="relative block"><Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={searchPlaceholders[tier]} className={`${inputClass} pl-9`} /></span>
             </label>
             {tier !== 'faculties' && <AcademicCascade value={filter} onChange={setFilter} depth={parentDepth[tier]} activeOnly={false} />}
-            {tier === 'classGroups' && <label className="space-y-1 text-xs font-semibold text-slate-700"><span>ปีเข้า</span><input type="number" min="2500" value={admissionYearFilter} onChange={(event) => setAdmissionYearFilter(event.target.value)} placeholder="ทุกปีเข้า" className={inputClass} /></label>}
+            {tier === 'classGroups' && <label className="space-y-1 text-xs font-semibold text-slate-700"><span>ปีที่เข้าศึกษา</span><input type="number" min="2500" value={admissionYearFilter} onChange={(event) => setAdmissionYearFilter(event.target.value)} placeholder="ทุกปีที่เข้าศึกษา" className={inputClass} /></label>}
             <label className="space-y-1 text-xs font-semibold text-slate-700"><span>สถานะ</span><select aria-label="สถานะ" value={status} onChange={(event) => setStatus(event.target.value)} className={inputClass}>
               <option value="">ทุกสถานะ</option><option value="active">เปิดใช้งาน</option><option value="inactive">ปิดใช้งาน</option>
             </select></label>
@@ -255,7 +255,7 @@ export const FacultiesAndGroupsPage: React.FC = () => {
               {tier === 'faculties' && <><th className="px-4 py-3">จำนวนภาควิชา</th><th className="px-4 py-3">จำนวนสาขาวิชา</th></>}
               {tier === 'departments' && <><th className="px-4 py-3">คณะ</th><th className="px-4 py-3">จำนวนสาขาวิชา</th></>}
               {tier === 'majors' && <><th className="px-4 py-3">ภาควิชา</th><th className="px-4 py-3">คณะ</th></>}
-              {tier === 'classGroups' && <><th className="px-4 py-3">สาขาวิชา</th><th className="px-4 py-3">ปีเข้า</th><th className="px-4 py-3">ชั้นปี</th><th className="px-4 py-3">จำนวนนักศึกษา</th></>}
+              {tier === 'classGroups' && <><th className="px-4 py-3">สาขาวิชา</th><th className="px-4 py-3">ปีที่เข้าศึกษา</th><th className="px-4 py-3">ชั้นปี</th><th className="px-4 py-3">จำนวนนักศึกษา</th></>}
               <th className="px-4 py-3">สถานะ</th><th className="px-4 py-3 text-right">การดำเนินการ</th>
             </tr></thead>
             <tbody className="divide-y divide-slate-100">
@@ -275,7 +275,7 @@ export const FacultiesAndGroupsPage: React.FC = () => {
                   {tier === 'faculties' && <><td className="px-4 py-4 text-slate-600">{departmentCount} ภาควิชา</td><td className="px-4 py-4 text-slate-600">{majorCount} สาขาวิชา</td></>}
                   {tier === 'departments' && <><td className="px-4 py-4 text-slate-600">{path.faculty?.name || '—'}</td><td className="px-4 py-4 text-slate-600">{majorCount} สาขาวิชา</td></>}
                   {tier === 'majors' && <><td className="px-4 py-4 text-slate-600">{path.department?.name || '—'}</td><td className="px-4 py-4 text-slate-500">{path.faculty?.name || '—'}</td></>}
-                  {tier === 'classGroups' && 'admissionYear' in record && <><td className="px-4 py-4 text-slate-600">{path.major ? `[${path.major.code}] ${path.major.name}` : '—'}</td><td className="px-4 py-4 font-semibold">ปีเข้า {getAdmissionCode(record.admissionYear)}</td><td className="px-4 py-4">{calculateYearLevelFromAdmissionYear(record.admissionYear).isValid ? `ชั้นปี ${calculateYearLevelFromAdmissionYear(record.admissionYear).yearLevel}` : '—'}</td><td className="px-4 py-4">{studentsInAcademicRecord(academicState, students, tier, record.id).length} คน</td></>}
+                  {tier === 'classGroups' && 'admissionYear' in record && <><td className="px-4 py-4 text-slate-600">{path.major ? `[${path.major.code}] ${path.major.name}` : '—'}</td><td className="px-4 py-4 font-semibold">ปีที่เข้าศึกษา {getAdmissionCode(record.admissionYear)}</td><td className="px-4 py-4">{calculateYearLevelFromAdmissionYear(record.admissionYear).isValid ? `ชั้นปี ${calculateYearLevelFromAdmissionYear(record.admissionYear).yearLevel}` : '—'}</td><td className="px-4 py-4">{studentsInAcademicRecord(academicState, students, tier, record.id).length} คน</td></>}
                   <td className="px-4 py-4"><span className={`rounded-full border px-2 py-1 text-[10px] ${record.status === 'active' ? 'border-teal-200 bg-teal-50 text-teal-700' : 'border-slate-200 bg-slate-100 text-slate-500'}`}>{record.status === 'active' ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}</span></td>
                   <td className="px-3 py-3">{renderActions(record)}</td>
                 </tr>;
@@ -295,13 +295,13 @@ export const FacultiesAndGroupsPage: React.FC = () => {
             retained={editor.id ? { facultyId: form.facultyId, departmentId: form.departmentId, majorId: form.majorId || '' } : undefined}
             disabled={editorGroupLocked}
           />}
-          {editor.tier === 'classGroups' && <label className="block space-y-1 text-xs font-semibold"><span>ปีเข้า</span><select required disabled={editorGroupLocked} value={form.admissionYear || ''} onChange={(event) => setForm({ ...form, admissionYear: Number(event.target.value) || undefined })} className={`${inputClass} disabled:bg-slate-100 disabled:text-slate-500`}><option value="">เลือกปีเข้า</option>{getAdmissionYearOptions().map((year) => <option key={year} value={year}>{getAdmissionCode(year)}</option>)}</select><span className="block font-normal text-slate-500">จัดเก็บเป็นปีการศึกษาเต็ม เช่น 67 = 2567</span></label>}
+          {editor.tier === 'classGroups' && <label className="block space-y-1 text-xs font-semibold"><span>ปีที่เข้าศึกษา</span><select required disabled={editorGroupLocked} value={form.admissionYear || ''} onChange={(event) => setForm({ ...form, admissionYear: Number(event.target.value) || undefined })} className={`${inputClass} disabled:bg-slate-100 disabled:text-slate-500`}><option value="">เลือกปีที่เข้าศึกษา</option>{getAdmissionYearOptions().map((year) => <option key={year} value={year}>{getAdmissionCode(year)}</option>)}</select><span className="block font-normal text-slate-500">จัดเก็บเป็นปีการศึกษาเต็ม เช่น 67 = 2567</span></label>}
           {editor.tier === 'classGroups'
-            ? <label className="block space-y-1 text-xs font-semibold"><span>รหัสกลุ่ม</span><input readOnly value={generatedClassGroupCode(academicState, form.majorId, form.admissionYear, editor.id)} placeholder="ระบบจะสร้างรหัสหลังเลือกสาขาวิชาและปีเข้า" className={`${inputClass} bg-slate-100 font-mono text-slate-700`} /><span className="block font-normal text-slate-500">รหัสถูกสร้างอัตโนมัติและไม่สามารถแก้ไขโดยตรง</span></label>
+            ? <label className="block space-y-1 text-xs font-semibold"><span>รหัสกลุ่ม</span><input readOnly value={generatedClassGroupCode(academicState, form.majorId, form.admissionYear, editor.id)} placeholder="ระบบจะสร้างรหัสหลังเลือกสาขาวิชาและปีที่เข้าศึกษา" className={`${inputClass} bg-slate-100 font-mono text-slate-700`} /><span className="block font-normal text-slate-500">รหัสถูกสร้างอัตโนมัติและไม่สามารถแก้ไขโดยตรง</span></label>
             : <label className="block space-y-1 text-xs font-semibold"><span>รหัส{academicLabels[editor.tier]}</span><input required value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value.toUpperCase() })} className={inputClass} /></label>}
           <label className="block space-y-1 text-xs font-semibold"><span>{editor.tier === 'classGroups' ? 'ชื่อกลุ่ม (ไม่บังคับ)' : `ชื่อ${academicLabels[editor.tier]}`}</span><input required={editor.tier !== 'classGroups'} maxLength={150} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} className={inputClass} /></label>
           <label className="block space-y-1 text-xs font-semibold"><span>สถานะ</span><select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as AcademicInput['status'] })} className={inputClass}><option value="active">เปิดใช้งาน</option><option value="inactive">ปิดใช้งาน</option></select></label>
-          {editorGroupLocked && <p className="rounded-xl bg-blue-50 p-3 text-xs text-blue-800">กลุ่มนี้มีนักศึกษาหรือตอนเรียนอ้างอิงอยู่ จึงล็อกสาขาวิชา ปีเข้า และรหัสกลุ่มเพื่อรักษาความถูกต้องของข้อมูล</p>}
+          {editorGroupLocked && <p className="rounded-xl bg-blue-50 p-3 text-xs text-blue-800">กลุ่มนี้มีนักศึกษาหรือตอนเรียนอ้างอิงอยู่ จึงล็อกสาขาวิชา ปีที่เข้าศึกษา และรหัสกลุ่มเพื่อรักษาความถูกต้องของข้อมูล</p>}
           {(formError || error) && <p role="alert" className="text-xs text-red-600">{formError || error}</p>}
           <div className="flex justify-end gap-2 border-t pt-4"><button type="button" onClick={() => setEditor(null)} className={`${buttonClass} border`}>ยกเลิก</button><button disabled={Boolean(formError)} className={`${buttonClass} bg-blue-600 text-white`}>บันทึก</button></div>
         </form>}
@@ -329,7 +329,7 @@ export const FacultiesAndGroupsPage: React.FC = () => {
                     ['คณะ', path.faculty?.name || '—'],
                     ['ภาควิชา', path.department?.name || '—'],
                     ['สาขาวิชา', path.major ? `[${path.major.code}] ${path.major.name}` : '—'],
-                    ['ปีเข้า', `ปีเข้า ${getAdmissionCode(detailRecord.admissionYear)}`],
+                    ['ปีที่เข้าศึกษา', `ปีที่เข้าศึกษา ${getAdmissionCode(detailRecord.admissionYear)}`],
                     ['ชั้นปี', calculateYearLevelFromAdmissionYear(detailRecord.admissionYear).isValid ? `ชั้นปี ${calculateYearLevelFromAdmissionYear(detailRecord.admissionYear).yearLevel}` : '—'],
                   ]
                   : [];
@@ -351,7 +351,7 @@ export const FacultiesAndGroupsPage: React.FC = () => {
         {assigningGroup && (() => {
           const path = academicPath(academicState, 'classGroups', assigningGroup.id);
           return <div className="space-y-4">
-            <div className="rounded-xl bg-blue-50 p-4 text-sm text-blue-900"><strong>{path.major?.code} • ปีเข้า {getAdmissionCode(assigningGroup.admissionYear)} • {assigningGroup.code}</strong><p className="mt-1 text-xs text-blue-700">เลือกได้เฉพาะนักศึกษาที่อยู่ในสาขาวิชาและปีเข้าเดียวกัน</p></div>
+            <div className="rounded-xl bg-blue-50 p-4 text-sm text-blue-900"><strong>{path.major?.code} • ปีที่เข้าศึกษา {getAdmissionCode(assigningGroup.admissionYear)} • {assigningGroup.code}</strong><p className="mt-1 text-xs text-blue-700">เลือกได้เฉพาะนักศึกษาที่อยู่ในสาขาวิชาและปีที่เข้าศึกษาเดียวกัน</p></div>
             <label className="relative block"><span className="sr-only">ค้นหานักศึกษา</span><Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" /><input value={assignmentSearch} onChange={(event) => setAssignmentSearch(event.target.value)} placeholder="ค้นหารหัสนักศึกษา / ชื่อ-นามสกุล..." className={`${inputClass} pl-9`} /></label>
             <div className="max-h-80 divide-y overflow-y-auto rounded-xl border border-slate-200">
               {eligibleStudents.map((student) => {
@@ -359,7 +359,7 @@ export const FacultiesAndGroupsPage: React.FC = () => {
                 const selected = selectedStudentIds.includes(student.id);
                 return <label key={student.id} className="flex cursor-pointer items-center gap-3 px-4 py-3 hover:bg-slate-50"><input type="checkbox" checked={selected} disabled={student.classGroupId === assigningGroup.id} onChange={() => setSelectedStudentIds((current) => selected ? current.filter((id) => id !== student.id) : [...current, student.id])} /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{student.fullName}</span><span className="text-xs text-slate-500">{student.studentCode}</span></span><span className={`text-xs ${currentGroup && currentGroup.id !== assigningGroup.id ? 'text-amber-700' : 'text-slate-500'}`}>{currentGroup ? currentGroup.id === assigningGroup.id ? 'อยู่ในกลุ่มนี้แล้ว' : `กลุ่มปัจจุบัน ${currentGroup.code}` : 'ยังไม่กำหนด'}</span></label>;
               })}
-              {!eligibleStudents.length && <p className="p-8 text-center text-sm text-slate-500">ไม่พบนักศึกษาที่มีสาขาวิชาและปีเข้าตรงกับกลุ่มนี้</p>}
+              {!eligibleStudents.length && <p className="p-8 text-center text-sm text-slate-500">ไม่พบนักศึกษาที่มีสาขาวิชาและปีที่เข้าศึกษาตรงกับกลุ่มนี้</p>}
             </div>
             {selectedNeedsReassignment && <label className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900"><input type="checkbox" checked={confirmReassignment} onChange={(event) => setConfirmReassignment(event.target.checked)} className="mt-0.5" /><span><strong>ยืนยันย้ายกลุ่ม</strong><br />นักศึกษาที่เลือกบางคนอยู่ในกลุ่มอื่น การดำเนินการนี้จะเปลี่ยนกลุ่มประจำของนักศึกษาอย่างชัดเจน</span></label>}
             {error && <p role="alert" className="text-xs text-red-600">{error}</p>}

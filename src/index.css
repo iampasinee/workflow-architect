@@ -5,6 +5,11 @@
   --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
+/* Keep centered navigation aligned when a page gains a vertical scrollbar. */
+html {
+  scrollbar-gutter: stable;
+}
+
 /* Custom scrollbars and pulse animations */
 ::-webkit-scrollbar {
   width: 6px;

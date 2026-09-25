@@ -14,6 +14,9 @@
     "test:courses": "tsx --test src/services/courseState.test.ts",
     "test:monitoring": "tsx --test src/services/teacherMonitoring.test.ts",
     "test:exam-status": "tsx --test src/services/examStatus.test.ts",
+    "test:demo-time": "tsx --test src/services/demoTime.test.ts",
+    "test:student-demo": "tsx --test src/services/studentDemoRetry.test.ts",
+    "test:student-navigation": "tsx --test src/components/common/StudentNavigation.test.tsx",
     "test:exam-wizard": "tsx --test src/services/examWizard.test.ts",
     "test:exam-management": "tsx --test src/services/teacherExamManagement.test.ts",
     "test:rooms": "tsx --test src/services/roomState.test.ts"

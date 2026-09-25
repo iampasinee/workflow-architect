@@ -390,23 +390,23 @@ The new canonical source of truth must be:
 
 ---
 
-## Admission Year and "ปีเข้า"
+## Admission Year and "ปีที่เข้าศึกษา"
 
 The student admission cohort is shown in the UI using the Thai label:
 
-`ปีเข้า`
+`ปีที่เข้าศึกษา`
 
 Examples:
 
 ```text
 admissionYear = 2567
-display = ปีเข้า 67
+display = ปีที่เข้าศึกษา 67
 
 admissionYear = 2568
-display = ปีเข้า 68
+display = ปีที่เข้าศึกษา 68
 
 admissionYear = 2569
-display = ปีเข้า 69
+display = ปีที่เข้าศึกษา 69
 ```
 
 Store the full Buddhist academic year where possible.
@@ -431,9 +431,9 @@ for this concept in the UI.
 
 Use:
 
-* `ปีเข้า`
-* `ปีเข้า 67`
-* `ปีเข้า 68`
+* `ปีที่เข้าศึกษา`
+* `ปีที่เข้าศึกษา 67`
+* `ปีที่เข้าศึกษา 68`
 
 instead.
 
@@ -551,7 +551,7 @@ Recommended table columns:
 * คณะ
 * ภาควิชา
 * สาขาวิชา
-* ปีเข้า
+* ปีที่เข้าศึกษา
 * ชั้นปี
 * กลุ่มเรียน
 * สถานะ
@@ -562,7 +562,7 @@ Example:
 ```text
 รหัสนักศึกษา: 6706022510158
 สาขาวิชา: IT
-ปีเข้า: 67
+ปีที่เข้าศึกษา: 67
 ชั้นปี: 3
 กลุ่มเรียน: INET-DE-RA
 ```
@@ -613,7 +613,7 @@ Student Management may support filters for:
 * คณะ
 * ภาควิชา
 * สาขาวิชา
-* ปีเข้า
+* ปีที่เข้าศึกษา
 * ชั้นปี
 * กลุ่มเรียน
 * สถานะ
@@ -831,14 +831,14 @@ This allows a Section to represent:
 
 ```text
 สาขาวิชา IT
-ปีเข้า 67
+ปีที่เข้าศึกษา 67
 ```
 
 or multiple cohorts such as:
 
 ```text
-IT ปีเข้า 67
-IT ปีเข้า 68
+IT ปีที่เข้าศึกษา 67
+IT ปีที่เข้าศึกษา 68
 ```
 
 A Section may combine RA + RB or target RA and RB in separate Sections. Class Group is the student's primary academic grouping; Section is the teaching arrangement for one Course, academic year, and semester. Do not merge these concepts.
@@ -860,7 +860,7 @@ When assigning academic student groups to a Section, prefer a simple UI based on
 * คณะ
 * ภาควิชา
 * สาขาวิชา
-* ปีเข้า
+* ปีที่เข้าศึกษา
 * กลุ่มเรียน
 
 Example:
@@ -868,7 +868,7 @@ Example:
 ```text
 สาขาวิชา: IT
 
-ปีเข้า:
+ปีที่เข้าศึกษา:
 ☑ 67
 ☑ 68
 ☐ 69
@@ -1008,16 +1008,19 @@ Student ID and admission year are read-only in the Student Registration UI. Year
 
 The staff domain alone must never grant Admin access. Resolve Teacher/Admin from the predefined mock account record, and require `adminProvisioned` for Admin. Do not provide public Admin self-registration.
 
-Registration has four steps:
+Student and Teacher Registration have five steps:
 
 ```text
 Google account
+→ SecureLab password
 → role-specific profile
 → required mock face enrollment
 → review and confirmation
 ```
 
 Face enrollment stores status only. Do not store face images, perform biometric matching, or describe the mock as production authentication. Registration cannot complete unless the status is `verified_mock`.
+
+The password step is required before either role-specific profile step. Validation requires at least 8 characters, an English letter, a number, matching confirmation, and no leading/trailing whitespace. Keep credentials in mock auth state, never Student/Teacher profiles, and show only a "ตั้งค่าแล้ว" status on Review. Login checks the mock password. Existing registered demo accounts without a password migrate to the documented demo password. Browser-managed plaintext credentials are mock-only and never production-safe; a production backend must hash passwords server-side (Argon2/bcrypt or equivalent), manage sessions, and provide a secure reset/change flow.
 
 Mock registration state is stored under `securelab_mock_auth_users_v1`. Forward migration may map known legacy demo emails by stable auth ID, but persisted data must not override canonical role, email, subject ID, or Admin provisioning. A persisted `registered` state is valid only with verified mock face enrollment.
 
@@ -1449,7 +1452,7 @@ The `เพิ่มโครงสร้างการศึกษา` action 
 คณะ
 → ภาควิชา
 → สาขาวิชา
-→ ปีเข้าและกลุ่มเรียน
+→ ปีที่เข้าศึกษาและกลุ่มเรียน
 → ตรวจสอบและบันทึก
 ```
 
@@ -1465,7 +1468,7 @@ Use these labels consistently:
 * `คณะ`
 * `ภาควิชา`
 * `สาขาวิชา`
-* `ปีเข้า`
+* `ปีที่เข้าศึกษา`
 * `ชั้นปี`
 * `กลุ่มเรียน`
 * `รหัสนักศึกษา`
@@ -1476,7 +1479,7 @@ Do not use:
 
 `รุ่น`
 
-for the admission cohort unless explicitly requested in a future change. Use `ปีเข้า` for admission-year filters, forms, tables, and group/Section configuration. `รหัสนักศึกษา` remains the correct label for Student ID.
+for the admission cohort unless explicitly requested in a future change. Use `ปีที่เข้าศึกษา` for admission-year filters, forms, tables, and group/Section configuration. `รหัสนักศึกษา` remains the correct label for Student ID.
 
 ---
 
@@ -1803,6 +1806,7 @@ University email
 └── Staff domain → resolve Teacher/Admin from mock account data
 
 Registration
+→ SecureLab password
 → profile data
 → required mock face status
 → review
@@ -1834,7 +1838,7 @@ Derived display data:
 คณะ
 ภาควิชา
 สาขาวิชา
-ปีเข้า 67 / 68 / 69
+ปีที่เข้าศึกษา 67 / 68 / 69
 ชั้นปี
 กลุ่มเรียน
 ```
@@ -1844,7 +1848,7 @@ Section academic targeting:
 ```text
 สาขาวิชา
 +
-ปีเข้า
+ปีที่เข้าศึกษา
 +
 กลุ่มเรียน (optional)
 ```
@@ -1853,14 +1857,14 @@ Example:
 
 ```text
 สาขาวิชา IT
-ปีเข้า 67
+ปีที่เข้าศึกษา 67
 ```
 
 or:
 
 ```text
-IT ปีเข้า 67 กลุ่ม RA
-IT ปีเข้า 67 กลุ่ม RB
+IT ปีที่เข้าศึกษา 67 กลุ่ม RA
+IT ปีที่เข้าศึกษา 67 กลุ่ม RB
 ```
 
 Room and device infrastructure:

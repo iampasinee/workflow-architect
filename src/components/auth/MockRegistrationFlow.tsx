@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
-import { Camera, Check, ChevronLeft, CircleUserRound, ShieldCheck } from 'lucide-react';
+import { Check } from 'lucide-react';
+import { BackButton } from '../common/BackButton';
 import { useApp } from '../../context/AppContext';
-import { parseStudentUniversityEmail, resolveMockAuthAccount } from '../../services/authState';
+import { canEnterRegistrationStep, credentialsAfterAccountSelection, parseStudentUniversityEmail, resolveMockAuthAccount, validateRegistrationPassword } from '../../services/authState';
 import { classGroupsForCohort, isAcademicPathActive } from '../../services/academicState';
 import type { FaceEnrollmentStatus, MockAuthUser } from '../../types/auth';
 import { calculateYearLevelFromAdmissionYear, getAdmissionCode, useAcademicYear } from '../../utils/academicYear';
 import { AuthDomainNotice } from './AuthDomainNotice';
 import { MockGoogleAccountSelector } from './MockGoogleAccountSelector';
+import { RegistrationPasswordStep } from './RegistrationPasswordStep';
+import { MockFaceScanStep } from './MockFaceScanStep';
 
 interface MockRegistrationFlowProps {
   onBack: () => void;
@@ -51,19 +54,20 @@ export const MockRegistrationFlow: React.FC<MockRegistrationFlowProps> = ({ onBa
     academicState,
     students,
     teachers,
-    admins,
     updateStudent,
     updateTeacher,
-    updateAdmin,
   } = useApp();
   const currentAcademicYear = useAcademicYear();
-  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
   const [selectedEmail, setSelectedEmail] = useState('');
   const [target, setTarget] = useState<MockAuthUser | null>(null);
+  const [password, setPassword] = useState('');
+  const [confirmation, setConfirmation] = useState('');
   const [info, setInfo] = useState<RegistrationInfo>(emptyInfo);
   const [faceStatus, setFaceStatus] = useState<FaceEnrollmentStatus>('not_started');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const visibleStep = canEnterRegistrationStep(step, target, password, confirmation) ? step : target ? 2 : 1;
 
   const activeFaculties = academicState.faculties.filter((item) => item.status === 'active');
   const availableDepartments = academicState.departments.filter((item) => item.facultyId === info.facultyId && item.status === 'active');
@@ -113,10 +117,6 @@ export const MockRegistrationFlow: React.FC<MockRegistrationFlowProps> = ({ onBa
         facultyId: teacher?.facultyId || '',
         departmentId: teacher?.departmentId || '',
       });
-    } else {
-      const admin = admins.find((item) => item.id === user.subjectId);
-      const names = splitName(admin?.fullName || '');
-      setInfo({ ...emptyInfo, code: admin?.adminCode || '', firstName: names.firstName, lastName: names.lastName });
     }
   };
 
@@ -132,9 +132,17 @@ export const MockRegistrationFlow: React.FC<MockRegistrationFlowProps> = ({ onBa
       setError('บัญชีนี้ลงทะเบียนในระบบแล้ว');
       return;
     }
+    if (resolution.user.role === 'admin') {
+      setTarget(null);
+      setError('ไม่เปิดให้ลงทะเบียนบัญชีผู้ดูแลระบบด้วยตนเอง');
+      return;
+    }
+    const sameAccount = target?.id === resolution.user.id;
     setTarget(resolution.user);
-    initializeInfo(resolution.user);
-    setFaceStatus('not_started');
+    if (!sameAccount) {
+      initializeInfo(resolution.user);
+      setFaceStatus('not_started');
+    }
     setStep(2);
   };
 
@@ -143,37 +151,56 @@ export const MockRegistrationFlow: React.FC<MockRegistrationFlowProps> = ({ onBa
     if (!info.code.trim() || !info.firstName.trim() || !info.lastName.trim()) return 'กรุณากรอกข้อมูลผู้ใช้ให้ครบถ้วน';
     if (target.role === 'student') {
       if (!parsedStudentEmail) return 'ไม่สามารถอ่านรหัสนักศึกษาจากอีเมลนี้ได้';
-      if (info.code !== parsedStudentEmail.studentId || info.admissionYear !== parsedStudentEmail.admissionYear) return 'ข้อมูลรหัสนักศึกษาและปีเข้าต้องมาจากอีเมลมหาวิทยาลัย';
+      if (info.code !== parsedStudentEmail.studentId || info.admissionYear !== parsedStudentEmail.admissionYear) return 'ข้อมูลรหัสนักศึกษาและปีที่เข้าศึกษาต้องมาจากอีเมลมหาวิทยาลัย';
       if (!info.majorId) return 'กรุณาเลือกสาขาวิชา';
-      if (!yearLevel?.isValid) return 'ไม่สามารถคำนวณชั้นปีจากปีเข้าได้';
-      if (info.classGroupId && !availableGroups.some((group) => group.id === info.classGroupId)) return 'กลุ่มเรียนไม่ตรงกับสาขาวิชาและปีเข้า';
+      if (!yearLevel?.isValid) return 'ไม่สามารถคำนวณชั้นปีจากปีที่เข้าศึกษาได้';
+      if (info.classGroupId && !availableGroups.some((group) => group.id === info.classGroupId)) return 'กลุ่มเรียนไม่ตรงกับสาขาวิชาและปีที่เข้าศึกษา';
     }
     if (target.role === 'teacher') {
       if (!info.facultyId) return 'กรุณาเลือกคณะ';
       if (!info.departmentId || !availableDepartments.some((item) => item.id === info.departmentId)) return 'กรุณาเลือกภาควิชาให้ตรงกับคณะ';
     }
-    if (target.role === 'admin' && !target.adminProvisioned) return 'บัญชีผู้ดูแลระบบต้องได้รับการกำหนดสิทธิ์จากระบบ';
     return '';
   };
 
   const continueFromInfo = () => {
+    if (!canEnterRegistrationStep(3, target, password, confirmation)) {
+      setError('กรุณาตั้งรหัสผ่านให้ตรงตามเงื่อนไขก่อน');
+      setStep(2);
+      return;
+    }
     const validationError = validateInfo();
     setError(validationError);
-    if (!validationError) setStep(3);
+    if (!validationError) setStep(4);
   };
 
   const continueFromFace = () => {
+    if (!canEnterRegistrationStep(4, target, password, confirmation)) {
+      setStep(2);
+      return;
+    }
     if (faceStatus !== 'verified_mock') {
       setError('กรุณาลงทะเบียนใบหน้าก่อนดำเนินการต่อ');
       return;
     }
     setError('');
-    setStep(4);
+    setStep(5);
   };
 
   const confirmRegistration = () => {
+    if (!canEnterRegistrationStep(5, target, password, confirmation)) {
+      setError('กรุณาตั้งรหัสผ่านให้ตรงตามเงื่อนไขก่อน');
+      setStep(2);
+      return;
+    }
     if (!target || faceStatus !== 'verified_mock') {
       setError('กรุณาลงทะเบียนใบหน้าก่อนดำเนินการต่อ');
+      return;
+    }
+    const validationError = validateInfo();
+    if (validationError) {
+      setError(validationError);
+      setStep(3);
       return;
     }
     const fullName = `${info.firstName.trim()} ${info.lastName.trim()}`.trim();
@@ -204,14 +231,12 @@ export const MockRegistrationFlow: React.FC<MockRegistrationFlowProps> = ({ onBa
         departmentId: info.departmentId,
         icitProfileStatus: 'confirmed',
       });
-    } else {
-      updateAdmin(target.subjectId, { email: target.email, fullName });
     }
     if (!profileSaved) {
       setError('ไม่สามารถบันทึกข้อมูลผู้ใช้ได้ กรุณาตรวจสอบข้อมูลอีกครั้ง');
       return;
     }
-    const result = completeMockRegistration(target.id, faceStatus);
+    const result = completeMockRegistration(target.id, faceStatus, password, confirmation);
     if (!result.success) {
       setError(result.error || 'ลงทะเบียนไม่สำเร็จ');
       return;
@@ -230,39 +255,40 @@ export const MockRegistrationFlow: React.FC<MockRegistrationFlowProps> = ({ onBa
     </div>;
   }
 
-  const roleLabel = target?.role === 'student' ? 'นักศึกษา' : target?.role === 'teacher' ? 'อาจารย์' : 'ผู้ดูแลระบบ';
-  const steps = ['บัญชี Google', 'ข้อมูลผู้ใช้', 'ใบหน้า', 'ยืนยัน'];
+  const roleLabel = target?.role === 'student' ? 'นักศึกษา' : 'อาจารย์';
+  const steps = ['บัญชีมหาวิทยาลัย', 'ตั้งรหัสผ่าน', target?.role === 'teacher' ? 'ข้อมูลอาจารย์' : 'ข้อมูลนักศึกษา', 'ลงทะเบียนใบหน้า', 'ตรวจสอบ'];
 
   return <div className="mx-auto w-full max-w-3xl rounded-3xl border border-slate-200 bg-white p-5 shadow-xl sm:p-8">
     <div className="flex items-start gap-3">
-      <button type="button" onClick={onBack} aria-label="กลับหน้าหลัก" className="rounded-xl border border-slate-200 p-2 text-slate-600 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"><ChevronLeft className="h-5 w-5" /></button>
+      <BackButton onClick={onBack} />
       <div><p className="text-xs font-bold text-blue-600">SECURELAB REGISTRATION MOCKUP</p><h1 className="mt-1 text-2xl font-bold text-slate-900">ลงทะเบียนใช้งาน SecureLab</h1><p className="mt-1 text-sm text-slate-500">ยืนยันบัญชี ตรวจสอบข้อมูล และลงทะเบียนใบหน้าแบบจำลอง</p></div>
     </div>
 
     <nav aria-label="ขั้นตอนการลงทะเบียน" className="mt-6">
-      <ol className="grid grid-cols-4 gap-1 sm:gap-3">
+      <ol className="grid grid-cols-5 gap-1 sm:gap-3">
         {steps.map((label, index) => {
           const number = index + 1;
-          const active = step === number;
-          const complete = step > number;
+          const active = visibleStep === number;
+          const complete = visibleStep > number;
           return <li key={label} aria-current={active ? 'step' : undefined} className="min-w-0 text-center">
             <div className={`mx-auto flex h-8 w-8 items-center justify-center rounded-full border text-xs font-bold ${complete ? 'border-emerald-500 bg-emerald-500 text-white' : active ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-400'}`}>{complete ? <Check className="h-4 w-4" /> : number}</div>
-            <p className={`mt-1 truncate text-[10px] sm:text-xs ${active ? 'font-bold text-blue-700' : 'text-slate-500'}`}>{label}</p>
+            <p className={`mt-1 break-words text-[9px] leading-tight sm:text-xs ${active ? 'font-bold text-blue-700' : 'text-slate-500'}`}>{label}</p>
           </li>;
         })}
       </ol>
     </nav>
 
     <div className="mt-6 border-t border-slate-100 pt-6">
-      {step === 1 && <div className="space-y-4">
+      {visibleStep === 1 && <div className="space-y-4">
         <AuthDomainNotice compact />
-        <MockGoogleAccountSelector value={selectedEmail} onChange={(email) => { setSelectedEmail(email); setTarget(null); setError(''); }} onContinue={selectRegistrationAccount} actionLabel="ยืนยันบัญชี Google (จำลอง)" />
+        <MockGoogleAccountSelector value={selectedEmail} onChange={(email) => { const next = credentialsAfterAccountSelection(selectedEmail, email, { password, confirmation }); setSelectedEmail(email); setTarget(null); setPassword(next.password); setConfirmation(next.confirmation); if (email !== selectedEmail) { setInfo(emptyInfo); setFaceStatus('not_started'); } setError(''); }} onContinue={selectRegistrationAccount} actionLabel="ยืนยันบัญชี Google (จำลอง)" />
         {error && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"><p className="font-bold">{error}</p>{target?.registered && <button type="button" onClick={() => onGoLogin(target.email)} className="mt-2 font-bold underline">ไปหน้าเข้าสู่ระบบ</button>}</div>}
       </div>}
 
-      {step === 2 && target && <div className="space-y-4">
-        <div><h2 className="text-lg font-bold text-slate-900">ตรวจสอบข้อมูล{roleLabel}</h2><p className="mt-1 break-all text-xs text-slate-500">บัญชี: {target.email}</p></div>
-        {target.role === 'admin' && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><div className="flex gap-2"><ShieldCheck className="h-5 w-5 shrink-0" /><div><p className="font-bold">บัญชีผู้ดูแลระบบต้องได้รับการกำหนดสิทธิ์จากระบบ</p><p className="mt-1 text-xs">บัญชีนี้เป็นบัญชี mock ที่กำหนดไว้ล่วงหน้า จึงสามารถดำเนินการต่อได้ ไม่มีตัวเลือกสมัครเป็นผู้ดูแลระบบทั่วไป</p></div></div></div>}
+      {visibleStep === 2 && target && <RegistrationPasswordStep email={target.email} password={password} confirmation={confirmation} onPasswordChange={setPassword} onConfirmationChange={setConfirmation} onBack={() => { setError(''); setStep(1); }} onContinue={() => { if (validateRegistrationPassword(password, confirmation).valid) { setError(''); setStep(3); } }} />}
+
+      {visibleStep === 3 && target && <div className="space-y-4">
+        <div><h2 className="text-lg font-bold text-slate-900">ข้อมูล{roleLabel}</h2><p className="mt-1 break-all text-xs text-slate-500">บัญชี: {target.email}</p></div>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="text-xs font-semibold text-slate-700">อีเมล<input readOnly value={target.email} className={`${inputClass} mt-1 bg-slate-50`} /></label>
           <label className="text-xs font-semibold text-slate-700">{target.role === 'student' ? 'รหัสนักศึกษา' : target.role === 'teacher' ? 'รหัสบุคลากร/อาจารย์' : 'รหัสผู้ดูแลระบบ'}<input aria-label={target.role === 'student' ? 'รหัสนักศึกษา' : target.role === 'teacher' ? 'รหัสบุคลากร/อาจารย์' : 'รหัสผู้ดูแลระบบ'} readOnly={target.role === 'student'} value={info.code} onChange={(event) => setInfo({ ...info, code: event.target.value })} className={`${inputClass} mt-1 ${target.role === 'student' ? 'bg-slate-100' : ''}`} /></label>
@@ -274,11 +300,11 @@ export const MockRegistrationFlow: React.FC<MockRegistrationFlowProps> = ({ onBa
           <label htmlFor="registration-major" className="block text-xs font-semibold text-slate-700">สาขาวิชา<select id="registration-major" aria-label="สาขาวิชา" value={info.majorId} onChange={(event) => setInfo({ ...info, majorId: event.target.value, classGroupId: '' })} className={`${inputClass} mt-1`}><option value="">เลือกสาขาวิชา</option>{availableMajors.map((major) => <option key={major.id} value={major.id}>[{major.code}] {major.name}</option>)}</select></label>
           {selectedMajor && <p className="text-xs text-slate-500">{selectedFaculty?.name || '—'} → {selectedDepartment?.name || '—'}</p>}
           <div className="grid gap-4 sm:grid-cols-3">
-            <label htmlFor="registration-admission-year" className="text-xs font-semibold text-slate-700">ปีเข้า<input id="registration-admission-year" aria-label="ปีเข้า" readOnly value={studentAdmissionYear ? `${studentAdmissionYear} (ปีเข้า ${getAdmissionCode(studentAdmissionYear)})` : 'ไม่สามารถอ่านจากอีเมลได้'} className={`${inputClass} mt-1 bg-slate-100`} /></label>
+            <label htmlFor="registration-admission-year" className="text-xs font-semibold text-slate-700">ปีที่เข้าศึกษา<input id="registration-admission-year" aria-label="ปีที่เข้าศึกษา" readOnly value={studentAdmissionYear ? `${studentAdmissionYear} (ปีที่เข้าศึกษา ${getAdmissionCode(studentAdmissionYear)})` : 'ไม่สามารถอ่านจากอีเมลได้'} className={`${inputClass} mt-1 bg-slate-100`} /></label>
             <label htmlFor="registration-year-level" className="text-xs font-semibold text-slate-700">ชั้นปี<input id="registration-year-level" aria-label="ชั้นปี" readOnly value={yearLevel?.formattedYearLevel || 'คำนวณอัตโนมัติ'} className={`${inputClass} mt-1 bg-slate-100`} /></label>
-            <label htmlFor="registration-class-group" className="text-xs font-semibold text-slate-700">กลุ่มเรียน<select id="registration-class-group" aria-label="กลุ่มเรียน" disabled={!info.majorId || !studentAdmissionYear || availableGroups.length === 0} value={info.classGroupId} onChange={(event) => setInfo({ ...info, classGroupId: event.target.value })} className={`${inputClass} mt-1`}><option value="">{info.majorId && studentAdmissionYear && availableGroups.length === 0 ? 'ยังไม่มีกลุ่มเรียนสำหรับสาขาและปีเข้านี้' : 'ยังไม่กำหนด'}</option>{availableGroups.map((group) => <option key={group.id} value={group.id}>{group.code}</option>)}</select></label>
+            <label htmlFor="registration-class-group" className="text-xs font-semibold text-slate-700">กลุ่มเรียน<select id="registration-class-group" aria-label="กลุ่มเรียน" disabled={!info.majorId || !studentAdmissionYear || availableGroups.length === 0} value={info.classGroupId} onChange={(event) => setInfo({ ...info, classGroupId: event.target.value })} className={`${inputClass} mt-1`}><option value="">{info.majorId && studentAdmissionYear && availableGroups.length === 0 ? 'ยังไม่มีกลุ่มเรียนสำหรับสาขาและปีที่เข้าศึกษานี้' : 'ยังไม่กำหนด'}</option>{availableGroups.map((group) => <option key={group.id} value={group.id}>{group.code}</option>)}</select></label>
           </div>
-          {info.majorId && studentAdmissionYear && availableGroups.length === 0 && <p className="text-xs font-medium text-amber-700">ยังไม่มีกลุ่มเรียนสำหรับสาขาและปีเข้านี้</p>}
+          {info.majorId && studentAdmissionYear && availableGroups.length === 0 && <p className="text-xs font-medium text-amber-700">ยังไม่มีกลุ่มเรียนสำหรับสาขาและปีที่เข้าศึกษานี้</p>}
         </div>}
 
         {target.role === 'teacher' && <div className="grid gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
@@ -287,28 +313,18 @@ export const MockRegistrationFlow: React.FC<MockRegistrationFlowProps> = ({ onBa
         </div>}
 
         {error && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}
-        <div className="flex flex-wrap justify-between gap-2 border-t pt-4"><button type="button" onClick={() => { setError(''); setStep(1); }} className={secondaryButton}>ย้อนกลับ</button><button type="button" onClick={continueFromInfo} className={primaryButton}>ดำเนินการต่อ</button></div>
+        <div className="flex flex-wrap justify-between gap-2 border-t pt-4"><button type="button" onClick={() => { setError(''); setStep(2); }} className={secondaryButton}>ย้อนกลับ</button><button type="button" onClick={continueFromInfo} className={primaryButton}>ดำเนินการต่อ</button></div>
       </div>}
 
-      {step === 3 && target && <div className="space-y-4">
-        <div><h2 className="text-lg font-bold text-slate-900">ลงทะเบียนใบหน้า</h2><p className="mt-1 text-xs text-slate-500">ขั้นตอนบังคับสำหรับการลงทะเบียน Mockup นี้จะบันทึกเฉพาะสถานะ ไม่จัดเก็บภาพใบหน้า</p></div>
-        <ul className="grid gap-2 text-xs text-slate-600 sm:grid-cols-2"><li>• มองตรงไปที่กล้อง</li><li>• อยู่ในพื้นที่ที่มีแสงเพียงพอ</li><li>• ไม่สวมหน้ากาก</li><li>• จัดใบหน้าให้อยู่ในกรอบ</li></ul>
-        <div className={`relative flex aspect-video max-h-80 items-center justify-center overflow-hidden rounded-2xl border-2 ${faceStatus === 'verified_mock' ? 'border-emerald-400 bg-emerald-50' : faceStatus === 'capturing' ? 'border-blue-400 bg-slate-900' : 'border-dashed border-slate-300 bg-slate-100'}`}>
-          <div className={`flex h-40 w-32 items-center justify-center rounded-[45%] border-2 ${faceStatus === 'verified_mock' ? 'border-emerald-500 text-emerald-600' : faceStatus === 'capturing' ? 'animate-pulse border-blue-400 text-blue-300' : 'border-slate-300 text-slate-400'}`}><CircleUserRound className="h-16 w-16" /></div>
-          <span className="absolute bottom-4 rounded-full bg-white/90 px-3 py-1 text-xs font-bold text-slate-700">{faceStatus === 'verified_mock' ? 'บันทึกใบหน้าเรียบร้อย' : faceStatus === 'capturing' ? 'กล้องจำลองพร้อมถ่ายภาพ' : 'กรอบใบหน้า'}</span>
-        </div>
-        <div className="flex flex-wrap gap-2">{faceStatus === 'not_started' && <button type="button" onClick={() => { setFaceStatus('capturing'); setError(''); }} className={secondaryButton}><Camera className="h-4 w-4" />เริ่มกล้องจำลอง</button>}{faceStatus === 'capturing' && <button type="button" onClick={() => { setFaceStatus('verified_mock'); setError(''); }} className={primaryButton}><Camera className="h-4 w-4" />ถ่ายภาพใบหน้า (จำลอง)</button>}{faceStatus === 'verified_mock' && <span className="inline-flex items-center gap-2 rounded-xl bg-emerald-100 px-4 py-2 text-sm font-bold text-emerald-700"><Check className="h-4 w-4" />ลงทะเบียนแล้ว</span>}</div>
-        {error && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}
-        <div className="flex flex-wrap justify-between gap-2 border-t pt-4"><button type="button" onClick={() => { setError(''); setStep(2); }} className={secondaryButton}>ย้อนกลับ</button><button type="button" onClick={continueFromFace} className={primaryButton}>ดำเนินการต่อ</button></div>
-      </div>}
+      {visibleStep === 4 && target && <MockFaceScanStep status={faceStatus} error={error} onStatusChange={(next) => { setFaceStatus(next); setError(''); }} onBack={() => { setError(''); setStep(3); }} onContinue={continueFromFace} />}
 
-      {step === 4 && target && <div className="space-y-4">
+      {visibleStep === 5 && target && <div className="space-y-4">
         <div><h2 className="text-lg font-bold text-slate-900">ยืนยันการลงทะเบียน</h2><p className="mt-1 text-xs text-slate-500">ตรวจสอบข้อมูลก่อนบันทึกสถานะจำลอง</p></div>
         <dl className="divide-y divide-slate-100 rounded-2xl border border-slate-200 px-4 text-sm">
-          {[['บัญชี', target.email], ['ประเภทผู้ใช้', roleLabel], [target.role === 'student' ? 'รหัสนักศึกษา' : 'รหัสผู้ใช้', info.code], ['ชื่อ-นามสกุล', `${info.firstName} ${info.lastName}`], ...(target.role === 'student' ? [['สาขาวิชา', selectedMajor ? `[${selectedMajor.code}] ${selectedMajor.name}` : '—'], ['ปีเข้า', info.admissionYear ? `${info.admissionYear} (ปีเข้า ${getAdmissionCode(info.admissionYear)})` : '—'], ['ชั้นปี', yearLevel?.formattedYearLevel || '—'], ['กลุ่มเรียน', selectedGroup?.code || 'ยังไม่กำหนด']] : []), ['ใบหน้า', faceStatus === 'verified_mock' ? 'ลงทะเบียนแล้ว' : 'ยังไม่ลงทะเบียน']].map(([label, value]) => <div key={label} className="flex flex-wrap justify-between gap-2 py-3"><dt className="text-slate-500">{label}</dt><dd className="break-all text-right font-semibold text-slate-900">{value}</dd></div>)}
+          {[['บัญชี', target.email], ['รหัสผ่าน', 'ตั้งค่าแล้ว ✓'], ['ประเภทผู้ใช้', roleLabel], [target.role === 'student' ? 'รหัสนักศึกษา' : 'รหัสผู้ใช้', info.code], ['ชื่อ-นามสกุล', `${info.firstName} ${info.lastName}`], ...(target.role === 'student' ? [['สาขาวิชา', selectedMajor ? `[${selectedMajor.code}] ${selectedMajor.name}` : '—'], ['ปีที่เข้าศึกษา', info.admissionYear ? `${info.admissionYear} (ปีที่เข้าศึกษา ${getAdmissionCode(info.admissionYear)})` : '—'], ['ชั้นปี', yearLevel?.formattedYearLevel || '—'], ['กลุ่มเรียน', selectedGroup?.code || 'ยังไม่กำหนด']] : []), ['ใบหน้า', faceStatus === 'verified_mock' ? 'ลงทะเบียนใบหน้าแล้ว ✓' : 'ยังไม่ลงทะเบียน']].map(([label, value]) => <div key={label} className="flex flex-wrap justify-between gap-2 py-3"><dt className="text-slate-500">{label}</dt><dd className="break-all text-right font-semibold text-slate-900">{value}</dd></div>)}
         </dl>
         {error && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}
-        <div className="flex flex-wrap justify-between gap-2 border-t pt-4"><button type="button" onClick={() => { setError(''); setStep(3); }} className={secondaryButton}>ย้อนกลับ</button><button type="button" onClick={confirmRegistration} disabled={faceStatus !== 'verified_mock'} className={primaryButton}>ยืนยันการลงทะเบียน</button></div>
+        <div className="flex flex-wrap justify-between gap-2 border-t pt-4"><button type="button" onClick={() => { setError(''); setStep(4); }} className={secondaryButton}>ย้อนกลับ</button><button type="button" onClick={confirmRegistration} disabled={faceStatus !== 'verified_mock'} className={primaryButton}>ยืนยันการลงทะเบียน</button></div>
       </div>}
     </div>
 

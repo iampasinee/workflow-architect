@@ -4,14 +4,52 @@ import type {
   MockAuthUser,
   MockGoogleAccountOption,
   ParsedStudentUniversityEmail,
+  RegistrationCredentialDraft,
   UniversityAccountResolution,
 } from '../types/auth';
 import { inferAdmissionYearFromStudentId } from '../utils/academicYear';
 
 export const mockAuthStorageKey = 'securelab_mock_auth_users_v1';
+/** Demo-only fallback for accounts registered before the password step existed. */
+export const legacyMockPassword = 'SecureLab123';
+
+export interface RegistrationPasswordRequirements {
+  minLength: boolean;
+  hasLetter: boolean;
+  hasNumber: boolean;
+  noOuterWhitespace: boolean;
+  matches: boolean;
+  valid: boolean;
+}
+
+export const validateRegistrationPassword = (password: string, confirmation: string): RegistrationPasswordRequirements => {
+  const minLength = password.length >= 8;
+  const hasLetter = /[A-Za-z]/.test(password);
+  const hasNumber = /\d/.test(password);
+  const noOuterWhitespace = password.length > 0 && password === password.trim();
+  const matches = confirmation.length > 0 && password === confirmation;
+  return { minLength, hasLetter, hasNumber, noOuterWhitespace, matches,
+    valid: minLength && hasLetter && hasNumber && noOuterWhitespace && matches };
+};
+
+export const credentialsAfterAccountSelection = (
+  previousEmail: string,
+  nextEmail: string,
+  current: RegistrationCredentialDraft,
+): RegistrationCredentialDraft => normalizeAuthEmail(previousEmail) === normalizeAuthEmail(nextEmail)
+  ? current
+  : { password: '', confirmation: '' };
+
+export const canEnterRegistrationStep = (step: number, user: MockAuthUser | null, password: string, confirmation: string): boolean => {
+  if (step <= 1) return true;
+  if (!user || user.registered || user.role === 'admin') return false;
+  return step === 2 || validateRegistrationPassword(password, confirmation).valid;
+};
 
 const faceStatuses: FaceEnrollmentStatus[] = [
   'not_started',
+  'scanning',
+  'verifying',
   'capturing',
   'captured',
   'verified_mock',
@@ -33,6 +71,7 @@ export const initialMockAuthUsers: MockAuthUser[] = [
     subjectId: 'std_0002',
     registered: true,
     faceEnrollmentStatus: 'verified_mock',
+    mockPassword: legacyMockPassword,
   },
   {
     id: 'auth_teacher_new',
@@ -49,6 +88,7 @@ export const initialMockAuthUsers: MockAuthUser[] = [
     subjectId: 'tch_0001',
     registered: true,
     faceEnrollmentStatus: 'verified_mock',
+    mockPassword: legacyMockPassword,
   },
   {
     id: 'auth_admin_provisioned',
@@ -125,6 +165,16 @@ export const resolveMockAuthAccount = (
   return { ...resolution, user };
 };
 
+/** Frontend-only authentication. A real service must hash and verify server-side. */
+export const authenticateMockAccount = (email: string, password: string, users: MockAuthUser[]): MockAuthResolution => {
+  const resolution = resolveMockAuthAccount(email, users);
+  const genericError = 'อีเมลหรือรหัสผ่านไม่ถูกต้อง';
+  if (!resolution.user || !resolution.user.registered || !password || resolution.user.mockPassword !== password) {
+    return { ...resolution, user: undefined, error: genericError };
+  }
+  return { ...resolution, error: undefined };
+};
+
 export const migrateMockAuthUsers = (raw: unknown): MockAuthUser[] => {
   if (!Array.isArray(raw)) return initialMockAuthUsers.map((user) => ({ ...user }));
   return initialMockAuthUsers.map((seed) => {
@@ -139,6 +189,10 @@ export const migrateMockAuthUsers = (raw: unknown): MockAuthUser[] => {
       ...seed,
       registered: stored.registered === true && faceEnrollmentStatus === 'verified_mock',
       faceEnrollmentStatus,
+      // The v1 data predates passwords. Keep registered demo accounts usable after migration.
+      mockPassword: stored.registered === true && faceEnrollmentStatus === 'verified_mock'
+        ? (typeof stored.mockPassword === 'string' && stored.mockPassword.length > 0 ? stored.mockPassword : legacyMockPassword)
+        : undefined,
     };
   });
 };
@@ -147,17 +201,23 @@ export const completeMockRegistration = (
   users: MockAuthUser[],
   userId: string,
   faceEnrollmentStatus: FaceEnrollmentStatus,
+  password: string,
+  confirmation: string,
 ): { success: boolean; users: MockAuthUser[]; error?: string } => {
   const target = users.find((user) => user.id === userId);
   if (!target) return { success: false, users, error: 'ไม่พบบัญชีที่ต้องการลงทะเบียน' };
   if (target.registered) return { success: false, users, error: 'บัญชีนี้ลงทะเบียนในระบบแล้ว' };
+  if (target.role === 'admin') return { success: false, users, error: 'ไม่เปิดให้ลงทะเบียนบัญชีผู้ดูแลระบบด้วยตนเอง' };
+  if (!validateRegistrationPassword(password, confirmation).valid) {
+    return { success: false, users, error: 'รหัสผ่านไม่ตรงตามเงื่อนไขหรือยืนยันรหัสผ่านไม่ตรงกัน' };
+  }
   if (faceEnrollmentStatus !== 'verified_mock') {
     return { success: false, users, error: 'กรุณาลงทะเบียนใบหน้าก่อนดำเนินการต่อ' };
   }
   return {
     success: true,
     users: users.map((user) => user.id === userId
-      ? { ...user, registered: true, faceEnrollmentStatus: 'verified_mock' }
+      ? { ...user, registered: true, faceEnrollmentStatus: 'verified_mock', mockPassword: password }
       : user),
   };
 };

@@ -156,7 +156,7 @@ export const validateSectionInput = (
     const group = academic.classGroups.find((item) => item.id === groupId);
     return !group || group.majorId !== cohort.majorId || group.admissionYear !== cohort.admissionYear ||
       (!retainedGroupIds.has(groupId) && !isAcademicPathActive(academic, 'classGroups', groupId));
-  }))) return 'กลุ่มเรียนต้องเปิดใช้งานและตรงกับสาขาวิชาและปีเข้า';
+  }))) return 'กลุ่มเรียนต้องเปิดใช้งานและตรงกับสาขาวิชาและปีที่เข้าศึกษา';
   for (const cohort of raw.cohorts) {
     const collision = courses.flatMap((item) => item.sections.map((section) => ({ course: item, section }))).find(({ course: candidateCourse, section }) =>
       sectionIdOf(candidateCourse.id, section) !== id && candidateCourse.id === raw.courseId && normalizeYear(section.academicYear) === raw.academicYear &&
