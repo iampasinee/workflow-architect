@@ -18,13 +18,14 @@ export const SimulationToolbar: React.FC = () => {
   const {
     role,
     setRole,
+    startStudentExamAttempt,
     students,
     teachers,
     admins,
-    setCurrentStudent,
     setCurrentTeacher,
     setCurrentAdmin,
     currentStudent,
+    currentExamId,
     currentTeacher,
     currentAdmin,
     triggerViolation,
@@ -33,7 +34,6 @@ export const SimulationToolbar: React.FC = () => {
     toggleMachineStatus,
     resetToMockDefaults,
     rooms,
-    setActiveStudentStep,
     setActiveTeacherRoute,
     setActiveAdminRoute,
     language,
@@ -94,8 +94,8 @@ export const SimulationToolbar: React.FC = () => {
                 </button>
                 <button
                   onClick={() => {
-                    setRole('student');
-                    setActiveStudentStep('ST1');
+                    const student = currentStudent || students[0];
+                    if (student) startStudentExamAttempt(student, currentExamId);
                   }}
                   className={`py-1.5 px-2 rounded-lg font-medium transition-all cursor-pointer ${
                     role === 'student'
@@ -119,8 +119,7 @@ export const SimulationToolbar: React.FC = () => {
                   onChange={(e) => {
                     const found = students.find((s) => s.id === e.target.value);
                     if (found) {
-                      setCurrentStudent(found);
-                      setActiveStudentStep('ST1');
+                      startStudentExamAttempt(found, currentExamId);
                     }
                   }}
                   className="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-lg p-1.5 text-xs focus:ring-1 focus:ring-blue-500"

@@ -4,6 +4,7 @@ import { initialExamSessions, initialStudents, initialSubmissions } from '../dat
 import { canStartStudentExam } from './examStatus';
 import {
   canSubmitStudentAttempt,
+  createFreshStudentExamAttemptId,
   getStudentAttemptStagingKey,
   isDemoSubmissionRetry,
   recordStudentSubmission,
@@ -30,14 +31,24 @@ test('completed demo exam can be entered and submitted after the real schedule a
   assert.equal(canSubmitStudentAttempt(exam, afterExam, false, true, false), false);
 });
 
-test('new demo attempt uses a fresh staging key without touching old staged uploads', () => {
-  const originalKey = getStudentAttemptStagingKey(exam.id, student.id, true, false, 'one', false);
-  const firstRetryKey = getStudentAttemptStagingKey(exam.id, student.id, true, false, 'one', true);
-  const secondRetryKey = getStudentAttemptStagingKey(exam.id, student.id, true, false, 'two', true);
-  assert.equal(originalKey, `${exam.id}:${student.id}`);
-  assert.notEqual(firstRetryKey, originalKey);
-  assert.notEqual(secondRetryKey, firstRetryKey);
-  assert.equal(getStudentAttemptStagingKey(exam.id, student.id, false, false, 'one', true), originalKey);
+test('fresh login and demo retry use new student/exam-scoped upload workspaces', () => {
+  const firstAttemptId = createFreshStudentExamAttemptId();
+  const secondAttemptId = createFreshStudentExamAttemptId();
+  assert.notEqual(firstAttemptId, secondAttemptId);
+
+  const firstKey = getStudentAttemptStagingKey(exam.id, student.id, firstAttemptId);
+  const currentFiles = new Map([[firstKey, ['answer_1.py', 'answer_2.py']]]);
+  const sameAttemptKey = getStudentAttemptStagingKey(exam.id, student.id, firstAttemptId);
+  const retryKey = getStudentAttemptStagingKey(exam.id, student.id, secondAttemptId);
+  const anotherStudentKey = getStudentAttemptStagingKey(exam.id, 'std_other', firstAttemptId);
+  const anotherExamKey = getStudentAttemptStagingKey('exam_other', student.id, firstAttemptId);
+
+  assert.deepEqual(currentFiles.get(sameAttemptKey), ['answer_1.py', 'answer_2.py']);
+  assert.equal(currentFiles.get(retryKey), undefined);
+  assert.equal(currentFiles.get(anotherStudentKey), undefined);
+  assert.equal(currentFiles.get(anotherExamKey), undefined);
+  assert.deepEqual(currentFiles.get(firstKey), ['answer_1.py', 'answer_2.py']);
+  assert.notEqual(retryKey, `${exam.id}:${student.id}`);
 });
 
 test('demo submissions can repeat indefinitely while canonical submission and master data stay unchanged', () => {

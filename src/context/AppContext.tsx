@@ -38,7 +38,7 @@ import {
 import { getTranslation } from '../i18n/translations';
 import { canAdjustExamTime, canEditExamSeats, canEditExamSetup, canReopenExamSubmissions, getEffectiveExamStatus } from '../services/examStatus';
 import { getEffectiveNow } from '../services/demoTime';
-import { canSubmitStudentAttempt, demoSubmissionStorageKey, isDemoSubmissionRetry, recordStudentSubmission } from '../services/studentDemoRetry';
+import { canSubmitStudentAttempt, createFreshStudentExamAttemptId, demoSubmissionStorageKey, isDemoSubmissionRetry, recordStudentSubmission } from '../services/studentDemoRetry';
 import { useExamClock } from '../utils/useExamClock';
 import { getAdminRouteFromHash } from '../utils/adminRoutes';
 import { AcademicInput, AcademicResult, AcademicState, AcademicTier } from '../types/academic';
@@ -97,6 +97,8 @@ interface AppContextType {
   setCurrentAdmin: (admin: Admin | null) => void;
   currentExamId: string;
   setCurrentExamId: (id: string) => void;
+  studentExamAttemptId: string;
+  startStudentExamAttempt: (student: Student, examId: string) => void;
 
   // Frontend-only authentication mock state
   mockAuthUsers: MockAuthUser[];
@@ -331,6 +333,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [currentTeacher, setCurrentTeacher] = useState<Teacher | null>(teachers[0] || null);
   const [currentAdmin, setCurrentAdmin] = useState<Admin | null>(initialAdmins[0]);
   const [currentExamId, setCurrentExamId] = useState<string>('exam_0001');
+  const [studentExamAttemptId, setStudentExamAttemptId] = useState(createFreshStudentExamAttemptId);
+  const startStudentExamAttempt = (student: Student, examId: string) => {
+    setStudentExamAttemptId(createFreshStudentExamAttemptId());
+    setCurrentStudent(student);
+    setCurrentExamId(examId);
+    setActiveStudentStep('ST1');
+    setRole('student');
+  };
   const courses = useMemo(() => role === 'teacher' ? coursesForTeacher(storedCourses, currentTeacher?.id)
     : role === 'student' ? coursesForStudent(storedCourses, derivedCurrentStudent, storedExamSessions, examNow) : storedCourses,
   [role, storedCourses, currentTeacher?.id, derivedCurrentStudent, storedExamSessions, examNow]);
@@ -1119,6 +1129,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setCurrentTeacher(migratedTeachers[0]);
     setCurrentAdmin(initialAdmins[0]);
     setCurrentExamId('exam_0001');
+    setStudentExamAttemptId(createFreshStudentExamAttemptId());
     setActiveStudentStep('ST1');
     showToast('รีเซ็ตข้อมูลแล้ว', 'คืนค่าข้อมูลทั้งหมดเป็นข้อมูลเริ่มต้นเรียบร้อยแล้ว', 'info');
   };
@@ -1154,6 +1165,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setCurrentAdmin,
         currentExamId,
         setCurrentExamId,
+        studentExamAttemptId,
+        startStudentExamAttempt,
 
         mockAuthUsers,
         completeMockRegistration,

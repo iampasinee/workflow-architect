@@ -21,19 +21,14 @@ export const isDemoSubmissionRetry = (
   demoMode = FRONTEND_DEMO_MODE,
 ): boolean => demoMode && hasFinalSubmission && !hasActiveReopening;
 
+export const createFreshStudentExamAttemptId = (): string =>
+  globalThis.crypto?.randomUUID?.() || `attempt_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+
 export const getStudentAttemptStagingKey = (
   examId: string,
   studentId: string,
-  hasFinalSubmission: boolean,
-  hasActiveReopening: boolean,
   attemptId: string,
-  demoMode = FRONTEND_DEMO_MODE,
-): string => {
-  const baseKey = `${examId}:${studentId}`;
-  return isDemoSubmissionRetry(hasFinalSubmission, hasActiveReopening, demoMode)
-    ? `${baseKey}:demo:${attemptId}`
-    : baseKey;
-};
+): string => `${examId}:${studentId}:attempt:${attemptId}`;
 
 export const recordStudentSubmission = (
   canonical: Submission[],

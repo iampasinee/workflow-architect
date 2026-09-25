@@ -73,6 +73,7 @@ export const ExamSessionView: React.FC = () => {
     students,
     examSessions,
     currentExamId,
+    studentExamAttemptId,
     courses,
     rooms,
     seatAssignments,
@@ -192,10 +193,9 @@ export const ExamSessionView: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadTimersRef = useRef<Map<string, number>>(new Map());
   const graceTimerRef = useRef<number | null>(null);
-  const [demoAttemptId] = useState(() => globalThis.crypto?.randomUUID?.() || `attempt_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`);
   const stagingSessionKey = getStudentAttemptStagingKey(
     activeExam?.id || 'no-exam', currentStudent?.id || 'no-student',
-    hasFinalSubmission, hasActiveReopening, demoAttemptId,
+    studentExamAttemptId,
   );
   const canUpload = hasUploadPermission && (!isTimeExpired || hasActiveReopening);
 
@@ -272,6 +272,7 @@ export const ExamSessionView: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false;
+    setStagedFiles([]);
     setStagingLoaded(false);
 
     getStagedUploads(stagingSessionKey)

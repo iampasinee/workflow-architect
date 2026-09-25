@@ -22,10 +22,9 @@ export const LoginLanding: React.FC = () => {
   const now = useExamClock();
   const {
     setRole,
+    startStudentExamAttempt,
     setActiveAdminRoute,
     setActiveTeacherRoute,
-    setActiveStudentStep,
-    setCurrentStudent,
     setCurrentTeacher,
     setCurrentAdmin,
     students,
@@ -33,7 +32,6 @@ export const LoginLanding: React.FC = () => {
     admins,
     examSessions,
     submissions,
-    setCurrentExamId,
     mockAuthUsers,
     showToast,
   } = useApp();
@@ -67,11 +65,8 @@ export const LoginLanding: React.FC = () => {
         setLoginError('บัญชีนักศึกษาไม่พร้อมเข้าใช้งาน กรุณาติดต่อผู้ดูแลระบบ');
         return;
       }
-      setCurrentStudent(student);
       const selectedExam = getDefaultExam();
-      if (selectedExam) setCurrentExamId(selectedExam.id);
-      setActiveStudentStep('ST1');
-      setRole('student');
+      startStudentExamAttempt(student, selectedExam?.id || 'exam_0001');
       showToast('เข้าสู่ระบบ Mockup สำเร็จ', `ยินดีต้อนรับ ${student.fullName}`, 'success');
       return;
     }
@@ -137,11 +132,8 @@ export const LoginLanding: React.FC = () => {
     const student = type === 'student_first_time'
       ? students.find((item) => item.isFirstTime) || students[3]
       : defaultUploadStudent;
-    setRole('student');
-    if (student) setCurrentStudent(student);
     const selectedExam = getDefaultExam();
-    if (selectedExam) setCurrentExamId(selectedExam.id);
-    setActiveStudentStep('ST1');
+    if (student) startStudentExamAttempt(student, selectedExam?.id || 'exam_0001');
   };
 
   if (view === 'register') {

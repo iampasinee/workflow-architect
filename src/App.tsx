@@ -49,6 +49,9 @@ import {
 const MainRouter: React.FC = () => {
   const {
     role,
+    currentStudent,
+    currentExamId,
+    studentExamAttemptId,
     activeStudentStep,
     activeTeacherRoute,
     activeAdminRoute,
@@ -123,7 +126,7 @@ const MainRouter: React.FC = () => {
         {(activeStudentStep === 'ST4' ||
           activeStudentStep === 'ST5' ||
           activeStudentStep === 'ST6' ||
-          activeStudentStep === 'ST7') && <ExamSessionView />}
+          activeStudentStep === 'ST7') && <ExamSessionView key={`${currentStudent?.id}:${currentExamId}:${studentExamAttemptId}`} />}
       </div>
     );
   }
