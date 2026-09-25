@@ -18,8 +18,11 @@ import {
 import { Badge } from '../common/Badge';
 import { Modal } from '../common/Modal';
 import { formatFileSize } from '../../utils/fileSize';
+import { examStatusLabels, getEffectiveExamStatus } from '../../services/examStatus';
+import { useExamClock } from '../../utils/useExamClock';
 
 export const AnswerFileRepository: React.FC = () => {
+  const now = useExamClock();
   const {
     examSessions,
     courses,
@@ -125,6 +128,7 @@ export const AnswerFileRepository: React.FC = () => {
               const course = courses.find((c) => c.id === session.courseId);
               const room = rooms.find((r) => r.id === session.roomId);
               const subsCount = submissions.filter((s) => s.examId === session.id).length;
+              const status = getEffectiveExamStatus(session, now);
 
               return (
                 <div
@@ -137,11 +141,7 @@ export const AnswerFileRepository: React.FC = () => {
                       {course?.courseCode} • {isThai ? 'ตอน ' : 'Sec '}
                       {session.sectionNo}
                     </span>
-                    {session.status === 'completed' ? (
-                      <Badge variant="neutral">{isThai ? 'จัดเก็บแล้ว' : 'Archived'}</Badge>
-                    ) : (
-                      <Badge variant="success">{isThai ? 'กำลังสอบ / เปิดอยู่' : 'Active / Open'}</Badge>
-                    )}
+                    <Badge variant={status === 'completed' ? 'neutral' : status === 'upcoming' ? 'warning' : 'success'}>{examStatusLabels[status]}</Badge>
                   </div>
 
                   <h3 className="text-base font-bold text-gray-900 group-hover:text-blue-600 transition-colors">

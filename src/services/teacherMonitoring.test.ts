@@ -4,9 +4,11 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { Course, ExamSession, Room } from '../types';
 import { MonitoringCalendar } from '../components/teacher/MonitoringCalendar';
+import { MonitoringExamStatusBadge } from '../components/teacher/LiveExamMonitoring';
 import {
   clearMonitoringFilters,
   defaultMonitoringView,
+  deriveExamDisplayStatus,
   filterMonitoringExams,
   findAuthorizedMonitoringExam,
   formatMonitoringExamCount,
@@ -67,7 +69,7 @@ const exam = (
 
 const sessions = [
   exam('exam-a', 'course-a', '1', '2026-09-25', 'room-a', 'in_progress'),
-  exam('exam-b', 'course-b', '2', '2026-09-25', 'room-b', 'upcoming'),
+  { ...exam('exam-b', 'course-b', '2', '2026-09-25', 'room-b', 'upcoming'), startTime: '13:00', endTime: '16:00' },
   exam('exam-c', 'course-a', '1', '2026-09-25', 'room-b', 'completed'),
   exam('exam-other-day', 'course-a', '1', '2026-09-26', 'room-a', 'upcoming'),
   exam('exam-other-teacher', 'course-a', '9', '2026-09-25', 'room-a', 'upcoming'),
@@ -77,6 +79,49 @@ const rooms = [
   { id: 'room-a', labName: 'B4-08' },
   { id: 'room-b', labName: 'B4-09' },
 ] as Room[];
+
+const referenceNow = new Date(2026, 8, 25, 10, 0);
+
+test('display status uses full local exam date and time over stale canonical status', () => {
+  const scheduled = exam('scheduled', 'course-a', '1', '2026-09-15', 'room-a', 'in_progress');
+  scheduled.endTime = '11:00';
+
+  assert.equal(deriveExamDisplayStatus(scheduled, new Date(2026, 8, 15, 8, 59)), 'upcoming');
+  assert.equal(deriveExamDisplayStatus(scheduled, new Date(2026, 8, 15, 9, 0)), 'in_progress');
+  assert.equal(deriveExamDisplayStatus(scheduled, new Date(2026, 8, 15, 11, 0)), 'in_progress');
+  assert.equal(deriveExamDisplayStatus(scheduled, new Date(2026, 8, 15, 11, 1)), 'completed');
+  assert.equal(deriveExamDisplayStatus(scheduled, new Date(2026, 8, 16, 8, 0)), 'completed');
+  assert.equal(deriveExamDisplayStatus({ ...scheduled, examDate: '2026-09-16' }, new Date(2026, 8, 15, 12, 0)), 'upcoming');
+  assert.equal(deriveExamDisplayStatus({ ...scheduled, status: 'upcoming' }, new Date(2026, 8, 15, 10, 0)), 'in_progress');
+  assert.equal(deriveExamDisplayStatus({ ...scheduled, status: 'completed' }, new Date(2026, 8, 15, 8, 0)), 'completed');
+});
+
+test('daily counters and status filters move an ended exam together', () => {
+  const endedExam = {
+    ...exam('ended', 'course-a', '1', '2026-09-15', 'room-a', 'in_progress'),
+    endTime: '11:00',
+  };
+  const authorized = getAuthorizedMonitoringExams([endedExam], courses);
+  const filters = { date: '2026-09-15', status: 'in_progress' as const, courseId: '', roomId: '', search: '' };
+  const duringExam = new Date(2026, 8, 15, 10, 59);
+  const afterExam = new Date(2026, 8, 15, 11, 1);
+
+  assert.deepEqual(getMonitoringStatusCounts(authorized, filters.date, duringExam), {
+    all: 1, upcoming: 0, in_progress: 1, completed: 0,
+  });
+  assert.deepEqual(filterMonitoringExams(authorized, rooms, filters, duringExam).map(({ exam: item }) => item.id), ['ended']);
+  assert.deepEqual(getMonitoringStatusCounts(authorized, filters.date, afterExam), {
+    all: 1, upcoming: 0, in_progress: 0, completed: 1,
+  });
+  assert.deepEqual(filterMonitoringExams(authorized, rooms, filters, afterExam), []);
+  assert.deepEqual(filterMonitoringExams(authorized, rooms, { ...filters, status: 'completed' }, afterExam).map(({ exam: item }) => item.id), ['ended']);
+  assert.equal(deriveExamDisplayStatus(endedExam, afterExam), 'completed');
+  const cardBadge = renderToStaticMarkup(React.createElement(MonitoringExamStatusBadge, { exam: endedExam, now: afterExam }));
+  const detailBadge = renderToStaticMarkup(React.createElement(MonitoringExamStatusBadge, { exam: endedExam, now: afterExam, compact: true }));
+  assert.match(cardBadge, /เสร็จสิ้น/);
+  assert.match(detailBadge, /เสร็จสิ้น/);
+  assert.doesNotMatch(cardBadge + detailBadge, /กำลังสอบ/);
+});
 
 test('selected date defaults to a local YYYY-MM-DD value', () => {
   assert.equal(getLocalDateInputValue(new Date(2026, 8, 25, 23, 30)), '2026-09-25');
@@ -92,7 +137,7 @@ test('daily overview includes every authorized exam on the selected date', () =>
   const authorized = getAuthorizedMonitoringExams(sessions, courses);
   const result = filterMonitoringExams(authorized, rooms, {
     date: '2026-09-25', status: 'all', courseId: '', roomId: '', search: '',
-  });
+  }, referenceNow);
   assert.deepEqual(result.map(({ exam: item }) => item.id), ['exam-a', 'exam-b', 'exam-c']);
 });
 
@@ -100,7 +145,7 @@ test('status, Course, Room and search filters remain independent', () => {
   const authorized = getAuthorizedMonitoringExams(sessions, courses);
   const base = { date: '2026-09-25', status: 'all' as const, courseId: '', roomId: '', search: '' };
 
-  assert.deepEqual(filterMonitoringExams(authorized, rooms, { ...base, status: 'in_progress' }).map((item) => item.exam.id), ['exam-a']);
+  assert.deepEqual(filterMonitoringExams(authorized, rooms, { ...base, status: 'in_progress' }, referenceNow).map((item) => item.exam.id), ['exam-a']);
   assert.deepEqual(filterMonitoringExams(authorized, rooms, { ...base, courseId: 'course-b' }).map((item) => item.exam.id), ['exam-b']);
   assert.deepEqual(filterMonitoringExams(authorized, rooms, { ...base, roomId: 'room-b' }).map((item) => item.exam.id), ['exam-b', 'exam-c']);
   assert.deepEqual(filterMonitoringExams(authorized, rooms, { ...base, search: 'network' }).map((item) => item.exam.id), ['exam-a', 'exam-c']);
@@ -123,7 +168,7 @@ test('schedule summaries count only authorized exams without live-status categor
   assert.equal(summaries.find(({ date }) => date === '2026-09-22'), undefined);
   assert.equal(formatMonitoringExamCount(1), '1 รอบ');
   assert.equal(formatMonitoringExamCount(3), '3 รอบ');
-  assert.deepEqual(getMonitoringStatusCounts(authorized, '2026-09-25'), {
+  assert.deepEqual(getMonitoringStatusCounts(authorized, '2026-09-25', referenceNow), {
     all: 3, in_progress: 1, upcoming: 1, completed: 1,
   });
 });
@@ -175,7 +220,7 @@ test('full calendar renders only session counts, including quick dates, without 
 test('status counter filtering, rich search and clear filters preserve the selected date', () => {
   const authorized = getAuthorizedMonitoringExams(sessions, courses);
   const base = { date: '2026-09-25', status: 'all' as const, courseId: '', roomId: '', search: '' };
-  assert.deepEqual(filterMonitoringExams(authorized, rooms, { ...base, status: 'completed' }).map((item) => item.exam.id), ['exam-c']);
+  assert.deepEqual(filterMonitoringExams(authorized, rooms, { ...base, status: 'completed' }, referenceNow).map((item) => item.exam.id), ['exam-c']);
   assert.deepEqual(filterMonitoringExams(authorized, rooms, { ...base, search: 'Section 2' }).map((item) => item.exam.id), ['exam-b']);
   assert.deepEqual(clearMonitoringFilters({ ...base, status: 'in_progress', courseId: 'course-a', roomId: 'room-a', search: 'NET' }), base);
 });

@@ -22,11 +22,12 @@ import {
 } from 'lucide-react';
 import { Badge, ExamSubmissionStatusBadge } from '../common/Badge';
 import { Modal } from '../common/Modal';
-import { ExamSessionStatus, Student, Violation, StudentExamStatus } from '../../types';
+import { ExamSession, ExamSessionStatus, Student, Violation, StudentExamStatus } from '../../types';
 import { studentMatchesExamSection } from '../../services/courseState';
 import {
   clearMonitoringFilters,
   defaultMonitoringView,
+  deriveExamDisplayStatus,
   filterMonitoringExams,
   getAuthorizedMonitoringExams,
   getLocalDateInputValue,
@@ -36,8 +37,11 @@ import {
 } from '../../services/teacherMonitoring';
 import { MonitoringCalendar } from './MonitoringCalendar';
 import { MonitoringDatePickerPopover } from './MonitoringDatePickerPopover';
+import { useExamClock } from '../../utils/useExamClock';
+import { canAdjustExamTime, canReopenExamSubmissions, examStatusLabels } from '../../services/examStatus';
 
 export const LiveExamMonitoring: React.FC = () => {
+  const now = useExamClock();
   const [selectedExamSessionId, setSelectedExamSessionId] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState(() => getLocalDateInputValue());
   const [monitoringView, setMonitoringView] = useState<MonitoringView>(defaultMonitoringView);
@@ -50,6 +54,7 @@ export const LiveExamMonitoring: React.FC = () => {
     return (
       <ExamMonitoringDetail
         examSessionId={selectedExamSessionId}
+        now={now}
         onBack={() => setSelectedExamSessionId(null)}
       />
     );
@@ -57,6 +62,7 @@ export const LiveExamMonitoring: React.FC = () => {
 
   return (
     <DailyExamOverview
+      now={now}
       selectedDate={selectedDate}
       monitoringView={monitoringView}
       statusFilter={statusFilter}
@@ -74,16 +80,19 @@ export const LiveExamMonitoring: React.FC = () => {
   );
 };
 
-const statusLabels: Record<ExamSessionStatus, string> = {
-  upcoming: 'กำลังจะเริ่ม',
-  in_progress: 'กำลังสอบ',
-  completed: 'เสร็จสิ้น',
-};
-
 const statusStyles: Record<ExamSessionStatus, string> = {
   upcoming: 'border-amber-200 bg-amber-50 text-amber-700',
   in_progress: 'border-emerald-200 bg-emerald-50 text-emerald-700',
   completed: 'border-slate-200 bg-slate-100 text-slate-600',
+};
+
+export const MonitoringExamStatusBadge: React.FC<{
+  exam: ExamSession;
+  now: Date;
+  compact?: boolean;
+}> = ({ exam, now, compact = false }) => {
+  const status = deriveExamDisplayStatus(exam, now);
+  return <span className={`inline-flex shrink-0 items-center gap-1 rounded-full border font-semibold ${compact ? 'px-2 py-0.5' : 'px-3 py-1 text-[11px] font-bold'} ${statusStyles[status]}`}>{!compact && <span className="h-2 w-2 rounded-full bg-current opacity-70" />}{examStatusLabels[status]}</span>;
 };
 
 const formatThaiDate = (date: string) => date
@@ -95,6 +104,7 @@ const formatThaiDate = (date: string) => date
   : 'ยังไม่เลือกวันที่';
 
 interface DailyExamOverviewProps {
+  now: Date;
   selectedDate: string;
   monitoringView: MonitoringView;
   statusFilter: 'all' | ExamSessionStatus;
@@ -111,6 +121,7 @@ interface DailyExamOverviewProps {
 }
 
 const DailyExamOverview: React.FC<DailyExamOverviewProps> = ({
+  now,
   selectedDate,
   monitoringView,
   statusFilter,
@@ -141,7 +152,7 @@ const DailyExamOverview: React.FC<DailyExamOverviewProps> = ({
     courseId: courseFilter,
     roomId: roomFilter,
     search: searchTerm,
-  }), [authorizedExams, courseFilter, roomFilter, rooms, searchTerm, selectedDate, statusFilter]);
+  }, now), [authorizedExams, courseFilter, now, roomFilter, rooms, searchTerm, selectedDate, statusFilter]);
 
   const availableCourses = useMemo(() => Array.from(new Map(
     examsOnSelectedDate.map(({ course }) => [course.id, course]),
@@ -153,7 +164,7 @@ const DailyExamOverview: React.FC<DailyExamOverviewProps> = ({
     }).filter((entry): entry is [string, typeof rooms[number]] => Boolean(entry)),
   ).values()), [examsOnSelectedDate, rooms]);
 
-  const statusCounts = getMonitoringStatusCounts(examsOnSelectedDate);
+  const statusCounts = getMonitoringStatusCounts(examsOnSelectedDate, selectedDate, now);
 
   const renderExamCard = ({ exam, course, section }: TeacherMonitoringExam) => {
     const room = rooms.find((candidate) => candidate.id === exam.roomId);
@@ -175,7 +186,7 @@ const DailyExamOverview: React.FC<DailyExamOverviewProps> = ({
             <span className="rounded-md bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-600">Section {exam.sectionNo}</span>
             <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold ${isPrimaryTeacher ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>{isPrimaryTeacher ? 'อาจารย์ผู้สอนหลัก' : 'อาจารย์ร่วมสอน'}</span>
           </div>
-          <span className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-1 text-[11px] font-bold ${statusStyles[exam.status]}`}><span className="h-2 w-2 rounded-full bg-current opacity-70" />{statusLabels[exam.status]}</span>
+          <MonitoringExamStatusBadge exam={exam} now={now} />
         </div>
 
         <h2 className="mt-2 truncate text-sm font-bold text-gray-950 sm:text-base">{course.courseName}</h2>
@@ -266,10 +277,11 @@ const DailyExamOverview: React.FC<DailyExamOverviewProps> = ({
 
 interface ExamMonitoringDetailProps {
   examSessionId: string;
+  now: Date;
   onBack: () => void;
 }
 
-const ExamMonitoringDetail: React.FC<ExamMonitoringDetailProps> = ({ examSessionId, onBack }) => {
+const ExamMonitoringDetail: React.FC<ExamMonitoringDetailProps> = ({ examSessionId, now, onBack }) => {
   const {
     examSessions,
     courses,
@@ -343,6 +355,8 @@ const ExamMonitoringDetail: React.FC<ExamMonitoringDetailProps> = ({ examSession
   }
 
   const section = course.sections.find((candidate) => candidate.sectionNo === activeExam.sectionNo);
+  const canAdjustTime = canAdjustExamTime(activeExam, now);
+  const canReopen = canReopenExamSubmissions(activeExam, now);
   const eligibleStudentCount = section
     ? students.filter((student) => studentMatchesExamSection(student, activeExam, section)).length
     : 0;
@@ -405,7 +419,7 @@ const ExamMonitoringDetail: React.FC<ExamMonitoringDetailProps> = ({ examSession
 
   const handleApplyTimeControl = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!timeControlReason) return;
+    if (!timeControlReason || !canAdjustExamTime(activeExam, new Date())) return;
     adjustExamTime(
       activeExam.id,
       timeControlDelta,
@@ -418,7 +432,7 @@ const ExamMonitoringDetail: React.FC<ExamMonitoringDetailProps> = ({ examSession
 
   const handleApplyReopen = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!reopenReason) return;
+    if (!reopenReason || !canReopenExamSubmissions(activeExam, new Date())) return;
     reopenSubmission(
       activeExam.id,
       reopenMinutes,
@@ -504,39 +518,42 @@ const ExamMonitoringDetail: React.FC<ExamMonitoringDetailProps> = ({ examSession
             <span>{activeExam.startTime} - {activeExam.endTime}</span>
             <span>{activeExam.durationMinutes} นาที</span>
             <span>ห้อง {room.labName}</span>
-            <span className={`rounded-full border px-2 py-0.5 font-semibold ${statusStyles[activeExam.status]}`}>{statusLabels[activeExam.status]}</span>
+            <MonitoringExamStatusBadge exam={activeExam} now={now} compact />
           </div>
         </div>
 
         {/* Global Time Controls Button Group */}
         <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
           <button
+            disabled={!canAdjustTime}
             onClick={() => {
               setTimeControlDelta(5);
               setTimeControlScope('room');
               setShowTimeControlModal(true);
             }}
-            className="px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+            className="px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>{isThai ? '+5 นาที (ทั้งห้อง)' : '+5 Min (Room)'}</span>
           </button>
 
           <button
+            disabled={!canAdjustTime}
             onClick={() => {
               setTimeControlDelta(-5);
               setTimeControlScope('room');
               setShowTimeControlModal(true);
             }}
-            className="px-3 py-2 rounded-xl border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 text-xs font-semibold shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+            className="px-3 py-2 rounded-xl border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 text-xs font-semibold shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Minus className="w-3.5 h-3.5" />
             <span>{isThai ? '-5 นาที' : '-5 Min'}</span>
           </button>
 
           <button
+            disabled={!canReopen}
             onClick={() => setShowReopenModal(true)}
-            className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+            className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             <span>{isThai ? 'เปิดรับส่งข้อสอบใหม่' : 'Reopen Submission'}</span>
@@ -946,6 +963,7 @@ const ExamMonitoringDetail: React.FC<ExamMonitoringDetailProps> = ({ examSession
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
+                  disabled={!canAdjustTime}
                   onClick={() => {
                     adjustExamTime(
                       activeExam.id,
@@ -956,12 +974,13 @@ const ExamMonitoringDetail: React.FC<ExamMonitoringDetailProps> = ({ examSession
                     );
                     setSelectedStudentForDetail(null);
                   }}
-                  className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-[11px] cursor-pointer"
+                  className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-[11px] cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {isThai ? '+5 นาที (นักศึกษาคนนี้)' : '+5 Mins (This Student)'}
                 </button>
                 <button
                   type="button"
+                  disabled={!canReopen}
                   onClick={() => {
                     reopenSubmission(
                       activeExam.id,
@@ -972,7 +991,7 @@ const ExamMonitoringDetail: React.FC<ExamMonitoringDetailProps> = ({ examSession
                     );
                     setSelectedStudentForDetail(null);
                   }}
-                  className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-semibold text-[11px] cursor-pointer"
+                  className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-semibold text-[11px] cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {isThai ? 'เปิดรับส่งข้อสอบใหม่ (+15 นาที)' : 'Reopen Submission (+15m)'}
                 </button>

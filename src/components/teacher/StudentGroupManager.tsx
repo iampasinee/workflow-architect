@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { ArrowLeft, ArrowRight, BookOpen, Search, UserCheck, UserPlus, Users } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { getEffectiveExamStatus } from '../../services/examStatus';
+import { useExamClock } from '../../utils/useExamClock';
 import { searchStudentsByIdentity, sectionIdOf, studentMatchesExamSection, studentMatchesSection } from '../../services/courseState';
 import { calculateYearLevelFromAdmissionYear, getAdmissionCode } from '../../utils/academicYear';
 import { AccountStatusBadge, ExamSubmissionStatusBadge } from '../common/Badge';
@@ -8,6 +10,7 @@ import { Modal } from '../common/Modal';
 import type { Course, Section, Student } from '../../types';
 
 export const StudentGroupManager: React.FC = () => {
+  const now = useExamClock();
   const { academicState, courses, currentTeacher, students, studentDirectory, teachers, examSessions, submissions, addStudentToSection, moveStudentBetweenSections, findStudentSectionInCourse } = useApp();
   const [courseId, setCourseId] = useState('');
   const [sectionId, setSectionId] = useState('');
@@ -22,8 +25,8 @@ export const StudentGroupManager: React.FC = () => {
   const selectedCourse = courses.find((course) => course.id === courseId);
   const assignments = selectedCourse?.sections.map((section) => ({ section, id: sectionIdOf(selectedCourse.id, section) })) || [];
   const selectedSection = assignments.find((item) => item.id === sectionId)?.section;
-  const selectedExam = examSessions.find((exam) => exam.courseId === courseId && exam.sectionNo === selectedSection?.sectionNo && exam.status === 'in_progress') ||
-    examSessions.find((exam) => exam.courseId === courseId && exam.sectionNo === selectedSection?.sectionNo && exam.status === 'upcoming') ||
+  const selectedExam = examSessions.find((exam) => exam.courseId === courseId && exam.sectionNo === selectedSection?.sectionNo && getEffectiveExamStatus(exam, now) === 'in_progress') ||
+    examSessions.find((exam) => exam.courseId === courseId && exam.sectionNo === selectedSection?.sectionNo && getEffectiveExamStatus(exam, now) === 'upcoming') ||
     examSessions.find((exam) => exam.courseId === courseId && exam.sectionNo === selectedSection?.sectionNo);
   const roster = useMemo(() => selectedSection ? students.filter((student) => studentMatchesSection(student, selectedSection)) : [], [students, selectedSection]);
   const filteredRoster = useMemo(() => searchStudentsByIdentity(roster, rosterSearch), [roster, rosterSearch]);
@@ -115,7 +118,7 @@ export const StudentGroupManager: React.FC = () => {
             <td className="px-4 py-3"><p className="font-semibold text-gray-900">{student.fullName}</p><p className="text-[11px] text-gray-500">{student.email}</p></td>
             <td className="px-4 py-3 text-gray-700">{studentContext(student)}</td>
             <td className="px-4 py-3 text-gray-700">{student.admissionYear ? `ปีเข้า ${getAdmissionCode(student.admissionYear)}` : '—'}<p className="text-[11px] text-gray-500">{level?.formattedYearLevel || '—'}</p></td>
-            <td className="px-4 py-3"><AccountStatusBadge status={student.accountStatus} /><div className="mt-1">{eligibleForExam ? <ExamSubmissionStatusBadge status={submission?.status === 'submitted' || submission?.status === 'late' ? submission.status : selectedExam?.status === 'in_progress' ? 'in_progress' : 'not_started'} /> : <span className="text-[11px] text-gray-400">ไม่มีการสอบล่าสุด</span>}</div></td>
+            <td className="px-4 py-3"><AccountStatusBadge status={student.accountStatus} /><div className="mt-1">{eligibleForExam ? <ExamSubmissionStatusBadge status={submission?.status === 'submitted' || submission?.status === 'late' ? submission.status : selectedExam && getEffectiveExamStatus(selectedExam, now) === 'in_progress' ? 'in_progress' : 'not_started'} /> : <span className="text-[11px] text-gray-400">ไม่มีการสอบล่าสุด</span>}</div></td>
             <td className="px-4 py-3"><button type="button" onClick={() => openMove(student.id)} disabled={!destinations.length} className="rounded-lg px-2 py-1 font-semibold text-blue-700 hover:bg-blue-50 disabled:text-gray-400">ย้าย</button></td>
           </tr>;
         })}{!filteredRoster.length && <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-gray-500">ไม่พบนักศึกษาใน Section ที่เลือก</td></tr>}</tbody></table></div></div>

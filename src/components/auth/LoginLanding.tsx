@@ -7,6 +7,7 @@ import { getAdminRouteFromHash } from '../../utils/adminRoutes';
 import { AuthDomainNotice } from './AuthDomainNotice';
 import { MockGoogleAccountSelector } from './MockGoogleAccountSelector';
 import { MockRegistrationFlow } from './MockRegistrationFlow';
+import { getEffectiveExamStatus } from '../../services/examStatus';
 
 type AuthView = 'landing' | 'login' | 'register';
 
@@ -36,7 +37,8 @@ export const LoginLanding: React.FC = () => {
   const [loginError, setLoginError] = useState('');
   const [unregisteredUser, setUnregisteredUser] = useState<MockAuthUser | null>(null);
 
-  const activeExam = examSessions.find((exam) => exam.status === 'in_progress') || examSessions[0];
+  const getDefaultExam = () => examSessions.find((exam) => getEffectiveExamStatus(exam) === 'in_progress') || examSessions[0];
+  const activeExam = getDefaultExam();
   const defaultUploadStudent = students.find((student) => {
     if (student.accountStatus !== 'active') return false;
     const submission = submissions.find((item) => item.examId === activeExam?.id && item.studentId === student.id);
@@ -58,7 +60,8 @@ export const LoginLanding: React.FC = () => {
         return;
       }
       setCurrentStudent(student);
-      if (activeExam) setCurrentExamId(activeExam.id);
+      const selectedExam = getDefaultExam();
+      if (selectedExam) setCurrentExamId(selectedExam.id);
       setActiveStudentStep('ST1');
       setRole('student');
       showToast('เข้าสู่ระบบ Mockup สำเร็จ', `ยินดีต้อนรับ ${student.fullName}`, 'success');
@@ -123,7 +126,8 @@ export const LoginLanding: React.FC = () => {
       : defaultUploadStudent;
     setRole('student');
     if (student) setCurrentStudent(student);
-    if (activeExam) setCurrentExamId(activeExam.id);
+    const selectedExam = getDefaultExam();
+    if (selectedExam) setCurrentExamId(selectedExam.id);
     setActiveStudentStep('ST1');
   };
 

@@ -17,8 +17,11 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { Badge, MachineStatusBadge } from '../common/Badge';
+import { countEffectiveExamStatuses, examStatusLabels, getEffectiveExamStatus } from '../../services/examStatus';
+import { useExamClock } from '../../utils/useExamClock';
 
 export const TeacherDashboard: React.FC = () => {
+  const now = useExamClock();
   const {
     examSessions,
     courses,
@@ -34,12 +37,14 @@ export const TeacherDashboard: React.FC = () => {
   const isThai = language === 'th';
 
   // Session counts
-  const upcomingCount = examSessions.filter((e) => e.status === 'upcoming').length;
-  const inProgressCount = examSessions.filter((e) => e.status === 'in_progress').length;
-  const completedCount = examSessions.filter((e) => e.status === 'completed').length;
+  const upcomingExams = examSessions.filter((exam) => getEffectiveExamStatus(exam, now) === 'upcoming');
+  const { upcoming: upcomingCount, in_progress: inProgressCount, completed: completedCount } = countEffectiveExamStatuses(examSessions, now);
 
-  // Active in-progress exam (exam_0001)
-  const activeExam = examSessions.find((e) => e.status === 'in_progress') || examSessions[0];
+  // Prefer a live exam, then a future exam, then the first available record.
+  const activeExam = examSessions.find((exam) => getEffectiveExamStatus(exam, now) === 'in_progress') || upcomingExams[0] || examSessions[0];
+  const activeStatus = activeExam ? getEffectiveExamStatus(activeExam, now) : null;
+  const nextExam = [...upcomingExams].sort((first, second) => `${first.examDate}T${first.startTime}`.localeCompare(`${second.examDate}T${second.startTime}`))[0];
+  const nextCourse = courses.find((course) => course.id === nextExam?.courseId);
   const activeCourse = courses.find((c) => c.id === activeExam?.courseId);
   const activeRoom = rooms.find((r) => r.id === activeExam?.roomId);
 
@@ -49,7 +54,7 @@ export const TeacherDashboard: React.FC = () => {
   const examSubmissions = submissions.filter((s) => s.examId === activeExam?.id);
   const submittedCount = examSubmissions.filter((s) => s.status === 'submitted').length + 20; // 24 submitted as per mock PRD specs
   const lateCount = examSubmissions.filter((s) => s.status === 'late').length;
-  const workingCount = totalExaminees - submittedCount - lateCount;
+  const workingCount = activeStatus === 'in_progress' ? Math.max(totalExaminees - submittedCount - lateCount, 0) : 0;
 
   const examViolations = violations.filter((v) => v.examId === activeExam?.id);
   const violatedCount = new Set(examViolations.map((v) => v.studentId)).size;
@@ -82,7 +87,7 @@ export const TeacherDashboard: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             onClick={() => {
-              setCurrentExamId(activeExam.id);
+              if (activeExam) setCurrentExamId(activeExam.id);
               setActiveTeacherRoute('T5');
             }}
             className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-md transition-all flex items-center gap-2 cursor-pointer"
@@ -98,7 +103,7 @@ export const TeacherDashboard: React.FC = () => {
         {/* In Progress */}
         <div
           onClick={() => {
-            setCurrentExamId(activeExam.id);
+            if (activeExam) setCurrentExamId(activeExam.id);
             setActiveTeacherRoute('T5');
           }}
           className="p-5 rounded-2xl bg-blue-50/70 border border-blue-200 hover:border-blue-400 hover:shadow-md transition-all cursor-pointer group"
@@ -112,7 +117,7 @@ export const TeacherDashboard: React.FC = () => {
           </div>
           <div className="text-3xl font-bold text-blue-950 font-mono">{inProgressCount}</div>
           <div className="text-xs text-blue-700/80 mt-1">
-            {activeCourse?.courseCode} - {activeRoom?.labName} {isThai ? 'กำลังสอบขณะนี้' : 'Active Now'}
+            {inProgressCount ? `${activeCourse?.courseCode || '—'} - ${activeRoom?.labName || '—'} กำลังสอบขณะนี้` : 'ไม่มีการสอบที่กำลังดำเนินการ'}
           </div>
         </div>
 
@@ -129,7 +134,7 @@ export const TeacherDashboard: React.FC = () => {
           </div>
           <div className="text-3xl font-bold text-amber-950 font-mono">{upcomingCount}</div>
           <div className="text-xs text-amber-700/80 mt-1">
-            {isThai ? 'ถัดไป: CS402 วันที่ 22 ก.ย.' : 'Next: CS402 on Sept 22'}
+            {nextExam ? `ถัดไป: ${nextCourse?.courseCode || 'รายวิชา'} วันที่ ${nextExam.examDate}` : 'ยังไม่มีการสอบที่กำลังจะเริ่ม'}
           </div>
         </div>
 
@@ -162,9 +167,7 @@ export const TeacherDashboard: React.FC = () => {
               <Badge variant="purple" size="sm">
                 {isThai ? 'กลุ่ม' : 'Sec'} {activeExam?.sectionNo}
               </Badge>
-              <Badge variant="success" size="sm">
-                {isThai ? 'กำลังสอบสด' : 'Live In Progress'}
-              </Badge>
+              {activeStatus && <Badge variant={activeStatus === 'in_progress' ? 'success' : activeStatus === 'upcoming' ? 'warning' : 'neutral'} size="sm">{examStatusLabels[activeStatus]}</Badge>}
             </div>
             <p className="text-xs text-gray-500 mt-1">
               {isThai ? 'ห้อง' : 'Room'} {activeRoom?.labName} • {activeExam?.startTime} - {activeExam?.endTime} ({activeExam?.durationMinutes} {isThai ? 'นาที' : 'min'})

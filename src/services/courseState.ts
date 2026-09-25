@@ -4,6 +4,7 @@ import { CourseInput, LocatedSection, SectionInput } from '../types/course';
 import { academicSettings } from '../utils/academicYear';
 import { isAcademicPathActive, legacyGroupToCohort } from './academicState';
 import { resolveAcademicGroupId } from '../data/academicStructure';
+import { getEffectiveExamStatus } from './examStatus';
 
 const stamp = '2026-09-17T00:00:00.000Z';
 export const courseOfferingSettings = { currentSemester: 1 as const };
@@ -243,17 +244,17 @@ export const searchStudentsByIdentity = (students: Student[], query: string): St
     `${student.studentCode} ${student.fullName} ${student.email}`.toLocaleLowerCase().includes(normalized)) : students;
 };
 
-export const studentMatchesExamSection = (student: Student, exam: ExamSession, section?: Course['sections'][number]) =>
-  exam.status !== 'upcoming' && exam.eligibleStudentIds
+export const studentMatchesExamSection = (student: Student, exam: ExamSession, section?: Course['sections'][number], now = new Date()) =>
+  getEffectiveExamStatus(exam, now) !== 'upcoming' && exam.eligibleStudentIds
     ? exam.eligibleStudentIds.includes(student.id)
     : studentMatchesSection(student, section);
 
 export const snapshotAffectedExamRosters = (
-  exams: ExamSession[], courses: Course[], students: Student[], affectedSectionIds: string[],
+  exams: ExamSession[], courses: Course[], students: Student[], affectedSectionIds: string[], now = new Date(),
 ): ExamSession[] => {
   const affected = new Set(affectedSectionIds);
   return exams.map((exam) => {
-    if (exam.status === 'upcoming' || exam.eligibleStudentIds) return exam;
+    if (getEffectiveExamStatus(exam, now) === 'upcoming' || exam.eligibleStudentIds) return exam;
     const course = courses.find((item) => item.id === exam.courseId);
     const section = course?.sections.find((item) => item.sectionNo === exam.sectionNo);
     if (!course || !section || !affected.has(sectionIdOf(course.id, section))) return exam;
@@ -394,9 +395,9 @@ export const coursesForTeacher = (courses: Course[], teacherId?: string) => !tea
   .map((course) => ({ ...course, sections: course.sections.filter((section) => (section.primaryTeacherId || section.teacherId) === teacherId || section.coTeacherIds?.includes(teacherId)) }))
   .filter((course) => course.sections.length);
 
-export const coursesForStudent = (courses: Course[], student?: Student | null, exams: ExamSession[] = []) =>
+export const coursesForStudent = (courses: Course[], student?: Student | null, exams: ExamSession[] = [], now = new Date()) =>
   !student ? [] : courses
     .map((course) => ({ ...course, sections: course.sections.filter((section) =>
       studentMatchesSection(student, section) || exams.some((exam) => exam.courseId === course.id && exam.sectionNo === section.sectionNo &&
-        exam.status !== 'upcoming' && exam.eligibleStudentIds?.includes(student.id))) }))
+        getEffectiveExamStatus(exam, now) !== 'upcoming' && exam.eligibleStudentIds?.includes(student.id))) }))
     .filter((course) => course.sections.length);

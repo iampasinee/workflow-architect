@@ -16,8 +16,11 @@ import {
   Info
 } from 'lucide-react';
 import { Badge, MachineStatusBadge } from '../common/Badge';
+import { canEditExamSeats } from '../../services/examStatus';
+import { useExamClock } from '../../utils/useExamClock';
 
 export const SeatAssignmentManager: React.FC = () => {
+  const now = useExamClock();
   const {
     examSessions,
     courses,
@@ -34,6 +37,7 @@ export const SeatAssignmentManager: React.FC = () => {
   const isThai = language === 'th';
 
   const activeExam = examSessions[0];
+  const canEditSeats = Boolean(activeExam && canEditExamSeats(activeExam, now));
   const room = rooms.find((r) => r.id === activeExam?.roomId) || rooms[0];
   const activeSection = courses.find((course) => course.id === activeExam?.courseId)?.sections
     .find((section) => section.sectionNo === activeExam?.sectionNo);
@@ -60,6 +64,7 @@ export const SeatAssignmentManager: React.FC = () => {
   );
 
   const handleSeatClick = (seatNo: string) => {
+    if (!canEditSeats) return;
     const station = room?.seats?.find((s) => s.seatNo === seatNo);
     if (station?.status === 'damaged' || station?.status === 'unavailable') {
       const statusText = station?.status?.toUpperCase() || 'UNAVAILABLE';
@@ -81,7 +86,7 @@ export const SeatAssignmentManager: React.FC = () => {
   };
 
   const handleAssignToSelected = (studentId: string) => {
-    if (!selectedSeatNo) return;
+    if (!selectedSeatNo || !canEditSeats) return;
     assignSeat(activeExam.id, selectedSeatNo, studentId);
     showToast(
       isThai ? 'จัดที่นั่งสำเร็จ' : 'Seat Assigned',
@@ -92,7 +97,7 @@ export const SeatAssignmentManager: React.FC = () => {
   };
 
   const handleUnassignCurrentSeat = () => {
-    if (!selectedSeatNo) return;
+    if (!selectedSeatNo || !canEditSeats) return;
     unassignSeat(activeExam.id, selectedSeatNo);
     showToast(
       isThai ? 'ยกเลิกการจัดที่นั่งแล้ว' : 'Seat Cleared',
@@ -126,11 +131,14 @@ export const SeatAssignmentManager: React.FC = () => {
         <div className="flex items-center gap-2 self-start sm:self-auto">
           <button
             onClick={() => autoAssignSeats(activeExam.id, room.id)}
-            className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-md transition-all flex items-center gap-2 cursor-pointer"
+            disabled={!canEditSeats}
+            className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-md transition-all flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Sparkles className="w-4 h-4 text-blue-200" />
             <span>{isThai ? 'จัดที่นั่งอัตโนมัติ' : 'Auto-Assign Active Examinees'}</span>
           </button>
+
+          {!canEditSeats && <span className="text-xs text-amber-700">การสอบสิ้นสุดแล้ว ไม่สามารถเปลี่ยนผังที่นั่งย้อนหลัง</span>}
 
           <button
             onClick={() => setActiveTeacherRoute('T5')}
@@ -265,7 +273,7 @@ export const SeatAssignmentManager: React.FC = () => {
           </div>
 
           {/* Selected Seat Controls */}
-          {selectedSeatNo && (
+          {selectedSeatNo && canEditSeats && (
             <div className="mt-6 p-4 rounded-xl bg-blue-50/80 border border-blue-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
               <div>
                 <strong className="text-blue-900 block font-semibold">
@@ -327,7 +335,7 @@ export const SeatAssignmentManager: React.FC = () => {
                     {std.admissionYear ? calculateYearLevelFromAdmissionYear(std.admissionYear).yearLevel || '—' : '—'}
                   </div>
 
-                  {selectedSeatNo ? (
+                  {selectedSeatNo && canEditSeats ? (
                     <button
                       onClick={() => handleAssignToSelected(std.id)}
                       className="mt-2 w-full py-1.5 px-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg text-[11px] transition-colors cursor-pointer"

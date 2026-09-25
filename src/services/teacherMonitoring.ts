@@ -1,4 +1,5 @@
 import type { Course, ExamSession, ExamSessionStatus, Room, Violation } from '../types';
+import { getEffectiveExamStatus } from './examStatus';
 
 export interface TeacherMonitoringExam {
   exam: ExamSession;
@@ -60,15 +61,19 @@ export const getAuthorizedMonitoringExams = (
   return course && section ? [{ exam, course, section }] : [];
 });
 
+export { getEffectiveExamStatus as deriveExamDisplayStatus } from './examStatus';
+
 export const getMonitoringStatusCounts = (
   exams: TeacherMonitoringExam[],
   date?: string,
+  now = new Date(),
 ): MonitoringStatusCounts => exams.reduce<MonitoringStatusCounts>((counts, { exam }) => {
   if (date && exam.examDate !== date) return counts;
+  const status = getEffectiveExamStatus(exam, now);
   return {
     ...counts,
     all: counts.all + 1,
-    [exam.status]: counts[exam.status] + 1,
+    [status]: counts[status] + 1,
   };
 }, { all: 0, upcoming: 0, in_progress: 0, completed: 0 });
 
@@ -156,12 +161,13 @@ export const filterMonitoringExams = (
   exams: TeacherMonitoringExam[],
   rooms: Room[],
   filters: TeacherMonitoringFilters,
+  now = new Date(),
 ): TeacherMonitoringExam[] => {
   const query = filters.search.trim().toLocaleLowerCase('th');
 
   return exams.filter(({ exam, course }) => {
     if (exam.examDate !== filters.date) return false;
-    if (filters.status !== 'all' && exam.status !== filters.status) return false;
+    if (filters.status !== 'all' && getEffectiveExamStatus(exam, now) !== filters.status) return false;
     if (filters.courseId && exam.courseId !== filters.courseId) return false;
     if (filters.roomId && exam.roomId !== filters.roomId) return false;
     if (!query) return true;

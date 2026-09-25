@@ -318,16 +318,26 @@ test('saved Section edits and migration preserve normalized overrides and stable
 });
 
 test('historical exam roster is frozen before override while upcoming exam stays dynamic', () => {
-  const baseExam = { ...initialExamSessions[0], courseId: enrollmentCourse.id, sectionNo: '1' };
+  const now = new Date(2026, 8, 25, 8, 0);
+  const baseExam = { ...initialExamSessions[0], courseId: enrollmentCourse.id, sectionNo: '1', examDate: '2026-09-25' };
   const historical = { ...baseExam, id: 'historical', status: 'completed' as const };
   const upcoming = { ...baseExam, id: 'future', status: 'upcoming' as const };
-  const frozen = snapshotAffectedExamRosters([historical, upcoming], [enrollmentCourse], students, ['section-enrollment-1']);
+  const frozen = snapshotAffectedExamRosters([historical, upcoming], [enrollmentCourse], students, ['section-enrollment-1'], now);
   assert.ok(frozen[0].eligibleStudentIds?.includes(enrollmentStudent.id));
   assert.equal(frozen[1].eligibleStudentIds, undefined);
   const moved = moveStudentBetweenSections([enrollmentCourse], students, enrollmentStudent.id, 'section-enrollment-1', 'section-enrollment-2', enrollmentTeacherId).courses!;
-  assert.equal(studentMatchesExamSection(enrollmentStudent, frozen[0], moved[0].sections[0]), true);
-  assert.equal(studentMatchesExamSection(enrollmentStudent, frozen[1], moved[0].sections[0]), false);
-  assert.ok(coursesForStudent(moved, enrollmentStudent, frozen).some((course) => course.sections.some((section) => section.id === 'section-enrollment-1')));
+  assert.equal(studentMatchesExamSection(enrollmentStudent, frozen[0], moved[0].sections[0], now), true);
+  assert.equal(studentMatchesExamSection(enrollmentStudent, frozen[1], moved[0].sections[0], now), false);
+  assert.ok(coursesForStudent(moved, enrollmentStudent, frozen, now).some((course) => course.sections.some((section) => section.id === 'section-enrollment-1')));
+});
+
+test('stale upcoming status cannot make an ended exam roster mutable', () => {
+  const now = new Date(2026, 8, 26, 8, 0);
+  const ended = { ...initialExamSessions[0], id: 'ended-stale', courseId: enrollmentCourse.id, sectionNo: '1', examDate: '2026-09-25', startTime: '09:00', endTime: '11:00', status: 'upcoming' as const };
+  const [frozen] = snapshotAffectedExamRosters([ended], [enrollmentCourse], students, ['section-enrollment-1'], now);
+  assert.ok(frozen.eligibleStudentIds?.includes(enrollmentStudent.id));
+  const moved = moveStudentBetweenSections([enrollmentCourse], students, enrollmentStudent.id, 'section-enrollment-1', 'section-enrollment-2', enrollmentTeacherId).courses!;
+  assert.equal(studentMatchesExamSection(enrollmentStudent, frozen, moved[0].sections[0], now), true);
 });
 
 test('ambiguous legacy exam Section number blocks unsafe individual roster changes', () => {

@@ -26,6 +26,8 @@ import {
   removeExamDraft,
 } from '../../services/examWizard';
 import { getAuthorizedMonitoringExams } from '../../services/teacherMonitoring';
+import { canEditExamSetup, examStatusLabels, getEffectiveExamStatus } from '../../services/examStatus';
+import { useExamClock } from '../../utils/useExamClock';
 import {
   defaultTeacherExamFilters,
   filterTeacherExamSessions,
@@ -40,6 +42,7 @@ interface WizardTarget {
 type ExamManagementView = 'exams' | 'drafts';
 
 export const CourseExamSessionManager: React.FC = () => {
+  const now = useExamClock();
   const { currentTeacher, examSessions, courses, rooms, showToast } = useApp();
   const [activeView, setActiveView] = useState<ExamManagementView>('exams');
   const [examFilters, setExamFilters] = useState<TeacherExamFilters>(defaultTeacherExamFilters);
@@ -69,7 +72,7 @@ export const CourseExamSessionManager: React.FC = () => {
   }
 
   const authorizedSessions = getAuthorizedMonitoringExams(examSessions, courses);
-  const filteredSessions = filterTeacherExamSessions(examSessions, courses, rooms, examFilters);
+  const filteredSessions = filterTeacherExamSessions(examSessions, courses, rooms, examFilters, now);
   const hasExamFilters = Boolean(examFilters.search.trim()) || examFilters.status !== 'all' || examFilters.mode !== 'all';
   const updateExamFilters = (updates: Partial<TeacherExamFilters>) => setExamFilters((current) => ({ ...current, ...updates }));
 
@@ -78,8 +81,8 @@ export const CourseExamSessionManager: React.FC = () => {
 
   const statusBadge = (status: ExamSession['status']) => {
     if (status === 'in_progress') return <Badge variant="success">กำลังสอบ</Badge>;
-    if (status === 'upcoming') return <Badge variant="warning">กำลังจะถึง</Badge>;
-    return <Badge variant="neutral">เสร็จสิ้น</Badge>;
+    if (status === 'upcoming') return <Badge variant="warning">{examStatusLabels.upcoming}</Badge>;
+    return <Badge variant="neutral">{examStatusLabels.completed}</Badge>;
   };
 
   const confirmDeleteDraft = () => {
@@ -142,7 +145,7 @@ export const CourseExamSessionManager: React.FC = () => {
                 <span className="sr-only">สถานะการสอบ</span>
                 <select value={examFilters.status} onChange={(event) => updateExamFilters({ status: event.target.value as TeacherExamFilters['status'] })} className="h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-xs text-gray-800 focus:ring-2 focus:ring-blue-500">
                   <option value="all">ทุกสถานะ</option>
-                  <option value="upcoming">กำลังจะถึง</option>
+                  <option value="upcoming">{examStatusLabels.upcoming}</option>
                   <option value="in_progress">กำลังสอบ</option>
                   <option value="completed">เสร็จสิ้น</option>
                 </select>
@@ -168,14 +171,15 @@ export const CourseExamSessionManager: React.FC = () => {
                   {filteredSessions.map(({ exam: session }) => {
                     const course = courses.find((candidate) => candidate.id === session.courseId);
                     const room = rooms.find((candidate) => candidate.id === session.roomId);
-                    const editable = session.status === 'upcoming';
+                    const effectiveStatus = getEffectiveExamStatus(session, now);
+                    const editable = canEditExamSetup(session, now);
                     return (
                       <tr key={session.id} className="hover:bg-gray-50/70">
                         <td className="px-5 py-4"><p className="font-bold text-gray-900">{session.examName || `${course?.courseCode} การสอบ`}</p><p className="mt-1 text-[11px] text-gray-500">{course?.courseCode} — {course?.courseName} • Section {session.sectionNo}</p></td>
                         <td className="px-4 py-4"><p className="font-medium text-gray-800">{session.examDate}</p><p className="mt-1 font-mono text-[11px] text-gray-500">{session.startTime} - {session.endTime} ({session.durationMinutes} นาที)</p></td>
                         <td className="px-4 py-4"><p className="flex items-center gap-1 font-medium text-gray-800"><MapPin className="h-3.5 w-3.5 text-blue-500" />{room?.labName || '—'}</p><p className="mt-1 text-[11px] text-gray-500">ชั้น {room?.floor ?? '—'}</p></td>
                         <td className="px-4 py-4"><p className="flex items-center gap-1 font-semibold text-gray-700"><FileCode className="h-3.5 w-3.5 text-blue-600" />{session.format === 'online' ? 'ออนไลน์' : 'ออฟไลน์'}</p><p className="mt-1 text-[11px] text-gray-500">{session.fileRequirements.acceptedExtensions.join(', ')} • {session.fileRequirements.maxSizeMb} MB</p></td>
-                        <td className="px-4 py-4">{statusBadge(session.status)}</td>
+                        <td className="px-4 py-4">{statusBadge(effectiveStatus)}</td>
                         <td className="px-5 py-4"><div className="flex items-center justify-end gap-1"><button type="button" onClick={() => setPreviewExam(session)} className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1 text-[11px] font-semibold text-gray-600 hover:bg-gray-100" aria-label={`ดูรายละเอียด ${session.examName || course?.courseCode}`}><Eye className="h-3.5 w-3.5" />ดู</button><button type="button" disabled={!editable} onClick={() => editable && setWizardTarget({ editingExam: session })} className="inline-flex min-h-8 items-center gap-1 rounded-lg p-2 text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:text-gray-300" aria-label={`แก้ไข ${session.examName || course?.courseCode}`} title={editable ? 'แก้ไขการสอบ' : 'ไม่สามารถแก้ไขข้อมูลหลักระหว่างหรือหลังการสอบ'}><Edit2 className="h-4 w-4" /></button></div></td>
                       </tr>
                     );

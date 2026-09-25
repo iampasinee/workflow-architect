@@ -36,6 +36,7 @@ import {
   CheatDetectionRules
 } from '../types';
 import { getTranslation } from '../i18n/translations';
+import { canAdjustExamTime, canEditExamSeats, canEditExamSetup, canReopenExamSubmissions, canSubmitToExam, getEffectiveExamStatus } from '../services/examStatus';
 import { getAdminRouteFromHash } from '../utils/adminRoutes';
 import { AcademicInput, AcademicResult, AcademicState, AcademicTier } from '../types/academic';
 import {
@@ -335,7 +336,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (role !== 'teacher') return students;
     const sections = courses.flatMap((course) => course.sections);
     return students.filter((student) => sections.some((section) => studentMatchesSection(student, section)) ||
-      storedExamSessions.some((exam) => exam.status !== 'upcoming' && exam.eligibleStudentIds?.includes(student.id) &&
+      storedExamSessions.some((exam) => getEffectiveExamStatus(exam) !== 'upcoming' && exam.eligibleStudentIds?.includes(student.id) &&
         courses.some((course) => course.id === exam.courseId && course.sections.some((section) => section.sectionNo === exam.sectionNo))));
   }, [role, students, courses, currentStudent?.id, storedExamSessions]);
   const studentDirectory = role === 'teacher' ? students : visibleStudents;
@@ -801,6 +802,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const updateExamSession = (id: string, updates: Partial<ExamSession>) => {
     const existing = storedExamSessions.find((exam) => exam.id === id);
+    if (existing && !canEditExamSetup(existing)) {
+      showToast('ไม่สามารถแก้ไขการสอบได้', 'การสอบที่เริ่มแล้วหรือเสร็จสิ้นแล้วไม่อนุญาตให้แก้ไขข้อมูลหลัก', 'error');
+      return;
+    }
     if (updates.roomId && updates.roomId !== existing?.roomId && !rooms.some((room) => room.id === updates.roomId && room.status === 'ready')) {
       showToast('ไม่สามารถเปลี่ยนห้องสอบได้', 'กรุณาเลือกห้องสอบที่พร้อมใช้งาน', 'error');
       return;
@@ -822,6 +827,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     targetStudentId?: string,
     reason: string = 'Instructor adjustment'
   ) => {
+    const exam = storedExamSessions.find((item) => item.id === examId);
+    if (!exam || !canAdjustExamTime(exam)) {
+      showToast('ไม่สามารถปรับเวลาสอบได้', 'ปรับเวลาได้เฉพาะการสอบที่กำลังดำเนินการ', 'warning');
+      return;
+    }
     setExamSessions(prev => prev.map(e => {
       if (e.id !== examId) return e;
       const currentAdj = e.adjustedMinutes || 0;
@@ -853,6 +863,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     reason: string = 'อนุญาตเป็นกรณีพิเศษ'
   ) => {
     const now = new Date();
+    const exam = storedExamSessions.find((item) => item.id === examId);
+    if (!exam || !canReopenExamSubmissions(exam, now)) {
+      showToast('ไม่สามารถเปิดรับส่งใหม่ได้', 'ต้องเริ่มการสอบก่อนจึงจะเปิดรับส่งใหม่ได้', 'warning');
+      return;
+    }
     const reopenedUntil = new Date(now.getTime() + extraMinutes * 60000).toISOString();
 
     setExamSessions(prev => prev.map(e => {
@@ -886,6 +901,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // Seat Assignments
   const assignSeat = (examId: string, seatNo: string, studentId: string) => {
     const exam = storedExamSessions.find((item) => item.id === examId);
+    if (!exam || !canEditExamSeats(exam)) {
+      showToast('ไม่สามารถจัดที่นั่งได้', 'การสอบสิ้นสุดแล้ว ไม่สามารถเปลี่ยนผังที่นั่งย้อนหลัง', 'warning');
+      return;
+    }
     const station = rooms.find((room) => room.id === exam?.roomId)?.seats.find((seat) => seat.seatNo === seatNo);
     if (!station || station.disabled || station.status !== 'online') {
       showToast('ไม่สามารถจัดที่นั่งได้', 'ที่นั่งหรือเครื่องไม่พร้อมใช้งาน', 'error');
@@ -905,16 +924,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const unassignSeat = (examId: string, seatNo: string) => {
+    const exam = storedExamSessions.find((item) => item.id === examId);
+    if (!exam || !canEditExamSeats(exam)) {
+      showToast('ไม่สามารถยกเลิกที่นั่งได้', 'การสอบสิ้นสุดแล้ว ไม่สามารถเปลี่ยนผังที่นั่งย้อนหลัง', 'warning');
+      return;
+    }
     setSeatAssignments(prev => prev.filter(sa => !(sa.examId === examId && sa.seatNo === seatNo)));
   };
 
   const autoAssignSeats = (examId: string, roomId: string) => {
     const room = rooms.find(r => r.id === roomId);
-    if (!room || room.status !== 'ready' || !storedExamSessions.some((exam) => exam.id === examId && exam.roomId === roomId)) return;
+    const exam = storedExamSessions.find((item) => item.id === examId);
+    if (!exam || !canEditExamSeats(exam)) {
+      showToast('ไม่สามารถจัดที่นั่งได้', 'การสอบสิ้นสุดแล้ว ไม่สามารถเปลี่ยนผังที่นั่งย้อนหลัง', 'warning');
+      return;
+    }
+    if (!room || room.status !== 'ready' || exam.roomId !== roomId) return;
 
     // Filter available seats (online, not damaged, not disabled)
     const availableSeats = room.seats.filter(s => s.status === 'online' && !s.disabled);
-    const exam = storedExamSessions.find((item) => item.id === examId);
     const section = storedCourses.find((course) => course.id === exam?.courseId)?.sections
       .find((item) => item.sectionNo === exam?.sectionNo);
     const activeStudents = students.filter((student) =>
@@ -962,7 +990,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return false;
     }
 
-    if (!exam || exam.status !== 'in_progress') {
+    if (!exam || !canSubmitToExam(exam, new Date(), hasActiveReopening)) {
       showToast('ไม่อนุญาตให้อัปโหลด', 'อัปโหลดไฟล์ได้เฉพาะระหว่างการสอบที่กำลังดำเนินการ', 'error');
       return false;
     }

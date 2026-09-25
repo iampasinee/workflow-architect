@@ -14,8 +14,11 @@ import {
   HardDrive
 } from 'lucide-react';
 import { Badge } from '../common/Badge';
+import { canSubmitToExam, examStatusLabels, getEffectiveExamStatus } from '../../services/examStatus';
+import { useExamClock } from '../../utils/useExamClock';
 
 export const ExamInfoRules: React.FC = () => {
+  const now = useExamClock();
   const {
     currentStudent,
     currentExamId,
@@ -34,8 +37,13 @@ export const ExamInfoRules: React.FC = () => {
   // Find active exam session
   const activeExam =
     examSessions.find((exam) => exam.id === currentExamId) ||
-    examSessions.find((exam) => exam.status === 'in_progress') ||
+    examSessions.find((exam) => getEffectiveExamStatus(exam, now) === 'in_progress') ||
     examSessions[0];
+  const reopening = currentStudent
+    ? activeExam?.reopenedStudents?.[currentStudent.id] || activeExam?.reopenedStudents?.['*']
+    : undefined;
+  const hasActiveReopening = Boolean(reopening && new Date(reopening.reopenedUntil) > now);
+  const canStartExam = Boolean(activeExam && canSubmitToExam(activeExam, now, hasActiveReopening));
   const course = courses.find((c) => c.id === activeExam?.courseId);
   const room = rooms.find((r) => r.id === activeExam?.roomId);
 
@@ -49,6 +57,10 @@ export const ExamInfoRules: React.FC = () => {
 
   const handleStartExam = () => {
     if (!agreed) return;
+    if (!activeExam || !canSubmitToExam(activeExam, new Date(), Boolean(reopening && new Date(reopening.reopenedUntil) > new Date()))) {
+      showToast('ยังไม่สามารถเข้าสอบได้', 'เข้าสอบได้เฉพาะช่วงเวลาสอบหรือช่วงที่อาจารย์เปิดรับส่งใหม่', 'warning');
+      return;
+    }
     showToast(
       isThai ? 'เริ่มการสอบแล้ว' : 'Examination Commenced',
       isThai ? 'เข้าสู่โหมดเต็มหน้าจอล็อกข้อสอบ และเริ่มนับเวลาถอยหลัง' : 'Full-screen focus mode initiated. Countdown active.',
@@ -81,6 +93,7 @@ export const ExamInfoRules: React.FC = () => {
           <Badge variant="success" size="md">
             {isThai ? 'ยืนยันตัวตนสำเร็จ' : 'Identity Verified'}
           </Badge>
+          {activeExam && <Badge variant={getEffectiveExamStatus(activeExam, now) === 'in_progress' ? 'success' : 'neutral'} size="md">{examStatusLabels[getEffectiveExamStatus(activeExam, now)]}</Badge>}
         </div>
       </div>
 
@@ -242,7 +255,7 @@ export const ExamInfoRules: React.FC = () => {
           </span>
           <button
             type="button"
-            disabled={!agreed}
+            disabled={!agreed || !canStartExam}
             onClick={handleStartExam}
             className="w-full sm:w-auto px-8 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
           >

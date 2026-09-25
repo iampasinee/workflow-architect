@@ -28,6 +28,8 @@ import { Badge } from '../common/Badge';
 import { Modal } from '../common/Modal';
 import { StudentExamProgressStepper } from './StudentExamProgressStepper';
 import { formatFileSize } from '../../utils/fileSize';
+import { canSubmitToExam, getEffectiveExamStatus } from '../../services/examStatus';
+import { useExamClock } from '../../utils/useExamClock';
 import { StagedUploadRecord, StagedUploadStatus } from '../../types/stagedUpload';
 import {
   deleteStagedUpload,
@@ -63,6 +65,7 @@ const thaiExamCopy: Record<string, { instructions: string; rules: Record<string,
 };
 
 export const ExamSessionView: React.FC = () => {
+  const now = useExamClock();
   const {
     currentStudent,
     students,
@@ -80,7 +83,7 @@ export const ExamSessionView: React.FC = () => {
 
   const activeExam =
     examSessions.find((exam) => exam.id === currentExamId) ||
-    examSessions.find((exam) => exam.status === 'in_progress') ||
+    examSessions.find((exam) => getEffectiveExamStatus(exam, now) === 'in_progress') ||
     examSessions[0];
   const course = courses.find((c) => c.id === activeExam?.courseId);
   const room = rooms.find((r) => r.id === activeExam?.roomId);
@@ -98,7 +101,7 @@ export const ExamSessionView: React.FC = () => {
     ? activeExam?.reopenedStudents?.[currentStudent.id] || activeExam?.reopenedStudents?.['*']
     : undefined;
   const reopeningExpiresAt = reopening ? new Date(reopening.reopenedUntil).getTime() : 0;
-  const hasActiveReopening = reopeningExpiresAt > Date.now();
+  const hasActiveReopening = reopeningExpiresAt > now.getTime();
   const registeredStudent = currentStudent
     ? students.find((student) => student.id === currentStudent.id)
     : undefined;
@@ -107,7 +110,7 @@ export const ExamSessionView: React.FC = () => {
     existingSubmission?.status === 'submitted' || existingSubmission?.status === 'late';
   const hasUploadPermission = Boolean(
     isRegisteredStudent &&
-    activeExam?.status === 'in_progress' &&
+    activeExam && canSubmitToExam(activeExam, now, hasActiveReopening) &&
     (!hasFinalSubmission || hasActiveReopening)
   );
 
@@ -195,7 +198,7 @@ export const ExamSessionView: React.FC = () => {
         ? 'เฉพาะนักศึกษาที่ลงทะเบียนและมีบัญชีใช้งานอยู่เท่านั้นที่สามารถอัปโหลดไฟล์ได้'
         : 'Only registered students with an active account may upload files.';
     }
-    if (activeExam?.status !== 'in_progress') {
+    if (!activeExam || !canSubmitToExam(activeExam, now, hasActiveReopening)) {
       return isThai
         ? 'สามารถอัปโหลดไฟล์ได้เฉพาะระหว่างการสอบที่กำลังดำเนินการ'
         : 'File uploads are only available while the exam is in progress.';

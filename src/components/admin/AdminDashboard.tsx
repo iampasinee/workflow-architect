@@ -15,8 +15,11 @@ import {
   Cpu
 } from 'lucide-react';
 import { Badge } from '../common/Badge';
+import { countEffectiveExamStatuses } from '../../services/examStatus';
+import { useExamClock } from '../../utils/useExamClock';
 
 export const AdminDashboard: React.FC = () => {
+  const now = useExamClock();
   const {
     examSessions,
     rooms,
@@ -30,7 +33,7 @@ export const AdminDashboard: React.FC = () => {
   } = useApp();
   const isThai = language === 'th';
 
-  const activeExams = examSessions.filter((e) => e.status === 'in_progress');
+  const activeExamCount = countEffectiveExamStatuses(examSessions, now).in_progress;
   const totalStations = rooms.reduce((acc, r) => acc + r.seats.length, 0);
   const damagedTotal = rooms.reduce(
     (acc, r) => acc + r.seats.filter((s) => s.status === 'damaged').length,
@@ -75,9 +78,9 @@ export const AdminDashboard: React.FC = () => {
             </span>
             <Activity className="w-4 h-4 text-blue-600" />
           </div>
-          <div className="text-3xl font-bold text-gray-900 font-mono">{activeExams.length}</div>
+          <div className="text-3xl font-bold text-gray-900 font-mono">{activeExamCount}</div>
           <div className="text-xs text-blue-600 mt-1 font-medium">
-            {isThai ? 'วิชา CS301 ห้อง 301 กำลังสอบ' : 'CS301 Lab 301 Active'}
+            {activeExamCount ? `มี ${activeExamCount} การสอบที่กำลังดำเนินการ` : 'ไม่มีการสอบที่กำลังดำเนินการ'}
           </div>
         </div>
 

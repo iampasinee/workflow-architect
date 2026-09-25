@@ -45,6 +45,8 @@ import {
   validateExamWizard,
 } from '../../services/examWizard';
 import { getAdmissionCode } from '../../utils/academicYear';
+import { canEditExamSetup, getEffectiveExamStatus } from '../../services/examStatus';
+import { useExamClock } from '../../utils/useExamClock';
 
 const steps = [
   'ข้อมูลการสอบ',
@@ -104,6 +106,7 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
   onClose,
   onSaved,
 }) => {
+  const now = useExamClock();
   const {
     academicState,
     courses,
@@ -143,7 +146,8 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
   const durationMinutes = calculateExamDurationMinutes(state.startTime, state.endTime);
   const roomConflict = findExamRoomConflict(examSessions, state, editingExam?.id || initialDraft?.editingExamId);
   const roomCapacity = getExamRoomCapacity(selectedRoom);
-  const editingStatus = editingExam?.status || examSessions.find((exam) => exam.id === initialDraft?.editingExamId)?.status;
+  const editingRecord = editingExam || examSessions.find((exam) => exam.id === initialDraft?.editingExamId);
+  const editingStatus = editingRecord && getEffectiveExamStatus(editingRecord, now);
 
   const updateState = <K extends keyof ExamWizardState>(key: K, value: ExamWizardState[K]) => {
     setState((current) => ({ ...current, [key]: value }));
@@ -252,7 +256,7 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
 
     const editingId = editingExam?.id || initialDraft?.editingExamId;
     const existing = examSessions.find((exam) => exam.id === editingId);
-    if (existing && existing.status !== 'upcoming') {
+    if (existing && !canEditExamSetup(existing, new Date())) {
       showToast('ไม่สามารถแก้ไขการสอบได้', 'การสอบที่กำลังดำเนินการหรือเสร็จสิ้นแล้วไม่อนุญาตให้แก้ไขข้อมูลหลัก', 'error');
       return;
     }

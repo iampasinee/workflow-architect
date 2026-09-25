@@ -37,7 +37,7 @@ const exam = (
   status: ExamSession['status'],
   format: ExamSession['format'],
   roomId: string,
-) => ({ id, courseId, sectionNo, examName, status, format, roomId, examDate: '2026-09-25' }) as ExamSession;
+) => ({ id, courseId, sectionNo, examName, status, format, roomId, examDate: '2026-09-25', startTime: status === 'upcoming' ? '13:00' : '09:00', endTime: status === 'upcoming' ? '16:00' : '11:00' }) as ExamSession;
 
 const sessions = [
   exam('exam-midterm', 'course-net', '1', 'สอบกลางภาค', 'upcoming', 'online', 'room-a'),
@@ -47,11 +47,13 @@ const sessions = [
 ];
 
 const teacherCourses = coursesForTeacher(courses, 'teacher-a');
+const referenceNow = new Date(2026, 8, 25, 10, 0);
 const filter = (updates: Partial<TeacherExamFilters> = {}) => filterTeacherExamSessions(
   sessions,
   teacherCourses,
   rooms,
   { ...defaultTeacherExamFilters(), ...updates },
+  referenceNow,
 ).map(({ exam: item }) => item.id);
 
 test('search matches exam name without case sensitivity', () => {
@@ -75,7 +77,7 @@ test('search matches room name and ignores surrounding whitespace', () => {
   assert.deepEqual(filter({ search: '  b4-08  ' }), ['exam-midterm', 'exam-lab']);
 });
 
-test('canonical status filters cover upcoming, in-progress and completed', () => {
+test('effective status filters cover upcoming, in-progress and completed', () => {
   assert.deepEqual(filter({ status: 'upcoming' }), ['exam-midterm']);
   assert.deepEqual(filter({ status: 'in_progress' }), ['exam-final']);
   assert.deepEqual(filter({ status: 'completed' }), ['exam-lab']);
@@ -103,6 +105,18 @@ test('Teacher authorization is applied before every search or filter', () => {
   assert.deepEqual(filter({ status: 'upcoming', mode: 'online' }), ['exam-midterm']);
   assert.deepEqual(filterTeacherExamSessions(sessions, coursesForTeacher(courses, 'teacher-b'), rooms, defaultTeacherExamFilters())
     .map(({ exam: item }) => item.id), ['exam-other']);
+});
+
+test('stale canonical status moves between filters after its scheduled end', () => {
+  const stale = { ...sessions[1], status: 'upcoming' as const };
+  const beforeEnd = new Date(2026, 8, 25, 10, 0);
+  const afterEnd = new Date(2026, 8, 25, 11, 1);
+  const statusIds = (status: TeacherExamFilters['status'], now: Date) => filterTeacherExamSessions(
+    [stale], teacherCourses, rooms, { ...defaultTeacherExamFilters(), status }, now,
+  ).map(({ exam: item }) => item.id);
+  assert.deepEqual(statusIds('in_progress', beforeEnd), ['exam-final']);
+  assert.deepEqual(statusIds('in_progress', afterEnd), []);
+  assert.deepEqual(statusIds('completed', afterEnd), ['exam-final']);
 });
 
 test('canonical filters do not change the independent Draft search', () => {
