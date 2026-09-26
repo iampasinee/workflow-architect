@@ -5,6 +5,7 @@ import { coursesForTeacher } from './courseState';
 import { getAuthorizedMonitoringExams } from './teacherMonitoring';
 import {
   calculateExamDurationMinutes,
+  applyRecommendedExamResources,
   createEmptyExamWizardState,
   createResourceRule,
   examWizardStateFromSession,
@@ -12,16 +13,21 @@ import {
   filterExamDrafts,
   findExamRoomConflict,
   getNextPolicySubStep,
+  getExamResourceMeaning,
+  getPolicySubStepLabel,
+  getSelectedExamResources,
   getPreviousPolicySubStep,
   getExamRoomCapacity,
   initialPolicySubStep,
   isFinalPolicySubStep,
   loadExamDrafts,
   persistExamDraft,
+  policySubSteps,
   removeExamDraft,
   resolveEligibleExamStudents,
   sectionsForWizardCourse,
   selectWizardCourse,
+  setSelectedExamResources,
   validateExamWizard,
 } from './examWizard';
 
@@ -133,6 +139,10 @@ test('Step 5 sub-wizard advances through four views without duplicating policy s
   const policyReference = state.policy;
 
   assert.equal(initialPolicySubStep, 0);
+  assert.deepEqual(policySubSteps, ['ตัวตนและเครื่อง', 'ไฟล์คำตอบ', 'รูปแบบการสอบ', 'ทรัพยากร']);
+  assert.equal(getPolicySubStepLabel(2, 'online'), 'ออนไลน์');
+  assert.equal(getPolicySubStepLabel(2, 'offline'), 'ออฟไลน์');
+  assert.equal(getPolicySubStepLabel(3, 'online'), 'ทรัพยากร');
   assert.equal(getNextPolicySubStep(initialPolicySubStep), 1);
   assert.equal(getNextPolicySubStep(1), 2);
   assert.equal(getNextPolicySubStep(2), 3);
@@ -145,6 +155,61 @@ test('Step 5 sub-wizard advances through four views without duplicating policy s
   assert.equal(state.policy.file.requireDeviceSignature, false);
   assert.deepEqual(state.policy.online.allowedDomains, ['securelab.ic.it.ac.th', 'docs.python.org']);
   assert.equal(state.policy.offline.blockSsh, false);
+});
+
+test('Allowlist and Blocklist keep different resource meanings without rewriting legacy blocked rules', () => {
+  const oldBlocked = createResourceRule('Discord', 'application', 'Discord').rule!;
+  const allowed = createResourceRule('Python Docs', 'website', 'docs.python.org').rule!;
+  const original = createEmptyExamWizardState().policy;
+  original.online.blockedResources = [oldBlocked];
+  assert.equal(getExamResourceMeaning(original, 'online'), 'allowed');
+  assert.deepEqual(getSelectedExamResources(original, 'online'), []);
+  const withAllowed = setSelectedExamResources(original, 'online', [allowed]);
+  assert.deepEqual(getSelectedExamResources(withAllowed, 'online'), [allowed]);
+  assert.deepEqual(withAllowed.online.blockedResources, [oldBlocked]);
+  const blocklist = { ...withAllowed, online: { ...withAllowed.online, resourceMode: 'blocklist' as const } };
+  assert.equal(getExamResourceMeaning(blocklist, 'online'), 'blocked');
+  assert.deepEqual(getSelectedExamResources(blocklist, 'online'), [oldBlocked]);
+  assert.deepEqual(getSelectedExamResources(blocklist, 'offline'), [oldBlocked]);
+  assert.deepEqual(getSelectedExamResources(withAllowed, 'online'), [allowed]);
+});
+
+test('custom resources and recommended presets follow the selected policy mode', () => {
+  const custom = createResourceRule('Custom App', 'application', 'Custom App').rule!;
+  const allowlist = setSelectedExamResources(createEmptyExamWizardState().policy, 'online', [custom]);
+  assert.equal(getSelectedExamResources(allowlist, 'online')[0].name, 'Custom App');
+  const recommendedAllowed = applyRecommendedExamResources(allowlist, 'online');
+  assert.ok(getSelectedExamResources(recommendedAllowed, 'online').some((item) => item.value === 'docs.python.org'));
+  assert.deepEqual(recommendedAllowed.online.blockedResources, []);
+  const blocklist = { ...recommendedAllowed, online: { ...recommendedAllowed.online, resourceMode: 'blocklist' as const } };
+  const recommendedBlocked = applyRecommendedExamResources(blocklist, 'online');
+  assert.ok(getSelectedExamResources(recommendedBlocked, 'online').some((item) => item.name === 'Discord'));
+  assert.deepEqual(recommendedBlocked.online.allowedResources, recommendedAllowed.online.allowedResources);
+});
+
+test('resource-only Allowlist validates and survives draft and saved-exam round trips', () => {
+  const state = completeState();
+  state.policy.online.allowedDomains = [];
+  state.policy = setSelectedExamResources(state.policy, 'online', [createResourceRule('Python Docs', 'website', 'docs.python.org').rule!]);
+  assert.deepEqual(validateExamWizard(state, { courses: coursesForTeacher(courses, 'teacher-a'), students, rooms, examSessions: [] }), {});
+  const values = new Map<string, string>();
+  const storage = { getItem: (key: string) => values.get(key) || null, setItem: (key: string, value: string) => { values.set(key, value); } };
+  persistExamDraft({ id: 'draft-allow', teacherId: 'teacher-a', updatedAt: '2026-01-01', state }, storage);
+  assert.deepEqual(loadExamDrafts('teacher-a', storage)[0].state.policy.online.allowedResources, state.policy.online.allowedResources);
+  const saved = { id: 'exam-allow', ...examWizardToSession(state) };
+  assert.deepEqual(examWizardStateFromSession(saved).policy.online.allowedResources, state.policy.online.allowedResources);
+  const legacy = { ...saved, policy: { ...saved.policy!, online: { ...saved.policy!.online, allowedResources: undefined } } };
+  assert.deepEqual(getSelectedExamResources(examWizardStateFromSession(legacy).policy, 'online'), []);
+});
+
+test('Offline policy remains independent and still validates required Local Server', () => {
+  const state = { ...completeState(), format: 'offline' as const };
+  state.policy.offline.localServerHost = '';
+  assert.match(validateExamWizard(state, { courses: coursesForTeacher(courses, 'teacher-a'), students, rooms, examSessions: [] }).offlinePolicy, /Local Exam Server/);
+  state.policy.offline.localServerHost = 'exam.local';
+  state.policy.online.resourceMode = 'blocklist';
+  assert.equal(validateExamWizard(state, { courses: coursesForTeacher(courses, 'teacher-a'), students, rooms, examSessions: [] }).offlinePolicy, undefined);
+  assert.equal(getExamResourceMeaning(state.policy, 'offline'), 'blocked');
 });
 
 test('Draft list is teacher-scoped, searchable and deletes only the selected stable ID', () => {

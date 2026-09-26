@@ -41,6 +41,8 @@ export interface ExamPolicy {
   online: {
     resourceMode: 'allowlist' | 'blocklist';
     allowedDomains: string[];
+    /** Allowlist-specific selections. Absent on older records; never reinterpret blockedResources as allowed. */
+    allowedResources?: ExamResourceRule[];
     blockedResources: ExamResourceRule[];
     blockUnknownApplications: boolean;
     restrictBrowser: boolean;

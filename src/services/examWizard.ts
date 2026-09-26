@@ -49,6 +49,10 @@ export const examDraftStorageKey = 'securelab_teacher_exam_drafts_v1';
 
 export const policySubStepCount = 4;
 export const initialPolicySubStep = 0;
+export const policySubSteps = ['ตัวตนและเครื่อง', 'ไฟล์คำตอบ', 'รูปแบบการสอบ', 'ทรัพยากร'] as const;
+
+export const getPolicySubStepLabel = (index: number, format: ExamSession['format']) =>
+  index === 2 ? (format === 'online' ? 'ออนไลน์' : 'ออฟไลน์') : policySubSteps[index] || '';
 
 export const getNextPolicySubStep = (current: number) => Math.min(current + 1, policySubStepCount - 1);
 
@@ -95,6 +99,7 @@ export const defaultExamPolicy = (): ExamPolicy => ({
   online: {
     resourceMode: 'allowlist',
     allowedDomains: ['securelab.ic.it.ac.th'],
+    allowedResources: [],
     blockedResources: [],
     blockUnknownApplications: true,
     restrictBrowser: true,
@@ -280,6 +285,49 @@ export const recommendedBlockedResources: ExamResourceRule[] = [
   { id: 'preset_reddit', name: 'Reddit', type: 'website', value: 'reddit.com', category: 'SEARCH & ENTERTAINMENT' },
 ];
 
+export const examResourceCategoryLabels: Record<string, string> = {
+  'GENERATIVE AI & ASSISTANTS': 'ผู้ช่วย AI',
+  'REMOTE DESKTOP & SCREEN SHARING': 'ควบคุมระยะไกลและแชร์หน้าจอ',
+  'COMMUNICATION & SOCIAL MEDIA': 'การสื่อสารและสื่อสังคม',
+  'SEARCH & ENTERTAINMENT': 'ค้นหาและความบันเทิง',
+  'DEVELOPMENT DOCUMENTATION': 'เอกสารสำหรับพัฒนาโปรแกรม',
+};
+
+export const recommendedAllowedResources: ExamResourceRule[] = [
+  { id: 'recommended_python_docs', name: 'เอกสาร Python', type: 'website', value: 'docs.python.org', category: 'DEVELOPMENT DOCUMENTATION' },
+  { id: 'recommended_mdn', name: 'เอกสาร MDN', type: 'website', value: 'developer.mozilla.org', category: 'DEVELOPMENT DOCUMENTATION' },
+];
+
+export const getSelectedExamResources = (policy: ExamPolicy, format: ExamSession['format']) =>
+  format === 'online' && policy.online.resourceMode === 'allowlist'
+    ? policy.online.allowedResources || []
+    : policy.online.blockedResources;
+
+export const getExamResourceMeaning = (policy: ExamPolicy, format: ExamSession['format']) =>
+  format === 'online' && policy.online.resourceMode === 'allowlist' ? 'allowed' as const : 'blocked' as const;
+
+export const setSelectedExamResources = (
+  policy: ExamPolicy,
+  format: ExamSession['format'],
+  resources: ExamResourceRule[],
+): ExamPolicy => ({
+  ...policy,
+  online: getExamResourceMeaning(policy, format) === 'allowed'
+    ? { ...policy.online, allowedResources: resources }
+    : { ...policy.online, blockedResources: resources },
+});
+
+export const applyRecommendedExamResources = (policy: ExamPolicy, format: ExamSession['format']): ExamPolicy => {
+  const recommendedBlockedIds = ['preset_chatgpt', 'preset_discord', 'preset_anydesk'];
+  const resources = getExamResourceMeaning(policy, format) === 'allowed'
+    ? recommendedAllowedResources
+    : recommendedBlockedResources.filter((rule) => recommendedBlockedIds.includes(rule.id));
+  const next = setSelectedExamResources(policy, format, resources);
+  return getExamResourceMeaning(policy, format) === 'allowed'
+    ? { ...next, online: { ...next.online, allowedDomains: Array.from(new Set([...next.online.allowedDomains, 'docs.python.org', 'developer.mozilla.org'])) } }
+    : next;
+};
+
 export const validateExamWizard = (state: ExamWizardState, environment: ExamWizardEnvironment) => {
   const errors: Record<string, string> = {};
   const course = environment.courses.find((candidate) => candidate.id === state.courseId && candidate.status === 'active');
@@ -300,8 +348,11 @@ export const validateExamWizard = (state: ExamWizardState, environment: ExamWiza
   if (room && eligibleCount > getExamRoomCapacity(room)) errors.capacity = 'จำนวนที่นั่งไม่เพียงพอสำหรับผู้เข้าสอบ';
   if (!state.acceptedExtensions.length) errors.files = 'กรุณาเลือกประเภทไฟล์อย่างน้อย 1 ประเภท';
   if (!Number.isFinite(state.maxSizeMb) || state.maxSizeMb < 1) errors.maxSizeMb = 'ขนาดไฟล์สูงสุดต้องมากกว่า 0 MB';
-  if (state.format === 'online' && state.policy.online.resourceMode === 'allowlist' && !state.policy.online.allowedDomains.length) {
-    errors.onlinePolicy = 'Allowlist ต้องมีเว็บไซต์ที่อนุญาตอย่างน้อย 1 รายการ';
+  if (state.format === 'online' && !['allowlist', 'blocklist'].includes(state.policy.online.resourceMode)) {
+    errors.onlinePolicy = 'กรุณาเลือกรูปแบบการควบคุมออนไลน์';
+  } else if (state.format === 'online' && state.policy.online.resourceMode === 'allowlist' &&
+    !state.policy.online.allowedDomains.length && !state.policy.online.allowedResources?.length) {
+    errors.onlinePolicy = 'Allowlist ต้องมีเว็บไซต์หรือทรัพยากรที่อนุญาตอย่างน้อย 1 รายการ';
   }
   if (state.format === 'offline' && state.policy.offline.localServerOnly && !state.policy.offline.localServerHost.trim()) {
     errors.offlinePolicy = 'กรุณาระบุ Local Exam Server';
