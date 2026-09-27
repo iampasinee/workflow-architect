@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { initialCourses, initialExamSessions, initialStudents, initialTeachers } from '../data/initialData';
+import { addCs301DemoCoTeacher } from '../data/teacherCourseDemo';
 import { Course } from '../types';
 import { SectionInput } from '../types/course';
 import { createInitialAcademicState, migrateAcademicStudents } from './academicState';
@@ -48,6 +49,49 @@ const sectionInput = (values: Partial<SectionInput> = {}): SectionInput => ({
   cohorts: [{ majorId: baseMajor.id, admissionYear: 2567 }],
   status: 'active',
   ...values,
+});
+
+test('CS301 demo exposes two authorized Sections with distinct effective rosters', () => {
+  const teacherCourses = coursesForTeacher(courses, 'tch_0001');
+  const cs301 = teacherCourses.find((course) => course.courseCode === 'CS301')!;
+  assert.equal(teacherCourses.length, 3);
+  assert.equal(teacherCourses.reduce((count, course) => count + course.sections.length, 0), 4);
+  assert.deepEqual(cs301.sections.map((section) => section.sectionNo), ['1', '2']);
+  assert.equal(cs301.sections[0].primaryTeacherId, 'tch_0001');
+  assert.equal(cs301.sections[1].primaryTeacherId, 'tch_0002');
+  assert.ok(cs301.sections[1].coTeacherIds?.includes('tch_0001'));
+  const [firstRoster, secondRoster] = cs301.sections.map((section) => students.filter((student) => studentMatchesSection(student, section)));
+  assert.ok(firstRoster.length > 0 && secondRoster.length > 0);
+  assert.equal(firstRoster.some((student) => secondRoster.some((other) => other.id === student.id)), false);
+  assert.equal(new Set([...firstRoster, ...secondRoster].map((student) => student.id)).size, firstRoster.length + secondRoster.length);
+  assert.equal(coursesForTeacher(courses, 'unknown-teacher').length, 0);
+});
+
+test('CS301 demo forward update touches only an unchanged seed Section', () => {
+  const oldSeed = migrateCourses([{ ...initialCourses[0], sections: initialCourses[0].sections.map((section) =>
+    section.sectionNo === '2' ? { ...section, coTeacherIds: [] } : section) }], academic);
+  const updated = addCs301DemoCoTeacher(oldSeed);
+  assert.deepEqual(updated[0].sections[0], oldSeed[0].sections[0]);
+  assert.deepEqual(updated[0].sections[1].coTeacherIds, ['tch_0001']);
+  assert.deepEqual(updated[0].sections[1].cohorts, oldSeed[0].sections[1].cohorts);
+  const customized = [{ ...oldSeed[0], sections: [oldSeed[0].sections[0], { ...oldSeed[0].sections[1], includedStudentIds: ['custom-student'] }] }];
+  assert.deepEqual(addCs301DemoCoTeacher(customized), customized);
+  assert.deepEqual(addCs301DemoCoTeacher(updated), updated);
+});
+
+test('CS301 demo move updates both Section rosters without changing Student Master', () => {
+  const cs301 = courses.find((course) => course.courseCode === 'CS301')!;
+  const [first, second] = cs301.sections;
+  const student = students.find((item) => studentMatchesSection(item, first))!;
+  const originalStudent = structuredClone(student);
+  const originalFirstCount = students.filter((item) => studentMatchesSection(item, first)).length;
+  const originalSecondCount = students.filter((item) => studentMatchesSection(item, second)).length;
+  const moved = moveStudentBetweenSections(courses, students, student.id, sectionIdOf(cs301.id, first), sectionIdOf(cs301.id, second), 'tch_0001');
+  assert.equal(moved.success, true);
+  const [source, destination] = moved.courses!.find((course) => course.id === cs301.id)!.sections;
+  assert.equal(students.filter((item) => studentMatchesSection(item, source)).length, originalFirstCount - 1);
+  assert.equal(students.filter((item) => studentMatchesSection(item, destination)).length, originalSecondCount + 1);
+  assert.deepEqual(student, originalStudent);
 });
 
 test('legacy course migration converts groupIds into stable Major/admission cohorts', () => {

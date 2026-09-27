@@ -1,4 +1,5 @@
 import { useAcademicYear, withCalculatedStudentYear, withoutStudentYear } from '../utils/academicYear';
+import { addCs301DemoCoTeacher } from '../data/teacherCourseDemo';
 import { RoomState, RoomAction, RoomActionResult } from '../types/rooms';
 import { FaceEnrollmentStatus, MockAuthUser } from '../types/auth';
 import { applyRoomAction, migrateRoomState, projectRooms } from '../services/roomState';
@@ -287,7 +288,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const rooms = useMemo(() => projectRooms(roomState), [roomState]);
 
   const [storedCourses, setCourses] = useState<Course[]>(() => {
-    return migrateCourses(safeParse('securelab_courses', initialCourses), academicState, legacyAcademicSnapshot);
+    const migrated = migrateCourses(safeParse('securelab_courses', initialCourses), academicState, legacyAcademicSnapshot);
+    const demoMigrationKey = 'securelab_cs301_teacher_demo_v1';
+    if (localStorage.getItem(demoMigrationKey) === 'complete') return migrated;
+    return addCs301DemoCoTeacher(migrated);
   });
 
   const [storedExamSessions, setExamSessions] = useState<ExamSession[]>(() => {
@@ -389,6 +393,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   useEffect(() => {
     localStorage.setItem('securelab_courses', JSON.stringify(storedCourses));
+    localStorage.setItem('securelab_cs301_teacher_demo_v1', 'complete');
   }, [storedCourses]);
 
   useEffect(() => {

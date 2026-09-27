@@ -459,7 +459,7 @@ export const initialCourses: Course[] = [
     status: 'active',
     sections: [
       { sectionNo: '1', semester: 1, academicYear: 2026, teacherId: 'tch_0001', cohorts: [{ majorId: 'program_inet', admissionYear: 2567 }], studentCount: 40 },
-      { sectionNo: '2', semester: 1, academicYear: 2026, teacherId: 'tch_0002', cohorts: [{ majorId: 'program_ine', admissionYear: 2567 }], studentCount: 35 },
+      { sectionNo: '2', semester: 1, academicYear: 2026, teacherId: 'tch_0002', coTeacherIds: ['tch_0001'], cohorts: [{ majorId: 'program_ine', admissionYear: 2567 }], studentCount: 35 },
     ]
   },
   {
