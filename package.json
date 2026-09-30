@@ -16,6 +16,8 @@
     "test:exam-status": "tsx --test src/services/examStatus.test.ts",
     "test:demo-time": "tsx --test src/services/demoTime.test.ts",
     "test:student-demo": "tsx --test src/services/studentDemoRetry.test.ts",
+    "test:file-preview": "tsx --test src/services/filePreview.test.tsx",
+    "test:prepared-files": "tsx --test src/components/student/PreparedFileRow.test.tsx",
     "test:student-navigation": "tsx --test src/components/common/StudentNavigation.test.tsx",
     "test:exam-wizard": "tsx --test src/services/examWizard.test.ts",
     "test:exam-management": "tsx --test src/services/teacherExamManagement.test.ts",

@@ -54,6 +54,9 @@ export const Modal: React.FC<ModalProps> = ({
       {/* Modal Card */}
       <div className="flex min-h-full items-center justify-center p-4 text-center">
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={title}
           className={`relative w-full ${maxWidthClass} transform overflow-hidden rounded-2xl bg-white text-left shadow-2xl transition-all border border-gray-100 flex flex-col ${maxWidth === 'wide' ? 'max-h-[calc(100vh-32px)]' : 'max-h-[90vh]'}`}
           onClick={(e) => e.stopPropagation()}
         >

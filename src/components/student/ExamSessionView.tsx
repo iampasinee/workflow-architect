@@ -5,9 +5,6 @@ import {
   Laptop,
   UploadCloud,
   FileCode,
-  FileArchive,
-  Trash2,
-  Pencil,
   CheckCircle2,
   AlertCircle,
   AlertTriangle,
@@ -16,7 +13,6 @@ import {
   FileCheck,
   LogOut,
   HelpCircle,
-  Eye,
   RefreshCw,
   Sparkles,
   CalendarDays,
@@ -26,6 +22,8 @@ import {
 import { Badge } from '../common/Badge';
 import { Modal } from '../common/Modal';
 import { StudentExamProgressStepper } from './StudentExamProgressStepper';
+import { FilePreviewModal } from './FilePreviewModal';
+import { PreparedFileRow } from './PreparedFileRow';
 import { SecureLabBrandHeader } from '../common/SecureLabBrandHeader';
 import { formatFileSize } from '../../utils/fileSize';
 import { getEffectiveExamStatus } from '../../services/examStatus';
@@ -33,6 +31,7 @@ import { useExamClock } from '../../utils/useExamClock';
 import { getEffectiveNow } from '../../services/demoTime';
 import { canSubmitStudentAttempt, FRONTEND_DEMO_MODE, getStudentAttemptStagingKey, isDemoSubmissionRetry } from '../../services/studentDemoRetry';
 import { StagedUploadRecord, StagedUploadStatus } from '../../types/stagedUpload';
+import { findCurrentAttemptPreviewFile, getFilePreviewType } from '../../services/filePreview';
 import {
   deleteStagedUpload,
   getStagedUploads,
@@ -189,6 +188,10 @@ export const ExamSessionView: React.FC = () => {
   const [renameTarget, setRenameTarget] = useState<StagedUploadRecord | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [renameError, setRenameError] = useState<string | null>(null);
+  const [previewUploadId, setPreviewUploadId] = useState<string | null>(null);
+  const previewTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const [deleteTargetUploadId, setDeleteTargetUploadId] = useState<string | null>(null);
+  const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadTimersRef = useRef<Map<string, number>>(new Map());
@@ -197,6 +200,27 @@ export const ExamSessionView: React.FC = () => {
     activeExam?.id || 'no-exam', currentStudent?.id || 'no-student',
     studentExamAttemptId,
   );
+  const currentAttemptFiles = stagedFiles.filter((file) => file.sessionKey === stagingSessionKey);
+  const previewRecord = previewUploadId && sessionStep === 'upload'
+    ? findCurrentAttemptPreviewFile(currentAttemptFiles, stagingSessionKey, previewUploadId) || null
+    : null;
+  const deleteTarget = deleteTargetUploadId && sessionStep === 'upload'
+    ? findCurrentAttemptPreviewFile(currentAttemptFiles, stagingSessionKey, deleteTargetUploadId) || null
+    : null;
+  useEffect(() => {
+    setDeleteTargetUploadId(null);
+  }, [stagingSessionKey]);
+  const openFilePreview = (file: StagedUploadRecord, trigger: HTMLButtonElement) => {
+    if (file.sessionKey !== stagingSessionKey) return;
+    previewTriggerRef.current = trigger;
+    setPreviewUploadId(file.uploadId);
+  };
+  const closeFilePreview = () => {
+    setPreviewUploadId(null);
+    window.requestAnimationFrame(() => {
+      if (previewTriggerRef.current?.isConnected) previewTriggerRef.current.focus();
+    });
+  };
   const canUpload = hasUploadPermission && (!isTimeExpired || hasActiveReopening);
 
   const uploadLockedMessage = (() => {
@@ -424,8 +448,8 @@ export const ExamSessionView: React.FC = () => {
   };
 
   const handleRemoveFile = (uploadId: string) => {
-    const file = stagedFiles.find((record) => record.uploadId === uploadId);
-    if (!canUpload || file?.status === 'submitted') {
+    const file = findCurrentAttemptPreviewFile(stagedFiles, stagingSessionKey, uploadId);
+    if (!file || !canUpload || file.status === 'submitted') {
       notifyUploadLocked();
       return;
     }
@@ -434,6 +458,28 @@ export const ExamSessionView: React.FC = () => {
     uploadTimersRef.current.delete(uploadId);
     setStagedFiles((previous) => previous.filter((record) => record.uploadId !== uploadId));
     void deleteStagedUpload(uploadId);
+  };
+
+  const requestDeleteFile = (file: StagedUploadRecord, trigger: HTMLButtonElement) => {
+    if (file.sessionKey !== stagingSessionKey || !canUpload || file.status === 'submitted') return;
+    deleteTriggerRef.current = trigger;
+    setDeleteTargetUploadId(file.uploadId);
+  };
+
+  const closeDeleteDialog = () => {
+    setDeleteTargetUploadId(null);
+    window.requestAnimationFrame(() => {
+      if (deleteTriggerRef.current?.isConnected) deleteTriggerRef.current.focus();
+    });
+  };
+
+  const confirmDeleteFile = () => {
+    if (!deleteTarget) {
+      closeDeleteDialog();
+      return;
+    }
+    handleRemoveFile(deleteTarget.uploadId);
+    setDeleteTargetUploadId(null);
   };
 
   const getRenameValidationError = (value: string, target: StagedUploadRecord) => {
@@ -445,7 +491,7 @@ export const ExamSessionView: React.FC = () => {
     }
 
     const candidateName = `${trimmedBaseName}${target.extension}`.toLowerCase();
-    if (stagedFiles.some(
+    if (currentAttemptFiles.some(
       (file) => file.uploadId !== target.uploadId &&
         file.submissionName.toLowerCase() === candidateName
     )) {
@@ -555,9 +601,9 @@ export const ExamSessionView: React.FC = () => {
       return;
     }
 
-    const readyFiles = stagedFiles.filter((file) => file.status === 'ready');
+    const readyFiles = currentAttemptFiles.filter((file) => file.status === 'ready');
     const requiredCount = activeExam.fileRequirements.requiredFileCount || 1;
-    const hasBlockingFiles = stagedFiles.some(
+    const hasBlockingFiles = currentAttemptFiles.some(
       (file) => file.status === 'uploading' || file.status === 'invalid' || file.status === 'failed'
     );
     const hasIntegrityFailure = readyFiles.some((file) => !isIntegrityValid(file));
@@ -573,6 +619,7 @@ export const ExamSessionView: React.FC = () => {
     }
 
     setShowConfirmModal(false);
+    setPreviewUploadId(null);
     setSessionStep('checking');
     setIsCheckingIntegrity(true);
     setIntegrityProgress(0);
@@ -611,9 +658,9 @@ export const ExamSessionView: React.FC = () => {
     }, 500);
   };
 
-  const readyFiles = stagedFiles.filter((file) => file.status === 'ready');
+  const readyFiles = currentAttemptFiles.filter((file) => file.status === 'ready');
   const requiredFileCount = activeExam?.fileRequirements.requiredFileCount || 1;
-  const hasBlockingStagedFiles = stagedFiles.some(
+  const hasBlockingStagedFiles = currentAttemptFiles.some(
     (file) => file.status === 'uploading' || file.status === 'invalid' || file.status === 'failed'
   );
   const hasBlockingFiles = hasBlockingStagedFiles;
@@ -623,7 +670,7 @@ export const ExamSessionView: React.FC = () => {
   const getStagedStatusLabel = (status: StagedUploadStatus) => {
     switch (status) {
       case 'uploading': return isThai ? 'กำลังอัปโหลด' : 'Uploading';
-      case 'ready': return isThai ? 'อัปโหลดแล้ว — รอการส่งขั้นสุดท้าย' : 'Uploaded — Waiting for Final Submission';
+      case 'ready': return isThai ? 'พร้อมส่ง' : 'Ready to submit';
       case 'invalid': return isThai ? 'ไฟล์ไม่ถูกต้อง' : 'Invalid';
       case 'failed': return isThai ? 'อัปโหลดไม่สำเร็จ' : 'Failed';
       case 'submitted': return isThai ? 'ส่งแล้ว' : 'Submitted';
@@ -632,7 +679,8 @@ export const ExamSessionView: React.FC = () => {
 
   const getStagedStatusClass = (status: StagedUploadStatus) => {
     if (status === 'submitted') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-    if (status === 'ready' || status === 'uploading') {
+    if (status === 'ready') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    if (status === 'uploading') {
       return 'bg-blue-50 text-blue-700 border-blue-200';
     }
     return 'bg-red-50 text-red-700 border-red-200';
@@ -671,6 +719,7 @@ export const ExamSessionView: React.FC = () => {
     );
 
     if (accepted) {
+      setPreviewUploadId(null);
       setAttemptReceipt({ submittedAt: new Date().toISOString(), files: filesToSubmit });
       markFilesSubmitted(filesToSubmit);
       setTimeoutStatus('submitted');
@@ -697,12 +746,12 @@ export const ExamSessionView: React.FC = () => {
 
   useEffect(() => {
     if (timeoutStatus !== 'processing') return;
-    const uploadingFiles = stagedFiles.filter((file) => file.status === 'uploading');
+    const uploadingFiles = currentAttemptFiles.filter((file) => file.status === 'uploading');
 
     if (uploadingFiles.length === 0) {
       if (graceTimerRef.current) window.clearTimeout(graceTimerRef.current);
       graceTimerRef.current = null;
-      finalizeTimedOutSubmission(stagedFiles);
+      finalizeTimedOutSubmission(currentAttemptFiles);
       return;
     }
 
@@ -727,7 +776,7 @@ export const ExamSessionView: React.FC = () => {
         graceTimerRef.current = null;
       }, 10_000);
     }
-  }, [timeoutStatus, stagedFiles]);
+  }, [timeoutStatus, stagedFiles, stagingSessionKey]);
 
   useEffect(() => () => {
     if (graceTimerRef.current) window.clearTimeout(graceTimerRef.current);
@@ -1081,11 +1130,11 @@ export const ExamSessionView: React.FC = () => {
 
                 {/* Staged File List Table */}
                 <section className="min-w-0 scroll-mt-[176px] overflow-hidden bg-white border border-gray-200 rounded-2xl shadow-xs text-left">
-                  <div className="px-6 py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3">
+                  <div className="px-4 py-3 border-b border-gray-100 flex flex-wrap items-center justify-between gap-2">
                     <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
                       <FileCheck className="w-4 h-4 text-blue-600" />
                       <span>
-                        {isThai ? `ไฟล์ที่เตรียมส่ง (${stagedFiles.length})` : `Files Prepared for Submission (${stagedFiles.length})`}
+                        {isThai ? `ไฟล์ที่เตรียมส่ง (${currentAttemptFiles.length})` : `Files Prepared for Submission (${currentAttemptFiles.length})`}
                       </span>
                     </h3>
                     <span className="text-xs text-gray-500">
@@ -1097,102 +1146,23 @@ export const ExamSessionView: React.FC = () => {
                     <div className="p-8 text-center text-gray-400 text-xs">
                       {isThai ? 'กำลังโหลดไฟล์ชั่วคราว...' : 'Loading staged files...'}
                     </div>
-                  ) : stagedFiles.length === 0 ? (
+                  ) : currentAttemptFiles.length === 0 ? (
                     <div className="p-8 text-center text-gray-400 text-xs">
                       {isThai ? 'ยังไม่มีไฟล์ที่เตรียมส่ง กรุณาเลือกไฟล์ด้านบน' : 'No prepared files yet. Select files above.'}
                     </div>
                   ) : (
                     <div className="divide-y divide-gray-100">
-                      {stagedFiles.map((file) => (
-                        <div
+                      {currentAttemptFiles.map((file) => (
+                        <PreparedFileRow
                           key={file.uploadId}
-                          className="px-6 py-3.5 flex flex-wrap items-center justify-between gap-4 hover:bg-gray-50/80 transition-colors"
-                        >
-                          <div className="flex min-w-0 flex-1 basis-[280px] items-center gap-3">
-                            <div
-                              className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-                                file.extension === '.zip'
-                                  ? 'bg-amber-50 text-amber-600 border border-amber-200'
-                                  : 'bg-emerald-50 text-emerald-600 border border-emerald-200'
-                              }`}
-                            >
-                              {file.extension === '.zip' ? (
-                                <FileArchive className="w-5 h-5" />
-                              ) : (
-                                <FileCode className="w-5 h-5" />
-                              )}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="text-[10px] text-gray-500">
-                                {isThai ? 'ชื่อไฟล์สำหรับส่ง' : 'Submission filename'}
-                              </div>
-                              <div className="text-xs font-semibold text-gray-900 truncate font-mono">
-                                {file.submissionName}
-                              </div>
-                              <div className="mt-0.5 truncate text-[10px] text-gray-400">
-                                {isThai ? 'ชื่อไฟล์ต้นฉบับ: ' : 'Original filename: '}
-                                <span className="font-mono">{file.originalName}</span>
-                              </div>
-                              <div className="text-[11px] text-gray-500 flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                                <span>{formatFileSize(file.sizeBytes)}</span>
-                                <span>•</span>
-                                <span className="uppercase">{file.extension.replace('.', '')}</span>
-                                <span>•</span>
-                                <span>
-                                  {isThai ? 'อัปเดต ' : 'Updated '}
-                                  {new Date(file.lastUpdated).toLocaleTimeString()}
-                                </span>
-                              </div>
-                              <div className="mt-2 h-1.5 w-full max-w-sm overflow-hidden rounded-full bg-gray-100">
-                                <div
-                                  className={`h-full transition-all duration-300 ${file.status === 'failed' || file.status === 'invalid' ? 'bg-red-500' : 'bg-blue-600'}`}
-                                  style={{ width: `${file.progress}%` }}
-                                />
-                              </div>
-                              {file.errorReason && (
-                                <div className="text-[11px] text-red-600 mt-0.5 flex items-center gap-1">
-                                  <AlertCircle className="w-3 h-3 shrink-0" />
-                                  <span>{file.errorReason}</span>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="flex max-w-full flex-wrap items-center gap-2">
-                            <span className={`max-w-full text-xs font-medium border px-2.5 py-1 rounded-full flex items-center gap-1 ${getStagedStatusClass(file.status)}`}>
-                              {file.status === 'ready' || file.status === 'submitted' ? (
-                                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                              ) : file.status === 'uploading' ? (
-                                <RefreshCw className="w-3.5 h-3.5 shrink-0 animate-spin" />
-                              ) : (
-                                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                              )}
-                              <span>{getStagedStatusLabel(file.status)}</span>
-                            </span>
-
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => openRenameDialog(file)}
-                                disabled={!canUpload || file.status === 'submitted'}
-                                className="px-2.5 py-1.5 rounded-lg text-xs text-blue-700 hover:bg-blue-50 border border-blue-200 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
-                                title={isThai ? 'เปลี่ยนชื่อ' : 'Rename'}
-                              >
-                                <Pencil className="w-3.5 h-3.5" />
-                                <span>{isThai ? 'เปลี่ยนชื่อ' : 'Rename'}</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveFile(file.uploadId)}
-                                disabled={!canUpload || file.status === 'submitted'}
-                                className="px-2.5 py-1.5 rounded-lg text-xs text-red-700 hover:bg-red-50 border border-red-200 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                                <span>{isThai ? 'ลบ' : 'Remove'}</span>
-                              </button>
-                            </div>
-                          </div>
-                        </div>
+                          file={file}
+                          canManage={canUpload}
+                          statusLabel={getStagedStatusLabel(file.status)}
+                          statusClass={getStagedStatusClass(file.status)}
+                          onPreview={openFilePreview}
+                          onRename={openRenameDialog}
+                          onRequestDelete={requestDeleteFile}
+                        />
                       ))}
                     </div>
                   )}
@@ -1498,6 +1468,31 @@ export const ExamSessionView: React.FC = () => {
         </form>
       </Modal>
 
+      <Modal
+        isOpen={Boolean(deleteTarget)}
+        onClose={closeDeleteDialog}
+        title="ยืนยันการลบไฟล์"
+        footer={
+          <>
+            <button type="button" autoFocus onClick={closeDeleteDialog} className="rounded-xl px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100 focus-visible:outline-2 focus-visible:outline-blue-600">
+              ยกเลิก
+            </button>
+            <button type="button" onClick={confirmDeleteFile} className="rounded-xl bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600">
+              ลบไฟล์
+            </button>
+          </>
+        }
+      >
+        {deleteTarget && <div className="space-y-3 text-sm text-gray-700">
+          <p>ต้องการลบไฟล์นี้ออกจากรายการที่เตรียมส่งหรือไม่?</p>
+          <div className="min-w-0 rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs">
+            <p className="text-gray-500">ชื่อไฟล์สำหรับส่ง</p>
+            <p className="break-all font-mono font-semibold text-gray-900">{deleteTarget.submissionName}</p>
+            <p className="mt-1 break-all text-gray-500">ชื่อไฟล์ต้นฉบับ: {deleteTarget.originalName}</p>
+          </div>
+        </div>}
+      </Modal>
+
       {/* Confirmation Modal before final submission */}
       <Modal
         isOpen={showConfirmModal}
@@ -1532,16 +1527,22 @@ export const ExamSessionView: React.FC = () => {
               {isThai ? 'ไฟล์ที่จะส่งรับการตรวจสอบ:' : 'Complete staged file list:'}
             </span>
             <ul className="space-y-1.5 text-gray-600 font-mono">
-              {stagedFiles.map((file) => (
-                <li key={file.uploadId} className="flex items-center justify-between gap-3">
-                  <span className="truncate">{file.submissionName} ({formatFileSize(file.sizeBytes)})</span>
-                  <span className="shrink-0 font-sans">{getStagedStatusLabel(file.status)}</span>
+              {currentAttemptFiles.map((file) => (
+                <li key={file.uploadId} className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="min-w-0 break-all">{file.submissionName} ({formatFileSize(file.sizeBytes)})</span>
+                  <span className="flex flex-wrap items-center gap-2 font-sans">
+                    <span>{getStagedStatusLabel(file.status)}</span>
+                    <button type="button" onClick={(event) => openFilePreview(file, event.currentTarget)} className="min-h-8 rounded-lg border border-blue-200 bg-white px-2.5 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-blue-600">
+                      {getFilePreviewType(file) === 'metadata' ? 'ดูข้อมูลไฟล์' : 'ดูตัวอย่าง'}
+                    </button>
+                  </span>
                 </li>
               ))}
             </ul>
           </div>
         </div>
       </Modal>
+      <FilePreviewModal record={previewRecord} onClose={closeFilePreview} />
     </div>
   );
 };

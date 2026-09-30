@@ -205,6 +205,24 @@ type SectionCohort = {
 
 Rename เปลี่ยนเฉพาะ `submissionName` โดยคง `originalName`, extension, sequence, blob, progress และ upload identity การตรวจไฟล์ใช้ `File.size` เป็น bytes และปฏิเสธเฉพาะไฟล์ 0 bytes จึงรองรับไฟล์ต่ำกว่า 1 KB
 
+ไฟล์ใน attempt ปัจจุบันเปิดดูตัวอย่างได้จากรายการไฟล์ที่เตรียมส่งและหน้าก่อนยืนยันการส่ง: ซอร์สโค้ด/ข้อความแสดงเป็นข้อความอ่านอย่างเดียว (สูงสุด 1 MB), PNG/JPG/WebP/GIF แสดงเป็นภาพ ส่วน SVG, ZIP และไฟล์ไบนารีแสดงข้อมูลไฟล์เท่านั้น การดูตัวอย่างทำงานในเบราว์เซอร์และไม่เปลี่ยนกฎอนุญาตชนิดไฟล์ของข้อสอบหรือแก้ไขเนื้อหาไฟล์
+
+### Uploaded File Preview & Execution Safety
+
+SecureLab ถือว่าไฟล์ที่ผู้ใช้อัปโหลด **ทุกไฟล์เป็นข้อมูลที่ไม่น่าเชื่อถือ (untrusted data)** ไม่ว่านามสกุล MIME type ชื่อไฟล์ บัญชีนักศึกษา หรือข้อกำหนดการสอบจะเป็นอย่างไร การดูตัวอย่างเป็นเพียงการตรวจดูแบบอ่านอย่างเดียว ไม่ใช่สภาพแวดล้อมเรียกใช้โค้ด:
+
+```text
+Uploaded File → Read as bytes/text → Display read-only preview → NEVER EXECUTE
+
+SecureLab Upload / Preview → NEVER EXECUTE
+SecureLab Storage          → NEVER EXECUTE
+Future Code Judge         → EXECUTE ONLY INSIDE AN ISOLATED SANDBOX
+```
+
+ไฟล์ซอร์สโค้ดและข้อความ เช่น `.py`, `.js`, `.html`, `.sh` แสดงเป็นข้อความที่ React escape ให้ ไม่ประมวลผล script หรือคำสั่ง; SVG, archive และไฟล์ไบนารีแสดงข้อมูลไฟล์เท่านั้น ส่วน PNG/JPG/WebP/GIF แสดงผ่านตัวดูภาพที่คืน object URL เมื่อปิด การรองรับตัวอย่างไฟล์แยกจากสิทธิ์ส่งไฟล์ตาม Exam Policy โดยสิ้นเชิง
+
+บริการจัดเก็บข้อมูลในอนาคต ไม่ว่าจะเป็น Backend API, PostgreSQL, MinIO/Object Storage, Central Server หรือ Local Exam Server มีหน้าที่รับ ตรวจสอบ จัดเก็บ เรียกคืน ทำ hash และอนุญาตการเข้าถึงไฟล์ **ห้ามเรียกใช้ไฟล์อัปโหลดโดยตรง** หากอนาคตต้องตรวจ/ให้คะแนนโค้ดอัตโนมัติ ต้องสร้างระบบแยกที่ตรวจนโยบายก่อน ส่งไปรันใน sandbox แบบทิ้งได้ (container หรือ VM) จำกัด CPU หน่วยความจำ เวลา และ filesystem ใช้อินพุตอ่านอย่างเดียว ปิด network เป็นค่าเริ่มต้น เก็บผลแล้วทำลาย sandbox ห้ามรันบนเว็บเซิร์ฟเวอร์ Backend Central/Local Exam Server ฐานข้อมูล หรือเครื่องจัดเก็บไฟล์ ปัจจุบันยังไม่มี code judge หรือ sandbox
+
 การส่งด้วยตนเองมี confirmation dialog เมื่อหมดเวลา ระบบส่งไฟล์พร้อมใช้โดยอัตโนมัติและให้ grace period 10 วินาทีแก่ไฟล์ที่กำลังอัปโหลด หากไม่มีไฟล์พร้อมส่งจะแสดงสถานะไม่พบไฟล์ Teachers สามารถ reopen submission ตาม flow เดิม
 
 ใน frontend demo (`FRONTEND_DEMO_MODE` ผูกกับ `DEMO_TIME_ENABLED`) นักศึกษาที่ส่งแล้วสามารถเข้าสอบเดิมและทดลองส่งใหม่ได้แม้พ้นเวลาสอบ รอบใหม่ใช้ staging key แยกเพื่อเริ่มจากไฟล์และ checklist ว่าง ผลการทดลองส่งซ้ำเก็บแยกใน `securelab_demo_submission_attempts_v1` และไม่แทน submission หลักใน `securelab_submissions` เมื่อปิด demo mode จะกลับไปใช้กฎล็อกการส่งขั้นสุดท้ายและการเปิดรับส่งใหม่โดยอาจารย์ตามเดิม พฤติกรรมนี้ใช้ทดสอบ frontend เท่านั้น ไม่ใช่การอนุญาตส่งซ้ำในระบบจริง

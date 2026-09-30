@@ -1313,6 +1313,20 @@ Prefer deactivation when destructive deletion is unsafe.
 
 ## Upload Domain Conventions
 
+### Permanent uploaded-file execution boundary
+
+**SecureLab Upload / Preview: NEVER EXECUTE.**
+
+**SecureLab Storage: NEVER EXECUTE.**
+
+**Future Code Judge: EXECUTE ONLY INSIDE AN ISOLATED SANDBOX.**
+
+Treat **every user-uploaded file as untrusted data**, regardless of its extension, MIME type, filename, Student identity, or exam configuration. Preview and execution are separate capabilities. Source code (including HTML, JavaScript, and shell scripts) may be decoded and displayed only as escaped, read-only text; it must never be imported, evaluated, compiled, launched, or inserted as active markup by the SecureLab application. SVG and unknown/binary files must remain non-active. Never use uploaded content in `eval`, `new Function`, scripts, workers, executable iframes, shell commands, or similar execution paths. Keep preview classification fail-closed; MIME type alone is not trustworthy.
+
+Current SecureLab storage, including browser-staged files, receives, stores, retrieves, and authorizes data; it does not execute it. Future Backend APIs, PostgreSQL, MinIO/Object Storage, Central Servers, and Local Exam Servers must also never execute uploaded files directly. Verification and hashing are storage/security operations, not execution.
+
+If automatic code judging is introduced later, it must be a **separate** subsystem with validation and an isolated, disposable container or VM; enforce CPU, memory, and time limits, a restricted filesystem, read-only inputs, and no network by default, then destroy the sandbox after collecting results. Never run uploaded code on the SecureLab web/backend server, Central or Local Exam Server, database host, or storage host. Do not implement a code judge or sandbox as part of the frontend preview flow.
+
 For staged uploads, use:
 
 `uploadId`
