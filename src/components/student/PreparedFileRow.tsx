@@ -23,7 +23,9 @@ export const PreparedFileRow: React.FC<PreparedFileRowProps> = ({
   onRename,
   onRequestDelete,
 }) => {
-  const previewLabel = getFilePreviewType(file) === 'metadata' ? 'ดูข้อมูลไฟล์' : 'ดูตัวอย่าง';
+  const previewType = getFilePreviewType(file);
+  const previewLabel = previewType === 'metadata' ? 'ดูข้อมูลไฟล์' :
+    previewType === 'archive' ? 'ดูโครงสร้าง ZIP' : 'ดูตัวอย่าง';
   const fileType = file.extension.slice(1).toUpperCase() || 'FILE';
 
   return <div className="flex min-w-0 items-start gap-3 px-4 py-2.5 hover:bg-gray-50/80 transition-colors">

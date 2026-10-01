@@ -1,7 +1,7 @@
 import type { StagedUploadRecord } from '../types/stagedUpload';
 import { formatFileSize } from '../utils/fileSize';
 
-export type FilePreviewType = 'text' | 'image' | 'metadata';
+export type FilePreviewType = 'text' | 'image' | 'archive' | 'metadata';
 
 export const MAX_TEXT_PREVIEW_BYTES = 1024 * 1024;
 
@@ -26,6 +26,11 @@ export const getFilePreviewType = (record: StagedUploadRecord): FilePreviewType 
   // Both fields are user-controlled hints, never evidence of trusted content.
   // Unknown types and image/MIME mismatches fall back to metadata; no type executes.
   if (extension === '.svg') return 'metadata';
+  if (extension === '.zip') {
+    return !mimeType || mimeType === 'application/zip' ||
+      mimeType === 'application/x-zip-compressed' || mimeType === 'application/octet-stream'
+      ? 'archive' : 'metadata';
+  }
   if (imageMimeTypes[extension]) {
     return mimeType === imageMimeTypes[extension] ? 'image' : 'metadata';
   }

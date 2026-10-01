@@ -53,8 +53,8 @@ test('preview, rename and delete remain visible keyboard-accessible actions', ()
   assert.equal((locked.match(/disabled=""/g) || []).length, 2);
 });
 
-test('upload progress is shown only while uploading and archive action is metadata-only', () => {
+test('upload progress is shown only while uploading and ZIP action opens structure preview', () => {
   assert.ok(renderRow(makeRecord('uploading')).includes('role="progressbar"'));
   const archive = { ...makeRecord(), originalName: 'project.zip', submissionName: 'project.zip', extension: '.zip', blob: new Blob(['PK'], { type: 'application/zip' }) };
-  assert.ok(renderRow(archive).includes('aria-label="ดูข้อมูลไฟล์"'));
+  assert.ok(renderRow(archive).includes('aria-label="ดูโครงสร้าง ZIP"'));
 });

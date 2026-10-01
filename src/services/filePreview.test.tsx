@@ -75,9 +75,13 @@ test('PNG, JPG, JPEG, WebP and GIF use image preview when MIME matches', () => {
   assert.equal(getFilePreviewType(makeRecord('unknown.png', '')), 'metadata');
 });
 
-test('archives, unknown binaries and SVG use metadata only', async () => {
+test('ZIP uses structure-only preview while unsupported binaries and SVG use metadata', async () => {
+  assert.equal(getFilePreviewType(makeRecord('project.zip', 'application/zip')), 'archive');
+  assert.equal(getFilePreviewType(makeRecord('project.zip', 'application/octet-stream')), 'archive');
+  assert.equal(getFilePreviewType(makeRecord('spoof.zip', 'text/html')), 'metadata');
   for (const [name, mime] of [
-    ['project.zip', 'application/zip'], ['binary.bin', 'application/octet-stream'],
+    ['project.rar', 'application/octet-stream'], ['project.7z', 'application/octet-stream'],
+    ['document.docx', 'application/octet-stream'], ['binary.bin', 'application/octet-stream'],
     ['vector.svg', 'image/svg+xml'], ['program.exe', 'application/octet-stream'],
   ]) {
     const record = makeRecord(name, mime);
@@ -99,10 +103,10 @@ test('oversized text is never decoded for preview', async () => {
 });
 
 test('unsupported archives show metadata and cannot be opened as active content', () => {
-  const record = makeRecord('project.zip', 'application/zip');
+  const record = makeRecord('project.rar', 'application/octet-stream');
   const markup = renderToStaticMarkup(<FilePreviewModal record={record} onClose={() => {}} />);
   assert.match(markup, /ไม่สามารถแสดงตัวอย่างใน SecureLab/);
-  assert.match(markup, /application\/zip/);
+  assert.match(markup, /application\/octet-stream/);
   assert.ok(!markup.includes('<iframe'));
 });
 

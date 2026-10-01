@@ -24,6 +24,7 @@ import { Modal } from '../common/Modal';
 import { StudentExamProgressStepper } from './StudentExamProgressStepper';
 import { FilePreviewModal } from './FilePreviewModal';
 import { PreparedFileRow } from './PreparedFileRow';
+import { FinalSubmissionConfirmation } from './FinalSubmissionConfirmation';
 import { SecureLabBrandHeader } from '../common/SecureLabBrandHeader';
 import { formatFileSize } from '../../utils/fileSize';
 import { getEffectiveExamStatus } from '../../services/examStatus';
@@ -31,7 +32,7 @@ import { useExamClock } from '../../utils/useExamClock';
 import { getEffectiveNow } from '../../services/demoTime';
 import { canSubmitStudentAttempt, FRONTEND_DEMO_MODE, getStudentAttemptStagingKey, isDemoSubmissionRetry } from '../../services/studentDemoRetry';
 import { StagedUploadRecord, StagedUploadStatus } from '../../types/stagedUpload';
-import { findCurrentAttemptPreviewFile, getFilePreviewType } from '../../services/filePreview';
+import { findCurrentAttemptPreviewFile } from '../../services/filePreview';
 import {
   deleteStagedUpload,
   getStagedUploads,
@@ -1493,55 +1494,15 @@ export const ExamSessionView: React.FC = () => {
         </div>}
       </Modal>
 
-      {/* Confirmation Modal before final submission */}
-      <Modal
+      <FinalSubmissionConfirmation
         isOpen={showConfirmModal}
-        onClose={() => setShowConfirmModal(false)}
-        title={isThai ? 'ยืนยันการเสร็จสิ้นการสอบ' : 'Confirm Finish Exam'}
-        footer={
-          <>
-            <button
-              onClick={() => setShowConfirmModal(false)}
-              className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 hover:bg-gray-100 transition-colors cursor-pointer"
-            >
-              {isThai ? 'ยกเลิก' : 'Cancel'}
-            </button>
-            <button
-              onClick={startSubmissionProcess}
-              disabled={!canFinishExam}
-              className="px-5 py-2 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white shadow-md transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isThai ? 'เสร็จสิ้นและส่งไฟล์' : 'Finish Exam and Submit Files'}
-            </button>
-          </>
-        }
-      >
-        <div className="text-left text-xs text-gray-700 space-y-3">
-          <p>
-            {isThai
-              ? 'คุณแน่ใจหรือไม่ว่าต้องการส่งไฟล์ข้อสอบเหล่านี้? ระบบจะตรวจสอบขนาดไฟล์ ความสามารถในการเปิดอ่าน และสร้างบันทึกดิจิทัลที่ป้องกันการแก้ไขสำหรับอาจารย์ผู้คุมสอบ'
-              : 'Are you sure you want to submit these exam files? The system will verify non-zero byte size, structural readability, and compile a tamper-evident audit record for proctor review.'}
-          </p>
-          <div className="p-3 bg-gray-50 rounded-xl border border-gray-200">
-            <span className="font-semibold block mb-1 text-gray-900">
-              {isThai ? 'ไฟล์ที่จะส่งรับการตรวจสอบ:' : 'Complete staged file list:'}
-            </span>
-            <ul className="space-y-1.5 text-gray-600 font-mono">
-              {currentAttemptFiles.map((file) => (
-                <li key={file.uploadId} className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="min-w-0 break-all">{file.submissionName} ({formatFileSize(file.sizeBytes)})</span>
-                  <span className="flex flex-wrap items-center gap-2 font-sans">
-                    <span>{getStagedStatusLabel(file.status)}</span>
-                    <button type="button" onClick={(event) => openFilePreview(file, event.currentTarget)} className="min-h-8 rounded-lg border border-blue-200 bg-white px-2.5 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-blue-600">
-                      {getFilePreviewType(file) === 'metadata' ? 'ดูข้อมูลไฟล์' : 'ดูตัวอย่าง'}
-                    </button>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      </Modal>
+        isThai={isThai}
+        files={currentAttemptFiles}
+        canFinish={canFinishExam}
+        statusLabel={getStagedStatusLabel}
+        onCancel={() => setShowConfirmModal(false)}
+        onConfirm={startSubmissionProcess}
+      />
       <FilePreviewModal record={previewRecord} onClose={closeFilePreview} />
     </div>
   );

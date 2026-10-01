@@ -8,6 +8,8 @@ import {
   readTextPreview,
 } from '../../services/filePreview';
 import { Modal } from '../common/Modal';
+import { ArchivePreview } from './ArchivePreview';
+import { ImagePreview } from './ImagePreview';
 
 interface FilePreviewModalProps {
   record: StagedUploadRecord | null;
@@ -61,7 +63,7 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({ record, onCl
     };
   }, [record?.uploadId, record?.blob]);
 
-  // The confirmation dialog may be open behind this one; Escape closes only the preview.
+  // Escape closes only this preview if another dialog is open beneath it.
   useEffect(() => {
     if (!record) return;
     const closeTopModal = (event: KeyboardEvent) => {
@@ -87,7 +89,8 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({ record, onCl
       {loadError ? <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">ไม่สามารถอ่านไฟล์เพื่อแสดงตัวอย่างได้</div>
         : textPreviewTooLarge ? <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">ไฟล์มีขนาดใหญ่เกินกว่าจะแสดงตัวอย่าง (สูงสุด 1 MB)</div>
         : previewType === 'text' ? textContent === null ? <p role="status" className="py-8 text-center text-sm text-slate-500">กำลังอ่านไฟล์...</p> : <FilePreviewText content={textContent} />
-        : previewType === 'image' ? imageUrl ? <div className="flex max-h-[60vh] min-h-36 items-center justify-center overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3"><img src={imageUrl} alt={`ตัวอย่างไฟล์ ${metadata.originalName}`} onError={() => setLoadError(true)} className="max-h-[56vh] max-w-full object-contain" /></div> : <p role="status" className="py-8 text-center text-sm text-slate-500">กำลังเปิดภาพ...</p>
+        : previewType === 'image' ? imageUrl ? <ImagePreview key={`${record.sessionKey}:${record.uploadId}:${record.lastUpdated}`} url={imageUrl} filename={metadata.originalName} onError={() => setLoadError(true)} /> : <p role="status" className="py-8 text-center text-sm text-slate-500">กำลังเปิดภาพ...</p>
+        : previewType === 'archive' ? <ArchivePreview key={`${record.sessionKey}:${record.uploadId}:${record.lastUpdated}`} record={record} />
         : <div role="status" className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-700">{record.extension.toLowerCase() === '.svg' ? <ImageIcon className="h-5 w-5 shrink-0 text-slate-400" /> : <FileQuestion className="h-5 w-5 shrink-0 text-slate-400" />}<p>ไฟล์ประเภทนี้ไม่สามารถแสดงตัวอย่างใน SecureLab ได้ แต่สามารถส่งได้หากเป็นประเภทที่ข้อสอบอนุญาต</p></div>}
     </div>}
   </Modal>;
