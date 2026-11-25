@@ -7,6 +7,7 @@ export type StagedUploadStatus =
 
 export interface StagedUploadRecord {
   uploadId: string;
+  questionNumber?: number;
   uploadSequence: number;
   sessionKey: string;
   originalName: string;

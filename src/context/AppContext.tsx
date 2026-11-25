@@ -184,7 +184,7 @@ interface AppContextType {
   autoAssignSeats: (examId: string, roomId: string) => void;
 
   // Submission Actions
-  submitStudentFiles: (examId: string, studentId: string, files: { uploadId: string; submissionName: string; sizeBytes: number; snippet?: string }[]) => boolean;
+  submitStudentFiles: (examId: string, studentId: string, files: { uploadId: string; questionNumber?: number; submissionName: string; sizeBytes: number; snippet?: string }[]) => boolean;
 
   // Simulation helpers
   triggerViolation: (examId: string, studentId: string, seatNo: string, type: ViolationType, detail: string) => void;
@@ -997,7 +997,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const submitStudentFiles = (
     examId: string,
     studentId: string,
-    uploadedFiles: { uploadId: string; submissionName: string; sizeBytes: number; snippet?: string }[]
+    uploadedFiles: { uploadId: string; questionNumber?: number; submissionName: string; sizeBytes: number; snippet?: string }[]
   ): boolean => {
     const exam = examSessions.find(e => e.id === examId);
     const student = students.find(s => s.id === studentId);
@@ -1026,6 +1026,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const isDamaged = f.sizeBytes === 0;
       return {
         uploadId: f.uploadId,
+        questionNumber: f.questionNumber,
         fileName: f.submissionName,
         sizeKb: f.sizeBytes / 1024,
         submittedAt,

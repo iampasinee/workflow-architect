@@ -154,3 +154,18 @@ export const reserveUploadSequences = async (
     };
   });
 };
+
+export const saveQuestionFiles = async (records: StagedUploadRecord[]): Promise<void> => {
+  const database = await openDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(STORE_NAME, 'readwrite');
+      transaction.oncomplete = () => resolve();
+      transaction.onabort = () => reject(transaction.error);
+      const store = transaction.objectStore(STORE_NAME);
+      records.forEach((record) => store.put(record));
+    });
+  } finally {
+    database.close();
+  }
+};

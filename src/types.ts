@@ -239,6 +239,7 @@ export interface SeatAssignment {
 }
 
 export interface SubmittedFile {
+  questionNumber?: number;
   uploadId?: string;
   fileName: string;
   sizeKb: number;

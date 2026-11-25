@@ -35,6 +35,7 @@ import { StagedUploadRecord, StagedUploadStatus } from '../../types/stagedUpload
 import { findCurrentAttemptPreviewFile } from '../../services/filePreview';
 import {
   deleteStagedUpload,
+  saveQuestionFiles,
   getStagedUploads,
   reserveUploadSequences,
   saveStagedUpload,
@@ -177,6 +178,8 @@ export const ExamSessionView: React.FC = () => {
 
   // Upload Management
   const [stagedFiles, setStagedFiles] = useState<StagedUploadRecord[]>([]);
+  const [question, setQuestion] = useState('');
+  const preparing = useRef(false);
   const [stagingLoaded, setStagingLoaded] = useState(false);
   const [timeoutStatus, setTimeoutStatus] = useState<'idle' | 'processing' | 'submitted' | 'no_files'>('idle');
 
@@ -338,9 +341,9 @@ export const ExamSessionView: React.FC = () => {
   const generateSubmissionName = (file: File, uploadSequence: number) => {
     const extension = getFileExtension(file.name);
     const profileNameParts = (currentStudent?.fullName || '').trim().split(/\s+/);
-    const firstName = normalizeFilenamePart(currentStudent?.firstName || profileNameParts[0] || '');
+    const firstName = normalizeFilenamePart(currentStudent?.firstNameEn || currentStudent?.firstName || profileNameParts[0] || '');
     const lastName = normalizeFilenamePart(
-      currentStudent?.lastName || profileNameParts.slice(1).join(' ') || ''
+      currentStudent?.lastNameEn || currentStudent?.lastName || profileNameParts.slice(1).join(' ') || ''
     );
     const template = activeExam?.fileRequirements.automaticFilenamePattern ||
       '{studentId}_{firstName}_{lastName}_{uploadSequence}.{extension}';
@@ -388,7 +391,8 @@ export const ExamSessionView: React.FC = () => {
       uploadSequence,
       sessionKey: stagingSessionKey,
       originalName: file.name,
-      submissionName: generateSubmissionName(file, uploadSequence),
+      questionNumber: Number(question),
+      submissionName: generateSubmissionName(file, Number(question)),
       sizeBytes: file.size,
       extension,
       lastUpdated: new Date().toISOString(),
@@ -405,35 +409,48 @@ export const ExamSessionView: React.FC = () => {
       return;
     }
 
-    let uploadSequences: number[];
-    try {
-      uploadSequences = await reserveUploadSequences(stagingSessionKey, files.length);
-    } catch {
-      showToast('เตรียมไฟล์ไม่สำเร็จ', 'ไม่สามารถจองลำดับการอัปโหลดได้', 'error');
+    if (!files.length || !stagingLoaded || preparing.current) return;
+    if (!question) {
+      showToast('กรุณาเลือกข้อสอบก่อนเลือกไฟล์', '', 'info');
       return;
     }
-
-    const records = files.map((file, index) => createStagedRecord(file, uploadSequences[index]));
-    setStagedFiles((previous) => [...previous, ...records]);
+    const extensions = files.map((file) => getFileExtension(file.name));
+    if (new Set(extensions).size !== files.length) {
+      showToast('เลือกได้หนึ่งไฟล์ต่อนามสกุลในแต่ละข้อ', 'กรุณาเลือกไฟล์อีกครั้ง', 'error');
+      return;
+    }
+    const replaced = stagedFiles.filter((file) => file.questionNumber === Number(question) && extensions.includes(file.extension));
+    const invalid = files.find((file) => validateSelectedFile(file));
+    if (invalid) {
+      showToast('ไฟล์ไม่ผ่านเงื่อนไข', validateSelectedFile(invalid), 'error');
+      return;
+    }
+    if (replaced.some((file) => file.status === 'uploading')) {
+      showToast('กรุณารอให้ไฟล์เดิมอัปโหลดเสร็จก่อน', '', 'info');
+      return;
+    }
+    if (replaced.length && !window.confirm('ต้องการแทนที่ไฟล์เดิมของข้อ ' + question + ' หรือไม่?\n' + replaced.map((file) => file.submissionName).join('\n'))) return;
+    preparing.current = true;
     try {
-      await Promise.all(records.map(saveStagedUpload));
-      records
-        .filter((record) => record.status === 'uploading')
-        .forEach((record) => startMockUpload(record.uploadId));
+      const sequences = await reserveUploadSequences(stagingSessionKey, files.length);
+      const records = files.map((file, index) => {
+        const record = createStagedRecord(file, sequences[index]);
+        const old = replaced.find((item) => item.extension === record.extension);
+        return old ? { ...record, uploadId: old.uploadId, submissionName: old.submissionName } : record;
+      });
+      const remaining = stagedFiles.filter((file) => !replaced.includes(file));
+      if (records.some((record) => remaining.some((file) => file.submissionName.toLowerCase() === record.submissionName.toLowerCase()))) {
+        showToast('ชื่อไฟล์ซ้ำ', 'กรุณาเปลี่ยนชื่อไฟล์เดิมก่อน', 'error');
+        return;
+      }
+      await saveQuestionFiles(records);
+      const ids = new Set(records.map((record) => record.uploadId));
+      setStagedFiles((previous) => [...previous.filter((file) => !ids.has(file.uploadId)), ...records]);
+      records.forEach((record) => startMockUpload(record.uploadId));
     } catch {
-      const failedIds = new Set(records.map((record) => record.uploadId));
-      setStagedFiles((previous) => previous.map((record) =>
-        failedIds.has(record.uploadId)
-          ? {
-              ...record,
-              status: 'failed',
-              progress: 0,
-              errorReason: 'The file could not be copied to browser temporary storage.',
-              lastUpdated: new Date().toISOString(),
-            }
-          : record
-      ));
-      showToast('เตรียมไฟล์ไม่สำเร็จ', 'ไม่สามารถบันทึกไฟล์ที่เลือกลงพื้นที่จัดเก็บชั่วคราวของเบราว์เซอร์', 'error');
+      showToast('เตรียมไฟล์ไม่สำเร็จ', 'กรุณาลองอีกครั้ง', 'error');
+    } finally {
+      preparing.current = false;
     }
   };
 
@@ -642,6 +659,7 @@ export const ExamSessionView: React.FC = () => {
             currentStudent.id,
             readyFiles.map((file) => ({
               uploadId: file.uploadId,
+              questionNumber: file.questionNumber,
               submissionName: file.submissionName,
               sizeBytes: file.sizeBytes,
             }))
@@ -714,6 +732,7 @@ export const ExamSessionView: React.FC = () => {
       currentStudent.id,
       filesToSubmit.map((file) => ({
         uploadId: file.uploadId,
+        questionNumber: file.questionNumber,
         submissionName: file.submissionName,
         sizeBytes: file.sizeBytes,
       }))
@@ -794,10 +813,10 @@ export const ExamSessionView: React.FC = () => {
     : `${course?.courseCode || ''} Practical Examination`.trim();
   const exampleNameParts = (currentStudent?.fullName || '').trim().split(/\s+/);
   const exampleFirstName = normalizeFilenamePart(
-    currentStudent?.firstName || exampleNameParts[0] || ''
+    currentStudent?.firstNameEn || currentStudent?.firstName || exampleNameParts[0] || ''
   );
   const exampleLastName = normalizeFilenamePart(
-    currentStudent?.lastName || exampleNameParts.slice(1).join(' ') || ''
+    currentStudent?.lastNameEn || currentStudent?.lastName || exampleNameParts.slice(1).join(' ') || ''
   );
   const exampleExtension = (
     activeExam?.fileRequirements.acceptedExtensions.find((extension) => extension !== '.zip') ||
@@ -1089,7 +1108,16 @@ export const ExamSessionView: React.FC = () => {
               </section>
 
               <div className="flex min-w-0 flex-col gap-4">
-                {/* Drag & Drop Zone */}
+                <label className="grid gap-2 text-sm font-semibold">
+                  เลือกข้อสอบสำหรับไฟล์คำตอบ
+                  <select className="rounded-lg border border-gray-300 bg-white p-2" value={question} disabled={!canUpload} onChange={(event) => setQuestion(event.target.value)}>
+                    <option value="">เลือกข้อสอบ</option>
+                    {[1, 2].map((number) => <option key={number} value={number}>ข้อ {number}</option>)}
+                  </select>
+                </label>
+                {question && stagedFiles.some((file) => file.questionNumber === Number(question)) && (
+                  <p className="text-sm text-amber-800">ข้อนี้มีไฟล์แล้ว หากเลือกนามสกุลเดิม ระบบจะถามก่อนแทนที่</p>
+                )}
                 <div
                   onDragOver={(e) => {
                     e.preventDefault();
@@ -1097,7 +1125,7 @@ export const ExamSessionView: React.FC = () => {
                   }}
                   onDragLeave={() => setDragActive(false)}
                   onDrop={handleDrop}
-                  onClick={() => canUpload ? fileInputRef.current?.click() : notifyUploadLocked()}
+                  onClick={() => !canUpload ? notifyUploadLocked() : question ? fileInputRef.current?.click() : showToast('กรุณาเลือกข้อสอบก่อนเลือกไฟล์', '', 'info')}
                   className={`min-h-[200px] max-h-[240px] scroll-mt-[176px] p-6 rounded-2xl border-2 border-dashed transition-all text-center cursor-pointer flex flex-col items-center justify-center ${
                     !canUpload
                       ? 'border-gray-200 bg-gray-100/60 opacity-60 cursor-not-allowed'

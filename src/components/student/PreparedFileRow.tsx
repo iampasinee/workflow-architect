@@ -36,6 +36,7 @@ export const PreparedFileRow: React.FC<PreparedFileRowProps> = ({
       <div className="flex min-w-0 items-center justify-between gap-2">
         <div className="min-w-0">
           <span className="block text-[10px] text-gray-500">ชื่อไฟล์สำหรับส่ง</span>
+          {file.questionNumber && <span className="text-xs text-blue-700">ข้อ {file.questionNumber}</span>}
           <span className="block truncate font-mono text-xs font-semibold text-gray-900" title={file.submissionName}>{file.submissionName}</span>
         </div>
         <span className={`flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium ${statusClass}`}>
