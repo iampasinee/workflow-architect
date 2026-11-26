@@ -109,6 +109,7 @@ npm run test:academic
 npm run test:courses
 npm run test:rooms
 npm run test:exam-wizard
+npm run test:exam-roster
 npm run test:exam-management
 npm run test:monitoring
 npm run build
@@ -541,6 +542,8 @@ instead of implementing separate behavior in each page.
 ---
 
 ## Student Management UI
+
+Admin can create students in bulk through StudentImportDialog. Reuse readRosterFile and reviewNewStudents for UTF-8 CSV, first-sheet XLSX and text-table PDF (10 MB limit). Offer the downloadable CSV template, select one active Major and admission year per batch, preview row errors, and save all rows together only after validation, including duplicate IDs and account emails. Teacher roster import instead matches existing active Section members and stores importedStudentIds on the exam.
 
 Admin Student Management should clearly display academic information.
 
@@ -1056,6 +1059,8 @@ Do not silently assign students from the wrong Major or admission year.
 
 ## Teacher Exam Management and Monitoring
 
+Validate usable computers within the selected row range and columns. Simultaneous room reservations require disjoint row ranges. Allocate seats on save, preserve valid assignments on edit, and log a move with student, teacher, source, destination, time and reason. Keep simulated risk events distinct from authorized seat changes in the exam activity report.
+
 The Teacher `จัดการรายวิชา & กลุ่มเรียน` page is course-first, then Section-first. Only assigned Sections may be shown. Student master records remain Admin-managed. Individual exceptions to cohort membership use `includedStudentIds` and `excludedStudentIds` on existing Sections in `securelab_courses`; effective membership is base cohort plus inclusions minus exclusions. Teacher add/move operations must validate both Section assignments, prevent duplicates and cross-course moves, and never modify Student master data. Before an override changes an in-progress or completed exam's Section, freeze that exam's eligible student IDs; upcoming exams continue using the effective live roster.
 
 
@@ -1213,47 +1218,9 @@ Preserve legacy full codes such as `LAB 301` without rewriting them when Admin o
 
 ## Room Admin UI
 
-The page `ห้องสอบและเครื่องคอมพิวเตอร์` has three tabs:
+The managed inventory is fixed to Floor 4: B4-01A, B4-01B, B4-08, B4-09, B4-11, B4-13, and B4-16. Use src/services/fixedRoomCatalog.ts for initialization and the managed projection. Seed new layouts with 5 rows by 8 columns and 40 demo computers per room. Preserve customized layouts, device bindings, and historical references on reload.
 
-```text
-[ ห้องสอบ ] [ ผังที่นั่งและเครื่อง ] [ เครื่องคอมพิวเตอร์ ]
-```
-
-The `ห้องสอบ` tab uses this compact order:
-
-```text
-Summary cards
-→ Main tabs
-→ Filter bar
-→ Room table
-```
-
-Do not insert Floor overview cards or a selected-Floor management panel between the tabs and filter bar unless explicitly requested. Floor and Physical Room CRUD remain available through the page-level actions and modals.
-
-The room table is based on all Physical Rooms, not only opened Exam Rooms. It should show:
-
-* รหัสห้อง
-* ชั้น
-* สถานะห้อง
-* สถานะการเปิดเป็นห้องสอบ
-* ผังห้อง
-* จำนวนที่นั่ง
-* จำนวนเครื่อง
-* การดำเนินการ
-
-The filter bar supports room-code search, Floor, Physical Room status, opened/unopened Exam Room status, and reset. Keep it directly above the table.
-
-Unopened active rooms provide an `เปิดเป็นห้องสอบ` action. Opened rooms expose their Exam Room state and retain safe edit/removal actions. Detail UI must distinguish Physical Room information from Exam Room information and must not expose raw relationship IDs.
-
-Page-level actions remain available for:
-
-* เพิ่มชั้น
-* เพิ่มห้องในชั้น
-* เพิ่มห้องสอบ
-
-The Physical Room modal selects a Floor, accepts `รหัสย่อย/เลขห้อง`, previews the generated `รหัสห้อง` read-only, and selects status. The Exam Room modal cascades `ชั้น → ห้อง` and keeps already-opened or inactive rooms visible but disabled where practical.
-
----
+Expose room status, layout editing, and computer management. Keep floor and room creation, renaming, and deletion unavailable in the managed catalog. Retain legacy room migration support.
 
 ## Room Layout and Computer Binding
 
@@ -1358,6 +1325,8 @@ Do not regenerate unrelated upload state when renaming a file.
 ---
 
 ## Submission Filename Rules
+
+The teacher selects the exam type and may append a title suffix (การทดสอบย่อย - ครั้งที่ 1). Use the exam questionCount for student question buttons. Use the selected question number in the generated filename; uploadSequence remains a storage sequence. Confirm replacement in the shared modal when an extension already exists for the same question and attempt. Preserve preview, rename and delete actions.
 
 Generated submission filenames must preserve the original extension.
 
@@ -1508,6 +1477,7 @@ npm run test:academic
 npm run test:courses
 npm run test:rooms
 npm run test:exam-wizard
+npm run test:exam-roster
 npm run test:exam-management
 npm run test:monitoring
 npm run build
@@ -1637,10 +1607,7 @@ When relevant, manually verify:
 * canonical exam search/status/mode filters independent from draft search
 * monitoring date selection, calendar counts, daily status filters, and exam detail
 * add-user role selection, `ย้อนกลับ`, close, and form-state reset
-* add/edit/deactivate Floor and Physical Room
-* room suffix preview and generated room code
-* all-room table, Floor filter, room-status filter, and opened/unopened filter
-* open Physical Room as Exam Room and duplicate-open prevention
+* fixed seven-room inventory on Floor 4 and absence of floor/room creation controls
 * layout creation, expansion, reduction guards, and clearing
 * computer create, assignment, movement, uniqueness, and history guards
 * room persistence and forward migration after reload
