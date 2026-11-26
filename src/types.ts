@@ -203,6 +203,8 @@ export interface ExamRule {
 }
 
 export interface ExamSession {
+  sectionResolution?: 'missing' | 'ambiguous';
+  sectionId?: string;
   id: string;
   questionCount?: number;
   importedStudentIds?: string[];

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { initialCourses, initialExamSessions, initialStudents, initialTeachers } from '../data/initialData';
+import { initialCourses, initialExamSessions, initialSeatAssignments, initialStudents, initialSubmissions, initialTeachers } from '../data/initialData';
 import { addCs301DemoCoTeacher } from '../data/teacherCourseDemo';
 import { Course } from '../types';
 import { SectionInput } from '../types/course';
@@ -20,6 +20,7 @@ import {
   normalizeSectionOverrides,
   saveCourse,
   saveSection,
+  sectionReassignmentError,
   searchStudentsByIdentity,
   sectionDeleteError,
   sectionIdOf,
@@ -142,7 +143,7 @@ test('cohort validation enforces active Major, admission year and course Departm
 
 test('same Major/admission cohort cannot join two sections of the same course and term', () => {
   const firstInput = sectionInput({ sectionNumber: 97 });
-  const once = saveSection(courses, firstInput);
+  const once = saveSection(courses, firstInput, undefined, []);
   const collision = validateSectionInput(once, academic, initialTeachers, sectionInput({ sectionNumber: 98 }));
   assert.match(collision || '', /รหัส/);
 });
@@ -162,10 +163,10 @@ test('separate Sections may target RA and RB while duplicate RA is rejected', ()
   if (!ra || !rb) return;
   const isolated = courses.map((course) => course.id === baseCourse.id ? { ...course, sections: [] } : course);
   const raInput = sectionInput({ sectionNumber: 71, cohorts: [{ majorId: baseMajor.id, admissionYear: 2567, classGroupIds: [ra.id] }] });
-  const withRa = saveSection(isolated, raInput);
+  const withRa = saveSection(isolated, raInput, undefined, []);
   const rbInput = sectionInput({ sectionNumber: 72, cohorts: [{ majorId: baseMajor.id, admissionYear: 2567, classGroupIds: [rb.id] }] });
   assert.equal(validateSectionInput(withRa, academic, initialTeachers, rbInput), undefined);
-  const withRaAndRb = saveSection(withRa, rbInput);
+  const withRaAndRb = saveSection(withRa, rbInput, undefined, []);
   assert.equal(withRaAndRb.find((course) => course.id === baseCourse.id)?.sections.length, 2);
   const duplicateRa = sectionInput({ sectionNumber: 73, cohorts: [{ majorId: baseMajor.id, admissionYear: 2567, classGroupIds: [ra.id] }] });
   assert.match(validateSectionInput(withRaAndRb, academic, initialTeachers, duplicateRa) || '', /รหัส/);
@@ -186,7 +187,7 @@ test('one Section may combine RA + RB and eligibility follows the student primar
 });
 
 test('section edits retain identity and can move between courses', () => {
-  const created = saveSection(courses, sectionInput({ sectionNumber: 96 }));
+  const created = saveSection(courses, sectionInput({ sectionNumber: 96 }), undefined, []);
   const locatedCourse = created.find((course) => course.id === baseCourse.id)!;
   const createdSection = locatedCourse.sections.at(-1)!;
   const sectionId = sectionIdOf(locatedCourse.id, createdSection);
@@ -195,8 +196,114 @@ test('section edits retain identity and can move between courses', () => {
     assert.ok(findSection(created, sectionId));
     return;
   }
-  const moved = saveSection(created, sectionInput({ courseId: alternate.id, sectionNumber: 95 }), sectionId);
+  const moved = saveSection(created, sectionInput({ courseId: alternate.id, sectionNumber: 95 }), sectionId, []);
   assert.equal(findSection(moved, sectionId)?.course.id, alternate.id);
+});
+
+test('referenced Section reassignment is rejected before mutating Course or Exam data', () => {
+  const source = courses.find((course) => course.id === initialExamSessions[0].courseId)!;
+  const section = source.sections.find((item) => item.sectionNo === initialExamSessions[0].sectionNo)!;
+  const destination = { ...source, id: 'course-integrity-destination', sections: [] };
+  const inventory = [source, destination];
+  const sectionId = sectionIdOf(source.id, section);
+  const input: SectionInput = {
+    courseId: destination.id,
+    sectionNumber: Number(section.sectionNumber || section.sectionNo),
+    semester: section.semester as SectionInput['semester'],
+    academicYear: section.academicYear,
+    primaryTeacherId: section.primaryTeacherId || section.teacherId,
+    coTeacherIds: section.coTeacherIds || [],
+    cohorts: section.cohorts || [],
+    status: section.status || 'active',
+  };
+  const exam = { ...initialExamSessions[0], sectionId };
+  const before = JSON.stringify({ inventory, exam });
+  assert.equal(validateSectionInput(inventory, academic, initialTeachers, input, sectionId), undefined);
+  assert.throws(() => saveSection(inventory, input, sectionId, [exam]), /ไม่สามารถย้ายตอนเรียน/);
+  assert.equal(JSON.stringify({ inventory, exam }), before);
+});
+
+test('all Exam statuses and canonical, legacy, missing and ambiguous references prevent Section reassignment', () => {
+  const source = courses.find((course) => course.id === initialExamSessions[0].courseId)!;
+  const section = source.sections.find((item) => item.sectionNo === initialExamSessions[0].sectionNo)!;
+  const sectionId = sectionIdOf(source.id, section);
+  const duplicate = { ...section, id: 'same-number-other-period', academicYear: section.academicYear - 1 };
+  const inventory = [{ ...source, sections: [...source.sections, duplicate] }, { ...source, id: 'destination', sections: [] }];
+  const input: SectionInput = {
+    courseId: 'destination', sectionNumber: Number(section.sectionNo), semester: section.semester as SectionInput['semester'],
+    academicYear: section.academicYear, primaryTeacherId: section.primaryTeacherId || section.teacherId,
+    coTeacherIds: section.coTeacherIds || [], cohorts: section.cohorts || [], status: 'active',
+  };
+  const base = { ...initialExamSessions[0], courseId: source.id, sectionNo: section.sectionNo };
+  const references = [
+    { ...base, sectionId },
+    { ...base, sectionId: undefined },
+    { ...base, sectionId: undefined, sectionResolution: 'ambiguous' as const },
+    { ...base, sectionId: undefined, sectionResolution: 'missing' as const },
+    { ...base, sectionId: sectionId, sectionResolution: 'missing' as const },
+  ];
+  for (const status of ['upcoming', 'in_progress', 'completed'] as const) {
+    for (const exam of references) {
+      const protectedExam = { ...exam, status };
+      assert.match(sectionReassignmentError(inventory, [protectedExam], input, sectionId) || '', /ไม่สามารถย้ายตอนเรียน/);
+      assert.throws(() => saveSection(inventory, input, sectionId, [protectedExam]), /ไม่สามารถย้ายตอนเรียน/);
+    }
+  }
+  assert.match(sectionReassignmentError(inventory, [{ ...base, sectionId: undefined, sectionResolution: 'ambiguous' }], input, duplicate.id) || '', /ไม่สามารถย้ายตอนเรียน/);
+});
+
+test('rejected move preserves resolved Exam, Teacher and Student projections, historical arrays and serialized relationships', () => {
+  const source = courses.find((course) => course.id === initialExamSessions[0].courseId)!;
+  const section = source.sections.find((item) => item.sectionNo === initialExamSessions[0].sectionNo)!;
+  const id = sectionIdOf(source.id, section);
+  const exam = { ...initialExamSessions[0], sectionId: id, eligibleStudentIds: ['second', 'first'], importedStudentIds: ['first', 'second'] };
+  const destination = { ...source, id: 'destination', sections: [] };
+  const inventory = [source, destination];
+  const input: SectionInput = {
+    courseId: destination.id, sectionNumber: Number(section.sectionNo), semester: section.semester as SectionInput['semester'],
+    academicYear: section.academicYear, primaryTeacherId: section.primaryTeacherId || section.teacherId,
+    coTeacherIds: section.coTeacherIds || [], cohorts: section.cohorts || [], status: 'active',
+  };
+  const historical = { inventory, exams: [exam], seats: initialSeatAssignments, submissions: initialSubmissions };
+  const before = JSON.stringify(historical);
+  const teacherBefore = coursesForTeacher(inventory, section.primaryTeacherId || section.teacherId);
+  const eligibleStudent = students.find((student) => studentMatchesSection(student, section));
+  assert.ok(eligibleStudent);
+  const studentBefore = coursesForStudent(inventory, eligibleStudent);
+  assert.throws(() => saveSection(inventory, input, id, [exam]), /ไม่สามารถย้ายตอนเรียน/);
+  assert.equal(JSON.stringify(historical), before);
+  assert.deepEqual(coursesForTeacher(inventory, section.primaryTeacherId || section.teacherId), teacherBefore);
+  assert.deepEqual(coursesForStudent(inventory, eligibleStudent), studentBefore);
+  assert.equal(resolveExamSection(exam, inventory).status, 'resolved');
+  const reloaded = JSON.parse(before) as typeof historical;
+  assert.equal(resolveExamSection(migrateExamSections(reloaded.exams, reloaded.inventory)[0], reloaded.inventory).status, 'resolved');
+  assert.deepEqual(reloaded.seats, initialSeatAssignments);
+  assert.deepEqual(reloaded.submissions, initialSubmissions);
+});
+
+test('unique legacy reference blocks a move while unreferenced Section moves and referenced same-Course edit remain valid', () => {
+  const source = courses.find((course) => course.id === initialExamSessions[0].courseId)!;
+  const section = source.sections.find((item) => item.sectionNo === initialExamSessions[0].sectionNo)!;
+  const id = sectionIdOf(source.id, section);
+  const sourceOnly = { ...source, sections: [section] };
+  const destination = { ...source, id: 'destination', sections: [] };
+  const inventory = [sourceOnly, destination];
+  const input: SectionInput = {
+    courseId: destination.id, sectionNumber: Number(section.sectionNo), semester: section.semester as SectionInput['semester'],
+    academicYear: section.academicYear, primaryTeacherId: section.primaryTeacherId || section.teacherId,
+    coTeacherIds: section.coTeacherIds || [], cohorts: section.cohorts || [], status: 'active',
+  };
+  const legacy = { ...initialExamSessions[0], sectionId: undefined };
+  assert.equal(validateSectionInput(inventory, academic, initialTeachers, input, id), undefined);
+  assert.match(sectionReassignmentError(inventory, [legacy], input, id) || '', /ไม่สามารถย้ายตอนเรียน/);
+  assert.throws(() => saveSection(inventory, input, id, [legacy]), /ไม่สามารถย้ายตอนเรียน/);
+  assert.equal(sectionReassignmentError(inventory, [], input, id), undefined);
+  assert.equal(findSection(saveSection(inventory, input, id, []), id)?.course.id, destination.id);
+  const sameCourse = { ...input, courseId: source.id, sectionNumber: Number(section.sectionNo) + 10 };
+  assert.equal(validateSectionInput(inventory, academic, initialTeachers, sameCourse, id), undefined);
+  assert.equal(sectionReassignmentError(inventory, [legacy], sameCourse, id), undefined);
+  const edited = saveSection(inventory, sameCourse, id, [legacy]);
+  assert.equal(findSection(edited, id)?.section.sectionNo, String(sameCourse.sectionNumber));
 });
 
 test('teacher and student portal projections follow section assignments', () => {
@@ -357,7 +464,7 @@ test('saved Section edits and migration preserve normalized overrides and stable
   const migrated = migrateCourses([withOverride], academic);
   assert.deepEqual(migrated[0].sections[0].includedStudentIds, [exceptionalStudent.id]);
   const input: SectionInput = { courseId: withOverride.id, sectionNumber: 1, semester: 1, academicYear: 2569, primaryTeacherId: enrollmentTeacherId, coTeacherIds: [], cohorts: withOverride.sections[0].cohorts!, status: 'active' };
-  const saved = saveSection(migrated, input, 'section-enrollment-1');
+  const saved = saveSection(migrated, input, 'section-enrollment-1', []);
   assert.deepEqual(saved[0].sections.find((section) => section.id === 'section-enrollment-1')?.includedStudentIds, [exceptionalStudent.id]);
 });
 
@@ -390,4 +497,112 @@ test('ambiguous legacy exam Section number blocks unsafe individual roster chang
   const exam = { ...initialExamSessions[0], courseId: enrollmentCourse.id, sectionNo: '1' };
   assert.match(enrollmentExamReferenceError([exam], [ambiguous], ['section-enrollment-1']) || '', /Section ID/);
   assert.equal(enrollmentExamReferenceError([exam], [enrollmentCourse], ['section-enrollment-1']), undefined);
+});
+
+import { examSection, formatSectionAcademicPeriod, formatSectionOption, migrateExamSections, resolveExamSection } from './sectionIdentity';
+import { allocateEntityId } from './entityIdentity';
+import { getAuthorizedMonitoringExams } from './teacherMonitoring';
+import { examWizardStateFromSession, examWizardToSession, resolveEligibleExamStudents } from './examWizard';
+
+const identityCourse: Course = {
+  ...initialCourses[0], id: 'identity-course', sections: [
+    { ...initialCourses[0].sections[0], id: 'section-a', sectionNo: '1', semester: 1, academicYear: 2568, teacherId: 'teacher-a', primaryTeacherId: 'teacher-a', coTeacherIds: [], cohorts: [], includedStudentIds: [initialStudents[0].id] },
+    { ...initialCourses[0].sections[0], id: 'section-b', sectionNo: '1', semester: 1, academicYear: 2569, teacherId: 'teacher-b', primaryTeacherId: 'teacher-b', coTeacherIds: [], cohorts: [], includedStudentIds: [initialStudents[1].id] },
+    { ...initialCourses[0].sections[0], id: 'section-c', sectionNo: '1', semester: 2, academicYear: 2569, teacherId: 'teacher-c', primaryTeacherId: 'teacher-c', coTeacherIds: [], cohorts: [] },
+  ],
+};
+const identityExam = { ...initialExamSessions[0], courseId: identityCourse.id, sectionId: 'section-b', sectionNo: '1' };
+
+test('canonical Section resolves across repeated numbers, years and semesters independently of array order', () => {
+  for (const id of ['section-a', 'section-b', 'section-c']) {
+    const exam = { ...identityExam, sectionId: id };
+    assert.equal(examSection(exam, [identityCourse])?.id, id);
+    assert.equal(examSection(exam, [{ ...identityCourse, sections: [...identityCourse.sections].reverse() }])?.id, id);
+  }
+});
+
+test('canonical relationship survives renumbering and rejects missing or foreign IDs without fallback', () => {
+  assert.equal(examSection(identityExam, [{ ...identityCourse, sections: identityCourse.sections.map(s => ({ ...s, sectionNo: '9' })) }])?.id, 'section-b');
+  assert.equal(resolveExamSection({ ...identityExam, sectionId: 'foreign' }, [identityCourse]).status, 'missing');
+  assert.equal(resolveExamSection({ ...identityExam, courseId: 'missing' }, [identityCourse]).status, 'missing');
+});
+
+test('Student period and Wizard option use the resolved Section period without a guessed fallback', () => {
+  assert.equal(formatSectionAcademicPeriod(identityCourse.sections[0]), 'ภาคการศึกษา 1 / ปีการศึกษา 2568');
+  assert.equal(formatSectionAcademicPeriod(identityCourse.sections[2]), 'ภาคการศึกษา 2 / ปีการศึกษา 2569');
+  assert.equal(formatSectionAcademicPeriod({ ...identityCourse.sections[0], semester: 'summer' }), 'ภาคฤดูร้อน / ปีการศึกษา 2568');
+  assert.equal(formatSectionAcademicPeriod(undefined), undefined);
+  assert.equal(formatSectionAcademicPeriod(examSection({ ...identityExam, sectionId: 'missing' }, [identityCourse])), undefined);
+  const labels = identityCourse.sections.map(formatSectionOption);
+  assert.equal(new Set(labels).size, 3);
+  assert.ok(labels[0].includes('ตอนเรียน 1 | ภาคการศึกษา 1 / ปีการศึกษา 2568'));
+  assert.ok(labels.every((label) => !label.includes(' ? ')));
+});
+
+test('teacher monitoring never grants another same-number Section and Student eligibility uses actual Section', () => {
+  assert.equal(getAuthorizedMonitoringExams([identityExam], coursesForTeacher([identityCourse], 'teacher-a')).length, 0);
+  assert.equal(getAuthorizedMonitoringExams([identityExam], coursesForTeacher([identityCourse], 'teacher-b')).length, 1);
+  const roster = resolveEligibleExamStudents(identityExam, [identityCourse], initialStudents);
+  assert.deepEqual(roster.map(s => s.id), [initialStudents[1].id]);
+});
+
+test('legacy migration preserves IDs, ordered rosters, snapshots and historical references idempotently', () => {
+  const single = { ...identityCourse, sections: [identityCourse.sections[1]] };
+  const legacy = { ...identityExam, sectionId: undefined, eligibleStudentIds: ['b', 'a'], importedStudentIds: ['b', 'a'] };
+  const migrated = migrateExamSections([legacy], [single]);
+  assert.equal(migrated[0].sectionId, 'section-b');
+  assert.equal(migrated[0].id, legacy.id);
+  assert.equal(migrated[0].eligibleStudentIds, legacy.eligibleStudentIds);
+  assert.equal(migrated[0].importedStudentIds, legacy.importedStudentIds);
+  assert.deepEqual(migrateExamSections(migrated, [single]), migrated);
+  assert.equal(initialExamSessions[0].id, migrated[0].id);
+});
+
+test('ambiguous and missing legacy exams remain reviewable and fail closed even after role filtering', () => {
+  const legacy = { ...identityExam, sectionId: undefined };
+  const [ambiguous] = migrateExamSections([legacy], [identityCourse]);
+  assert.equal(ambiguous.sectionResolution, 'ambiguous');
+  assert.equal(ambiguous.sectionId, undefined);
+  assert.equal(ambiguous.id, legacy.id);
+  assert.equal(getAuthorizedMonitoringExams([ambiguous], coursesForTeacher([identityCourse], 'teacher-a')).length, 0);
+  const [missing] = migrateExamSections([legacy], []);
+  assert.equal(missing.sectionResolution, 'missing');
+  assert.deepEqual(migrateExamSections([ambiguous], [identityCourse]), [ambiguous]);
+});
+
+test('wizard round trip preserves canonical Section and Exam identity on edit', () => {
+  const state = examWizardStateFromSession(identityExam);
+  const payload = examWizardToSession(state);
+  assert.equal(payload.sectionId, 'section-b');
+  const edited = { ...identityExam, ...payload };
+  assert.equal(edited.id, identityExam.id);
+  assert.equal(edited.sectionId, identityExam.sectionId);
+  assert.equal(sectionDeleteError(identityCourse, identityCourse.sections[0], [identityExam]), undefined);
+  assert.ok(sectionDeleteError(identityCourse, identityCourse.sections[1], [identityExam]));
+});
+
+test('UUID allocation does not reuse sparse or deleted-middle entity IDs across repeated creates', () => {
+  for (const prefix of ['tch', 'adm', 'crs']) {
+    const records = [{ id: prefix + '_0001' }, { id: prefix + '_0003' }];
+    const issued = new Set(records.map(r => r.id));
+    issued.add(prefix + '_0002');
+    for (let i = 0; i < 100; i++) {
+      const id = allocateEntityId(prefix, records);
+      assert.ok(!issued.has(id));
+      issued.add(id);
+      records.push({ id });
+    }
+  }
+});
+
+
+test('unresolved Section cannot grant snapshot eligibility and canonical historical snapshots remain unchanged', () => {
+  const student = initialStudents[0];
+  const historical = { ...identityExam, status: 'completed' as const, examDate: '2020-01-01', eligibleStudentIds: [student.id] };
+  assert.equal(studentMatchesExamSection(student, historical, undefined), false);
+  assert.equal(studentMatchesExamSection(student, historical, examSection(historical, [identityCourse])), true);
+  assert.deepEqual(snapshotAffectedExamRosters([historical], [identityCourse], initialStudents, ['section-b']), [historical]);
+  const serialized = JSON.parse(JSON.stringify(migrateExamSections([{ ...identityExam, sectionId: undefined }], [identityCourse])));
+  assert.equal(resolveExamSection(serialized[0], [identityCourse]).status, 'ambiguous');
+  assert.deepEqual(migrateExamSections(serialized, [identityCourse]), serialized);
 });

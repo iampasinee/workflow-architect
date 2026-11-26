@@ -1,3 +1,4 @@
+import { formatSectionOption, sectionIdOf } from '../../services/sectionIdentity';
 import React, { useMemo, useState } from 'react';
 import {
   AlertTriangle,
@@ -358,15 +359,15 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
         <div><h2 className="text-lg font-bold text-gray-900">ข้อมูลการสอบ</h2><p className="text-xs text-gray-500">เลือกรายวิชาและ Section ที่คุณได้รับมอบหมายเท่านั้น</p></div>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="text-xs font-semibold text-gray-700">รายวิชา *
-            <select value={state.courseId} onChange={(event) => setState((current) => ({ ...current, courseId: event.target.value, sectionNo: '', importedStudentIds: undefined }))} className={`${inputClass} mt-1`}>
+            <select value={state.courseId} onChange={(event) => setState((current) => ({ ...current, courseId: event.target.value, sectionId: undefined, sectionNo: '', importedStudentIds: undefined }))} className={`${inputClass} mt-1`}>
               <option value="">เลือกรายวิชา</option>
               {courses.filter((course) => course.status === 'active' && course.sections.some((section) => section.status !== 'inactive')).map((course) => <option key={course.id} value={course.id}>{course.courseCode} — {course.courseName}</option>)}
             </select><ErrorText message={errors.courseId} />
           </label>
           <label className="text-xs font-semibold text-gray-700">Section *
-            <select value={state.sectionNo} disabled={!state.courseId} onChange={(event) => setState((current) => ({ ...current, sectionNo: event.target.value, importedStudentIds: undefined }))} className={`${inputClass} mt-1`}>
+            <select value={selectedSection ? sectionIdOf(state.courseId, selectedSection) : ''} disabled={!state.courseId} onChange={(event) => setState((current) => ({ ...current, sectionId: event.target.value, sectionNo: sectionOptions.find((section) => sectionIdOf(current.courseId, section) === event.target.value)?.sectionNo || '', importedStudentIds: undefined }))} className={`${inputClass} mt-1`}>
               <option value="">เลือก Section</option>
-              {sectionOptions.map((section) => <option key={section.id || section.sectionNo} value={section.sectionNo}>Section {section.sectionNo}</option>)}
+              {sectionOptions.map((section) => <option key={section.id || section.sectionNo} value={sectionIdOf(state.courseId, section)}>{formatSectionOption(section)}</option>)}
             </select><ErrorText message={errors.sectionNo} />
           </label>
           <label className="text-xs font-semibold text-gray-700">ประเภทการสอบ

@@ -6,11 +6,12 @@ import { isAcademicPathActive, legacyGroupToCohort } from './academicState';
 import { resolveAcademicGroupId } from '../data/academicStructure';
 import { getEffectiveExamStatus } from './examStatus';
 
+import { examSection, examReferencesSection, resolveExamSection, sectionIdOf } from './sectionIdentity';
+export { sectionIdOf } from './sectionIdentity';
+
 const stamp = '2026-09-17T00:00:00.000Z';
 export const courseOfferingSettings = { currentSemester: 1 as const };
 const normalizeYear = (year: number) => year > 0 && year < 2500 ? year + 543 : year;
-export const sectionIdOf = (courseId: string, section: Course['sections'][number]) =>
-  section.id || `section-${courseId}-${normalizeYear(section.academicYear)}-${section.semester}-${section.sectionNo}`;
 
 export const cohortKey = (cohort: SectionCohort) => `${cohort.majorId}:${cohort.admissionYear}`;
 const normalizeGroupIds = (ids?: string[]) => [...new Set(ids || [])].sort();
@@ -191,7 +192,18 @@ export const saveCourse = (courses: Course[], academic: AcademicState, raw: Cour
   return id ? courses.map((item) => item.id === id ? record : item) : [record, ...courses];
 };
 
-export const saveSection = (courses: Course[], raw: SectionInput, id?: string): Course[] => {
+export const sectionReassignmentError = (courses: Course[], exams: ExamSession[], raw: SectionInput, id?: string): string | undefined => {
+  if (!id) return undefined;
+  const located = findSection(courses, id);
+  if (!located || located.course.id === raw.courseId) return undefined;
+  return exams.some((exam) => examReferencesSection(exam, located.course, located.section))
+    ? 'ไม่สามารถย้ายตอนเรียนไปยังรายวิชาอื่นได้ เนื่องจากมีข้อมูลการสอบอ้างอิงอยู่'
+    : undefined;
+};
+
+export const saveSection = (courses: Course[], raw: SectionInput, id: string | undefined, exams: ExamSession[]): Course[] => {
+  const reassignmentError = sectionReassignmentError(courses, exams, raw, id);
+  if (reassignmentError) throw new Error(reassignmentError);
   const now = new Date().toISOString();
   const existing = id ? findSection(courses, id)?.section : undefined;
   const record: Course['sections'][number] = {
@@ -244,10 +256,13 @@ export const searchStudentsByIdentity = (students: Student[], query: string): St
     `${student.studentCode} ${student.fullName} ${student.email}`.toLocaleLowerCase().includes(normalized)) : students;
 };
 
-export const studentMatchesExamSection = (student: Student, exam: ExamSession, section?: Course['sections'][number], now = new Date()) =>
-  getEffectiveExamStatus(exam, now) !== 'upcoming' && exam.eligibleStudentIds
+export const studentMatchesExamSection = (student: Student, exam: ExamSession, section?: Course['sections'][number], now = new Date()) => {
+  if (!section || (exam.sectionResolution && !exam.sectionId)) return false;
+  if (exam.sectionId && sectionIdOf(exam.courseId, section) !== exam.sectionId) return false;
+  return getEffectiveExamStatus(exam, now) !== 'upcoming' && exam.eligibleStudentIds
     ? exam.eligibleStudentIds.includes(student.id)
     : studentMatchesSection(student, section) && (!exam.importedStudentIds || exam.importedStudentIds.includes(student.id));
+};
 
 export const snapshotAffectedExamRosters = (
   exams: ExamSession[], courses: Course[], students: Student[], affectedSectionIds: string[], now = new Date(),
@@ -256,7 +271,7 @@ export const snapshotAffectedExamRosters = (
   return exams.map((exam) => {
     if (getEffectiveExamStatus(exam, now) === 'upcoming' || exam.eligibleStudentIds) return exam;
     const course = courses.find((item) => item.id === exam.courseId);
-    const section = course?.sections.find((item) => item.sectionNo === exam.sectionNo);
+    const section = examSection(exam, courses);
     if (!course || !section || !affected.has(sectionIdOf(course.id, section))) return exam;
     return { ...exam, eligibleStudentIds: students.filter((student) => studentMatchesExamSection(student, exam, section, now)).map((student) => student.id) };
   });
@@ -267,7 +282,7 @@ export const enrollmentExamReferenceError = (exams: ExamSession[], courses: Cour
     const located = findSection(courses, id);
     if (!located) continue;
     const duplicateSectionNumbers = located.course.sections.filter((section) => section.sectionNo === located.section.sectionNo);
-    if (duplicateSectionNumbers.length > 1 && exams.some((exam) => exam.courseId === located.course.id && exam.sectionNo === located.section.sectionNo)) {
+    if (duplicateSectionNumbers.length > 1 && exams.some((exam) => exam.courseId === located.course.id && resolveExamSection(exam, courses).status === 'ambiguous')) {
       return 'รายวิชานี้มี Section หมายเลขเดียวกันหลายภาคการศึกษา และการสอบยังไม่ได้อ้างอิง Section ID จึงไม่สามารถปรับรายชื่อเฉพาะรายได้อย่างปลอดภัย';
     }
   }
@@ -388,7 +403,7 @@ export const courseDeleteError = (course: Course, exams: ExamSession[]) =>
     ? 'ไม่สามารถลบรายวิชานี้ได้ เนื่องจากมีตอนเรียนหรือข้อมูลการสอบอ้างอิงอยู่ กรุณาปิดใช้งานแทน' : undefined;
 
 export const sectionDeleteError = (course: Course, section: Course['sections'][number], exams: ExamSession[]) =>
-  exams.some((exam) => exam.courseId === course.id && exam.sectionNo === section.sectionNo)
+  exams.some((exam) => examReferencesSection(exam, course, section))
     ? 'ไม่สามารถลบตอนเรียนนี้ได้ เนื่องจากมีข้อมูลการสอบอ้างอิงอยู่ กรุณาปิดใช้งานแทน' : undefined;
 
 export const coursesForTeacher = (courses: Course[], teacherId?: string) => !teacherId ? [] : courses
@@ -398,6 +413,6 @@ export const coursesForTeacher = (courses: Course[], teacherId?: string) => !tea
 export const coursesForStudent = (courses: Course[], student?: Student | null, exams: ExamSession[] = [], now = new Date()) =>
   !student ? [] : courses
     .map((course) => ({ ...course, sections: course.sections.filter((section) =>
-      studentMatchesSection(student, section) || exams.some((exam) => exam.courseId === course.id && exam.sectionNo === section.sectionNo &&
+      studentMatchesSection(student, section) || exams.some((exam) => exam.courseId === course.id && examSection(exam, courses) === section &&
         getEffectiveExamStatus(exam, now) !== 'upcoming' && exam.eligibleStudentIds?.includes(student.id))) }))
     .filter((course) => course.sections.length);

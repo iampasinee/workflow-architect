@@ -1,3 +1,4 @@
+import { examSection } from './sectionIdentity';
 import type { Course, ExamSession, ExamSessionStatus, Room, Violation } from '../types';
 import { getEffectiveExamStatus } from './examStatus';
 
@@ -57,7 +58,7 @@ export const getAuthorizedMonitoringExams = (
   teacherCourses: Course[],
 ): TeacherMonitoringExam[] => examSessions.flatMap((exam) => {
   const course = teacherCourses.find((candidate) => candidate.id === exam.courseId);
-  const section = course?.sections.find((candidate) => candidate.sectionNo === exam.sectionNo);
+  const section = examSection(exam, teacherCourses);
   return course && section ? [{ exam, course, section }] : [];
 });
 

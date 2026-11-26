@@ -1,3 +1,4 @@
+import { examSection } from '../../services/sectionIdentity';
 import { calculateYearLevelFromAdmissionYear } from '../../utils/academicYear';
 import { studentMatchesExamSection } from '../../services/courseState';
 import React, { useState } from 'react';
@@ -42,8 +43,7 @@ export const SeatAssignmentManager: React.FC = () => {
   const activeExam = examSessions.find((exam) => exam.id === selectedExam) || examSessions[0];
   const canEditSeats = Boolean(activeExam && canEditExamSeats(activeExam, new Date()));
   const room = rooms.find((r) => r.id === activeExam?.roomId);
-  const activeSection = courses.find((course) => course.id === activeExam?.courseId)?.sections
-    .find((section) => section.sectionNo === activeExam?.sectionNo);
+  const activeSection = examSection(activeExam, courses);
   const eligibleStudents = students.filter((student) => activeExam && studentMatchesExamSection(student, activeExam, activeSection));
 
   const [selectedSeatNo, setSelectedSeatNo] = useState<string | null>(null);

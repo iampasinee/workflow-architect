@@ -1,3 +1,4 @@
+import { examSection, sectionIdOf } from './sectionIdentity';
 import type {
   Course,
   ExamPolicy,
@@ -13,6 +14,7 @@ import { studentMatchesSection } from './courseState';
 
 export interface ExamWizardState {
   courseId: string;
+  sectionId?: string;
   sectionNo: string;
   examName: string;
   questionCount: number;
@@ -178,6 +180,7 @@ export const createEmptyExamWizardState = (): ExamWizardState => ({
 export const examWizardStateFromSession = (exam: ExamSession): ExamWizardState => ({
   ...createEmptyExamWizardState(),
   courseId: exam.courseId,
+  sectionId: exam.sectionId,
   sectionNo: exam.sectionNo,
   examName: examNameSuffix(exam.examType || 'other', exam.examName),
   questionCount: getExamQuestionCount(exam.questionCount),
@@ -204,22 +207,22 @@ export const sectionsForWizardCourse = (courses: Course[], courseId: string) =>
 export const selectWizardCourse = (state: ExamWizardState, courseId: string, courses: Course[]): ExamWizardState => ({
   ...state,
   courseId,
+  sectionId: courseId === state.courseId ? state.sectionId : undefined,
   sectionNo: sectionsForWizardCourse(courses, courseId).some((section) => section.sectionNo === state.sectionNo)
     ? state.sectionNo
     : '',
 });
 
 export const resolveWizardSection = (state: ExamWizardState, courses: Course[]) =>
-  sectionsForWizardCourse(courses, state.courseId).find((section) => section.sectionNo === state.sectionNo);
+  examSection(state, courses);
 
 export const resolveEligibleExamStudents = (
-  state: Pick<ExamWizardState, 'courseId' | 'sectionNo' | 'importedStudentIds'>,
+  state: Pick<ExamWizardState, 'courseId' | 'sectionId' | 'sectionNo' | 'importedStudentIds'>,
   courses: Course[],
   students: Student[],
 ) => {
-  const section = courses.find((course) => course.id === state.courseId)?.sections
-    .find((candidate) => candidate.sectionNo === state.sectionNo && candidate.status !== 'inactive');
-  return section ? students.filter((student) => student.accountStatus === 'active' && studentMatchesSection(student, section) && (!state.importedStudentIds || state.importedStudentIds.includes(student.id))) : [];
+  const section = examSection(state, courses);
+  return section && section.status !== 'inactive' ? students.filter((student) => student.accountStatus === 'active' && studentMatchesSection(student, section) && (!state.importedStudentIds || state.importedStudentIds.includes(student.id))) : [];
 };
 
 const timeToMinutes = (value: string): number | null => {
@@ -366,14 +369,14 @@ export const applyRecommendedExamResources = (policy: ExamPolicy, format: ExamSe
 export const validateExamWizard = (state: ExamWizardState, environment: ExamWizardEnvironment) => {
   const errors: Record<string, string> = {};
   const course = environment.courses.find((candidate) => candidate.id === state.courseId && candidate.status === 'active');
-  const section = course?.sections.find((candidate) => candidate.sectionNo === state.sectionNo && candidate.status !== 'inactive');
+  const section = examSection(state, environment.courses);
   const room = environment.rooms.find((candidate) => candidate.id === state.roomId);
   const eligibleCount = resolveEligibleExamStudents(state, environment.courses, environment.students).length;
   const durationMinutes = calculateExamDurationMinutes(state.startTime, state.endTime);
   const conflict = findExamRoomConflict(environment.examSessions, state, environment.editingExamId);
 
   if (!course) errors.courseId = 'กรุณาเลือกรายวิชาที่คุณได้รับมอบหมาย';
-  if (!section) errors.sectionNo = 'กรุณาเลือก Section ที่คุณได้รับมอบหมาย';
+  if (!section || section.status === 'inactive') errors.sectionNo = 'กรุณาเลือก Section ที่คุณได้รับมอบหมาย';
   if (!Number.isSafeInteger(state.questionCount) || state.questionCount < 1) {
     errors.questionCount = 'กรุณาระบุจำนวนข้อเป็นจำนวนเต็มตั้งแต่ 1 ขึ้นไป';
   }
@@ -410,6 +413,7 @@ export const examWizardToSession = (
   layout: state.layout,
   examType: state.examType,
   courseId: state.courseId,
+  sectionId: state.sectionId,
   sectionNo: state.sectionNo,
   examDate: state.examDate,
   startTime: state.startTime,

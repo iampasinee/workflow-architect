@@ -1,3 +1,6 @@
+import { teacherCanManageSection } from '../services/courseState';
+import { allocateEntityId } from '../services/entityIdentity';
+import { examSection, migrateExamSections, sectionIdOf } from '../services/sectionIdentity';
 import { calculateYearLevelFromAdmissionYear, useAcademicYear, withCalculatedStudentYear, withoutStudentYear } from '../utils/academicYear';
 import { reviewNewStudents } from '../services/rosterImport';
 import { addCs301DemoCoTeacher } from '../data/teacherCourseDemo';
@@ -16,7 +19,7 @@ import {
   addStudentToSection as addStudentEnrollment, courseDeleteError, coursesForStudent, coursesForTeacher,
   enrollmentExamReferenceError,
   findSection, findStudentEnrollmentInCourse, migrateCourses,
-  moveStudentBetweenSections as moveStudentEnrollment, saveCourse, saveSection, sectionDeleteError,
+  moveStudentBetweenSections as moveStudentEnrollment, saveCourse, saveSection, sectionDeleteError, sectionReassignmentError,
   snapshotAffectedExamRosters, studentMatchesExamSection, studentMatchesSection, validateCourseInput, validateSectionInput,
 } from '../services/courseState';
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
@@ -302,7 +305,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   });
 
   const [storedExamSessions, setExamSessions] = useState<ExamSession[]>(() => {
-    return safeParse('securelab_exams', initialExamSessions).map((exam) =>
+    return migrateExamSections(safeParse('securelab_exams', initialExamSessions), storedCourses).map((exam) =>
       exam.examType ? { ...exam, examName: wizardExamName({ examType: exam.examType, examName: exam.examName || '' }) } : exam);
   });
 
@@ -358,17 +361,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const courses = useMemo(() => role === 'teacher' ? coursesForTeacher(storedCourses, currentTeacher?.id)
     : role === 'student' ? coursesForStudent(storedCourses, derivedCurrentStudent, storedExamSessions, examNow) : storedCourses,
   [role, storedCourses, currentTeacher?.id, derivedCurrentStudent, storedExamSessions, examNow]);
-  const examSessions = useMemo(() => role === 'admin' || !role ? storedExamSessions : storedExamSessions.filter((exam) =>
-    courses.some((course) => course.id === exam.courseId && course.sections.some((section) => section.sectionNo === exam.sectionNo &&
-      (role !== 'student' || (derivedCurrentStudent && studentMatchesExamSection(derivedCurrentStudent, exam, section, examNow)))))),
-  [role, storedExamSessions, courses, derivedCurrentStudent, examNow]);
+  const examSessions = useMemo(() => role === 'admin' || !role ? storedExamSessions : storedExamSessions.filter((exam) => {
+    const section = examSection(exam, storedCourses);
+    if (!section) return false;
+    const authorized = courses.some((course) => course.id === exam.courseId && course.sections.some((candidate) =>
+      sectionIdOf(course.id, candidate) === sectionIdOf(course.id, section)));
+    return authorized && (role !== 'student' || Boolean(derivedCurrentStudent && studentMatchesExamSection(derivedCurrentStudent, exam, section, examNow)));
+  }), [role, storedExamSessions, storedCourses, courses, derivedCurrentStudent, examNow]);
   const visibleStudents = useMemo(() => {
     if (role === 'student') return students.filter((student) => student.id === currentStudent?.id);
     if (role !== 'teacher') return students;
     const sections = courses.flatMap((course) => course.sections);
     return students.filter((student) => sections.some((section) => studentMatchesSection(student, section)) ||
       storedExamSessions.some((exam) => getEffectiveExamStatus(exam, examNow) !== 'upcoming' && exam.eligibleStudentIds?.includes(student.id) &&
-        courses.some((course) => course.id === exam.courseId && course.sections.some((section) => section.sectionNo === exam.sectionNo))));
+        courses.some((course) => course.id === exam.courseId && Boolean(examSection(exam, storedCourses) && course.sections.some((section) => sectionIdOf(course.id, section) === sectionIdOf(course.id, examSection(exam, storedCourses)!))))));
   }, [role, students, courses, currentStudent?.id, storedExamSessions, examNow]);
   const studentDirectory = role === 'teacher' ? students : visibleStudents;
 
@@ -656,7 +662,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       showToast('ไม่สามารถเพิ่มอาจารย์ได้', affiliationError, 'error');
       return false;
     }
-    const id = `tch_${String(teachers.length + 1).padStart(4, '0')}`;
+    const id = allocateEntityId('tch', teachers);
     const created: Teacher = { ...newTch, ...teacherAcademicFields(academicState, newTch), id };
     setTeachers(prev => [created, ...prev]);
     showToast('เพิ่มอาจารย์สำเร็จ', `ลงทะเบียน ${created.fullName} เรียบร้อยแล้ว`, 'success');
@@ -702,7 +708,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Admin CRUD
   const addAdmin = (newAdm: Omit<Admin, 'id'>) => {
-    const id = `adm_${String(admins.length + 1).padStart(4, '0')}`;
+    const id = allocateEntityId('adm', admins);
     const created: Admin = { ...newAdm, id };
     setAdmins(prev => [created, ...prev]);
     showToast('เพิ่มผู้ดูแลระบบสำเร็จ', `เพิ่ม ${created.fullName} พร้อมสิทธิ์ผู้ดูแลระบบแล้ว`, 'success');
@@ -739,7 +745,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Course CRUD
   const addCourse = (newCourse: Omit<Course, 'id'>) => {
-    const id = `crs_${String(storedCourses.length + 1).padStart(4, '0')}`;
+    const id = allocateEntityId('crs', storedCourses);
     const created: Course = { ...newCourse, id };
     setCourses(prev => [created, ...prev]);
     showToast('สร้างรายวิชาแล้ว', `เพิ่ม ${created.courseCode} ในรายการรายวิชาเรียบร้อยแล้ว`, 'success');
@@ -775,9 +781,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const saveSectionRecord = (input: SectionInput, id?: string): CourseActionResult => {
     if (role !== 'admin') return { success: false, error: 'เฉพาะผู้ดูแลระบบเท่านั้น' };
+    const reassignmentError = sectionReassignmentError(storedCourses, storedExamSessions, input, id);
+    if (reassignmentError) {
+      showToast('ไม่สามารถย้ายตอนเรียนได้', reassignmentError, 'error');
+      return { success: false, error: reassignmentError };
+    }
     const error = validateSectionInput(storedCourses, academicState, teachers, input, id);
     if (error) return { success: false, error };
-    const next = saveSection(storedCourses, input, id);
+    let next: Course[];
+    try {
+      next = saveSection(storedCourses, input, id, storedExamSessions);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'ไม่สามารถบันทึกตอนเรียนได้';
+      showToast('ไม่สามารถย้ายตอนเรียนได้', message, 'error');
+      return { success: false, error: message };
+    }
     const sectionId = id || next.find((course) => course.id === input.courseId)!.sections.at(-1)!.id;
     setCourses(next);
     showToast(id ? 'อัปเดตตอนเรียนแล้ว' : 'เปิดตอนเรียนใหม่แล้ว', 'บันทึกข้อมูลตอนเรียนเรียบร้อยแล้ว', 'success');
@@ -878,7 +896,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const planExamSeats = (exam: ExamSession, previous: SeatAssignment[] = []) => {
     const room = rooms.find((item) => item.id === exam.roomId);
-    const section = courses.find((item) => item.id === exam.courseId)?.sections.find((item) => item.sectionNo === exam.sectionNo);
+    const section = examSection(exam, storedCourses);
     if (!room || !section || (exam.layout && !validLayout(exam.layout, room))) return;
     const seats = availableExamSeats(room, exam.layout);
     const roster = students.filter((student) => student.accountStatus === 'active' && studentMatchesExamSection(student, exam, section));
@@ -918,13 +936,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return;
     }
     const course = courses.find((item) => item.id === newExam.courseId);
-    const section = course?.sections.find((item) => item.sectionNo === newExam.sectionNo);
+    const section = examSection(newExam, storedCourses);
     if (!course || course.status !== 'active' || !section || section.status === 'inactive') {
       showToast('ไม่สามารถสร้างรอบการสอบได้', 'กรุณาเลือกตอนเรียนที่เปิดใช้งานและได้รับมอบหมายให้คุณ', 'error');
       return;
     }
     const id = crypto.randomUUID();
-    const created: ExamSession = { ...newExam, id };
+    if (role !== 'teacher' || !currentTeacher || !section || !teacherCanManageSection(section, currentTeacher.id)) return false;
+    const created: ExamSession = { ...newExam, sectionResolution: undefined, sectionId: sectionIdOf(newExam.courseId, section), sectionNo: section.sectionNo, id };
     if (!saveExamSeats(created)) return false;
     setExamSessions(prev => [created, ...prev]);
     showToast('สร้างรอบการสอบแล้ว', `กำหนดสอบวันที่ ${created.examDate} เวลา ${created.startTime}`, 'success');
@@ -933,6 +952,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const updateExamSession = (id: string, updates: Partial<ExamSession>) => {
     const existing = storedExamSessions.find((exam) => exam.id === id);
+    if (!examSessions.some((exam) => exam.id === id)) return false;
     if (existing && !canEditExamSetup(existing)) {
       showToast('ไม่สามารถแก้ไขการสอบได้', 'การสอบที่เริ่มแล้วหรือเสร็จสิ้นแล้วไม่อนุญาตให้แก้ไขข้อมูลหลัก', 'error');
       return;
@@ -942,11 +962,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return;
     }
     const course = courses.find((item) => item.id === (updates.courseId || existing?.courseId));
-    const section = course?.sections.find((item) => item.sectionNo === (updates.sectionNo || existing?.sectionNo));
+    const section = existing && examSection({ ...existing, ...updates }, storedCourses);
     if (!existing || !course || course.status !== 'active' || !section || section.status === 'inactive') {
       showToast('ไม่สามารถอัปเดตรอบการสอบได้', 'ตอนเรียนถูกปิดใช้งานหรือคุณไม่ได้รับมอบหมาย', 'error');
       return;
     }
+    if (role !== 'teacher' || !currentTeacher || !teacherCanManageSection(section, currentTeacher.id)) return false;
+    updates = { ...updates, sectionResolution: undefined, sectionId: sectionIdOf(course.id, section), sectionNo: section.sectionNo };
     if (!saveExamSeats({ ...existing, ...updates }, existing)) return false;
     setExamSessions(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
     showToast('อัปเดตรอบการสอบแล้ว', 'บันทึกการเปลี่ยนแปลงเรียบร้อยแล้ว', 'success');
@@ -960,8 +982,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     targetStudentId?: string,
     reason: string = 'Instructor adjustment'
   ) => {
-    const exam = storedExamSessions.find((item) => item.id === examId);
-    if (!exam || !canAdjustExamTime(exam)) {
+    const exam = examSessions.find((item) => item.id === examId);
+    if (!exam || !examSection(exam, storedCourses) || !canAdjustExamTime(exam)) {
       showToast('ไม่สามารถปรับเวลาสอบได้', 'ปรับเวลาได้เฉพาะการสอบที่กำลังดำเนินการ', 'warning');
       return;
     }
@@ -997,8 +1019,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   ) => {
     // Reopening is persisted exam configuration, so its expiry always uses real time.
     const now = new Date();
-    const exam = storedExamSessions.find((item) => item.id === examId);
-    if (!exam || !canReopenExamSubmissions(exam, now)) {
+    const exam = examSessions.find((item) => item.id === examId);
+    if (!exam || !examSection(exam, storedCourses) || !canReopenExamSubmissions(exam, now)) {
       showToast('ไม่สามารถเปิดรับส่งใหม่ได้', 'ต้องเริ่มการสอบก่อนจึงจะเปิดรับส่งใหม่ได้', 'warning');
       return;
     }
@@ -1046,8 +1068,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       showToast('ไม่สามารถจัดที่นั่งได้', 'ที่นั่งหรือเครื่องไม่พร้อมใช้งาน', 'error');
       return;
     }
-    const section = storedCourses.find((course) => course.id === exam?.courseId)?.sections
-      .find((item) => item.sectionNo === exam?.sectionNo);
+    const section = examSection(exam, storedCourses);
     const student = students.find((item) => item.id === studentId);
     if (!student || student.accountStatus !== 'active' || !exam || !studentMatchesExamSection(student, exam, section)) {
       showToast('ไม่สามารถจัดที่นั่งได้', 'นักศึกษาไม่อยู่ในสาขาวิชาและรหัสที่กำหนดสำหรับตอนเรียนนี้', 'error');
@@ -1088,8 +1109,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // Filter available seats (online, not damaged, not disabled)
     if (role !== 'teacher' || currentTeacher?.accountStatus !== 'active' || !examSessions.some((item) => item.id === examId) || !canEditExamSetup(exam)) return;
     const availableSeats = availableExamSeats(room, exam.layout);
-    const section = storedCourses.find((course) => course.id === exam?.courseId)?.sections
-      .find((item) => item.sectionNo === exam?.sectionNo);
+    const section = examSection(exam, storedCourses);
     const activeStudents = students.filter((student) =>
       student.accountStatus === 'active' && Boolean(exam && studentMatchesExamSection(student, exam, section)));
 
@@ -1138,7 +1158,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return false;
     }
 
-    const section = storedCourses.find((course) => course.id === exam?.courseId)?.sections.find((item) => item.sectionNo === exam?.sectionNo);
+    const section = examSection(exam, storedCourses);
     if (role !== 'student' || currentStudent?.id !== studentId || !exam || !studentMatchesExamSection(student, exam, section) || !canSubmitStudentAttempt(exam, getEffectiveNow(), hasActiveReopening, hasFinalSubmission)) {
       showToast('ไม่อนุญาตให้อัปโหลด', 'อัปโหลดไฟล์ได้เฉพาะระหว่างการสอบที่กำลังดำเนินการ', 'error');
       return false;
@@ -1247,7 +1267,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setMockAuthUsers(initialMockAuthUsers.map((user) => ({ ...user })));
     setRoomState(initializeFixedRooms(migrateRoomState(null, initialRooms)));
     setCourses(migrateCourses(initialCourses, academicDefaults));
-    setExamSessions(initialExamSessions);
+    setExamSessions(migrateExamSections(initialExamSessions, migrateCourses(initialCourses, academicDefaults)));
     setSeatAssignments(initialSeatAssignments);
     setSubmissions(initialSubmissions);
     setDemoSubmissionAttempts([]);

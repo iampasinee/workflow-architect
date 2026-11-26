@@ -1,3 +1,4 @@
+import { examSection, formatSectionAcademicPeriod } from '../../services/sectionIdentity';
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
@@ -47,7 +48,8 @@ export const ExamInfoRules: React.FC = () => {
   const hasActiveReopening = Boolean(reopening && new Date(reopening.reopenedUntil) > now);
   const course = courses.find((c) => c.id === activeExam?.courseId);
   const room = rooms.find((r) => r.id === activeExam?.roomId);
-  const section = course?.sections.find((candidate) => candidate.sectionNo === activeExam?.sectionNo);
+  const section = examSection(activeExam, courses);
+  const academicPeriod = formatSectionAcademicPeriod(section);
   const canStartExam = Boolean(activeExam && currentStudent && canStartStudentExam(activeExam, now, {
     rulesAccepted: agreed,
     hasFaceReference: Boolean(currentStudent.faceReferenceUrl),
@@ -94,9 +96,9 @@ export const ExamInfoRules: React.FC = () => {
             {course?.courseCode}: {course?.courseName}
           </h1>
           <p className="text-xs text-gray-500 mt-1">
-            {isThai
-              ? `กลุ่มเรียน (Section) ${activeExam?.sectionNo} • ภาคการศึกษา 1 / ปีการศึกษา 2569`
-              : `Section ${activeExam?.sectionNo} • Semester 1 / Academic Year 2026`}
+            {academicPeriod
+              ? `ตอนเรียน ${section?.sectionNo} • ${academicPeriod}`
+              : `ตอนเรียน ${activeExam.sectionNo} • ไม่พบข้อมูลภาคการศึกษาและปีการศึกษา`}
           </p>
         </div>
         <div className="flex items-center gap-2">

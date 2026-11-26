@@ -1,3 +1,4 @@
+import { examSection } from '../../services/sectionIdentity';
 import React, { useState, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
@@ -364,7 +365,7 @@ const ExamMonitoringDetail: React.FC<ExamMonitoringDetailProps> = ({ examSession
     );
   }
 
-  const section = course.sections.find((candidate) => candidate.sectionNo === activeExam.sectionNo);
+  const section = examSection(activeExam, courses);
   // Persisted schedule operations remain governed by real time in demo mode.
   const canAdjustTime = canAdjustExamTime(activeExam, new Date());
   const canReopen = canReopenExamSubmissions(activeExam, new Date());
