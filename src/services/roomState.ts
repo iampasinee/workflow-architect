@@ -171,6 +171,11 @@ export function seatHasExamReference(state: RoomState, seatId: string, exams: Ex
 
 export function applyRoomAction(state: RoomState, action: RoomAction, exams: ExamSession[] = [], assignments: SeatAssignment[] = []): RoomActionResult {
   const fail = (error: string): RoomActionResult => ({ success: false, error });
+  if (state.fixedFloorFour && (action.type === 'floor' || action.type === 'physicalRoom'
+    || (action.type === 'room' && (!action.id || !state.rooms.some((room) => room.id === action.id && room.physicalRoomId === action.physicalRoomId)))
+    || (action.type === 'delete' && action.entity !== 'computers'))) {
+    return fail('รายชื่อชั้นและห้องสอบกำหนดไว้แล้ว');
+  }
   const next = structuredClone(state);
   const activeRoom = (roomId: string) => {
     const room = state.rooms.find((item) => item.id === roomId);

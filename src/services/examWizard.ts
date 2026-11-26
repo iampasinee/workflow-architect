@@ -55,12 +55,24 @@ export const examTypeLabels: Record<ExamType, string> = {
   midterm: 'สอบกลางภาค',
   final: 'สอบปลายภาค',
   lab: 'สอบปฏิบัติการ',
-  quiz: 'แบบทดสอบย่อย',
+  quiz: 'การทดสอบย่อย',
   other: 'อื่น ๆ',
 };
 
-export const wizardExamName = (state: Pick<ExamWizardState, 'examName' | 'examType'>) =>
-  state.examName.trim() || examTypeLabels[state.examType];
+export const examNameSuffix = (type: ExamType, name = '') => {
+  const text = name.trim();
+  const labels = type === 'quiz' ? [examTypeLabels.quiz, 'แบบทดสอบย่อย'] : [examTypeLabels[type]];
+  for (const label of labels) {
+    if (text === label) return '';
+    if (text.startsWith(label + ' - ')) return text.slice(label.length + 3).trim();
+  }
+  return text;
+};
+
+export const wizardExamName = (state: Pick<ExamWizardState, 'examName' | 'examType'>) => {
+  const suffix = examNameSuffix(state.examType, state.examName);
+  return suffix ? `${examTypeLabels[state.examType]} - ${suffix}` : examTypeLabels[state.examType];
+};
 
 // Older exams and drafts used the original two question buttons.
 export const getExamQuestionCount = (count?: number) =>
@@ -167,7 +179,7 @@ export const examWizardStateFromSession = (exam: ExamSession): ExamWizardState =
   ...createEmptyExamWizardState(),
   courseId: exam.courseId,
   sectionNo: exam.sectionNo,
-  examName: exam.examName === examTypeLabels[exam.examType || 'other'] ? '' : exam.examName || '',
+  examName: examNameSuffix(exam.examType || 'other', exam.examName),
   questionCount: getExamQuestionCount(exam.questionCount),
   importedStudentIds: exam.importedStudentIds,
   layout: exam.layout,

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { reviewRoster } from './rosterImport';
+import { reviewNewStudents, reviewRoster } from './rosterImport';
 import { availableExamSeats, validLayout } from './examLayout';
 import { findExamRoomConflict } from './examWizard';
 import { studentMatchesExamSection } from './courseState';
@@ -10,6 +10,14 @@ import type { Student, Room, ExamSession, Section } from '../types';
 const student = { id: 'student-one', studentCode: '6706022510018', accountStatus: 'active' } as Student;
 const header = ['ลำดับ', 'เลขประจำตัวนักศึกษา', '', 'ชื่อ - สกุล'];
 const row = ['1', '67-060225-1001-8', 's6706022510018@email.kmutnb.ac.th', 'ตัวอย่าง ทดสอบ'];
+test('admin import accepts new identities and flags duplicates and reserved accounts before saving', () => {
+  const rows = reviewNewStudents([header, row, row], [], []);
+  assert.equal(rows[0].error, '');
+  assert.equal(rows[0].studentCode, student.studentCode);
+  assert.ok(rows[1].error);
+  assert.ok(reviewNewStudents([header, row], [], [row[2].toUpperCase()])[0].error);
+  assert.ok(reviewNewStudents([header, row], [{ ...student, email: 'legacy@example.test' }], [])[0].error);
+});
 test('registrar columns accept hyphenated IDs and reject duplicates, mismatched emails and nonmembers', () => {
   assert.equal(reviewRoster([header, row], [student])[0].student?.id, student.id);
   assert.equal(reviewRoster([header, row], [student])[0].error, '');

@@ -27,6 +27,7 @@ import {
   inferAdmissionYearFromStudentId,
 } from '../../utils/academicYear';
 import { AcademicCascade, AcademicSelection, emptyAcademicSelection } from './AcademicCascade';
+import { StudentImportDialog } from './StudentImportDialog';
 import { Modal } from '../common/Modal';
 
 const pageSize = 10;
@@ -173,6 +174,7 @@ export const StudentEditorForm: React.FC<StudentEditorFormProps> = ({
 };
 
 export const StudentManagement: React.FC = () => {
+  const [importOpen, setImportOpen] = useState(false);
   const { students, academicState, deleteStudent, updateAccountStatus, showToast } = useApp();
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
   const [search, setSearch] = useState('');
@@ -266,8 +268,12 @@ export const StudentManagement: React.FC = () => {
   return <div className="min-w-0 space-y-5">
     <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-600 text-white"><GraduationCap className="h-5 w-5" /></span><div><h1 className="text-xl font-bold text-slate-950">จัดการข้อมูลนักศึกษา</h1><p className="text-xs text-slate-500">จัดการข้อมูลประจำตัว สาขาวิชา ปีที่เข้าศึกษา และสถานะบัญชี</p></div></div>
-      <button type="button" onClick={() => openEditor()} className={`${buttonClass} bg-blue-600 text-white`}><Plus className="h-4 w-4" />เพิ่มนักศึกษาใหม่</button>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={() => setImportOpen(true)} className={`${buttonClass} border border-slate-200 bg-white`}>นำเข้ารายชื่อนักศึกษา</button>
+        <button type="button" onClick={() => openEditor()} className={`${buttonClass} bg-blue-600 text-white`}><Plus className="h-4 w-4" />เพิ่มนักศึกษาใหม่</button>
+      </div>
     </header>
+    {importOpen && <StudentImportDialog onClose={() => setImportOpen(false)} />}
 
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       {[

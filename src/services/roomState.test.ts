@@ -1,6 +1,27 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { initialExamSessions, initialRooms, initialSeatAssignments } from '../data/initialData';
+import { floorFourCodes, initializeFixedRooms, managedFloorFour } from './fixedRoomCatalog';
+
+test('fixed catalog starts with seven equal layouts and preserves existing seat references and later edits', () => {
+  const original = migrateRoomState(null, initialRooms);
+  const state = initializeFixedRooms(original);
+  const managed = managedFloorFour(state);
+  assert.deepEqual(managed.floors.map((floor) => floor.floorNumber), [4]);
+  assert.deepEqual(managed.physicalRooms.map((room) => room.roomCode), floorFourCodes);
+  assert.equal(managed.computers.length, 280);
+  for (const room of projectRooms(managed)) {
+    assert.equal(room.rows, 5);
+    assert.equal(room.columns, 8);
+    assert.equal(room.seats.filter((seat) => seat.machineNo).length, 40);
+  }
+  for (const seat of original.seats) assert.ok(managed.seats.some((item) => item.id === seat.id && item.roomId === seat.roomId));
+  const room = managed.rooms[0];
+  const expanded = applyRoomAction(state, { type: 'layout', roomId: room.id, rows: 6, columns: 8 });
+  assert.equal(initializeFixedRooms(expanded.state!).rooms.find((item) => item.id === room.id)?.rows, 6);
+  assert.equal(applyRoomAction(state, { type: 'floor', floorNumber: 5, status: 'active' }).success, false);
+  assert.equal(applyRoomAction(state, { type: 'delete', entity: 'rooms', id: room.id }).success, false);
+});
 import type { RoomAction, RoomState } from '../types/rooms';
 import {
   applyRoomAction,

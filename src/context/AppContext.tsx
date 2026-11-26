@@ -1,8 +1,10 @@
-import { useAcademicYear, withCalculatedStudentYear, withoutStudentYear } from '../utils/academicYear';
+import { calculateYearLevelFromAdmissionYear, useAcademicYear, withCalculatedStudentYear, withoutStudentYear } from '../utils/academicYear';
+import { reviewNewStudents } from '../services/rosterImport';
 import { addCs301DemoCoTeacher } from '../data/teacherCourseDemo';
 import { RoomState, RoomAction, RoomActionResult } from '../types/rooms';
 import { FaceEnrollmentStatus, MockAuthUser } from '../types/auth';
 import { applyRoomAction, migrateRoomState, projectRooms } from '../services/roomState';
+import { initializeFixedRooms, managedFloorFour } from '../services/fixedRoomCatalog';
 import {
   completeMockRegistration as completeMockRegistrationState,
   initialMockAuthUsers,
@@ -38,7 +40,7 @@ import {
 } from '../types';
 import { getTranslation } from '../i18n/translations';
 import { availableExamSeats, validLayout } from '../services/examLayout';
-import { findExamRoomConflict } from '../services/examWizard';
+import { findExamRoomConflict, wizardExamName } from '../services/examWizard';
 import { canAdjustExamTime, canEditExamSeats, canEditExamSetup, canReopenExamSubmissions, getEffectiveExamStatus } from '../services/examStatus';
 import { getEffectiveNow } from '../services/demoTime';
 import { canSubmitStudentAttempt, createFreshStudentExamAttemptId, demoSubmissionStorageKey, isDemoSubmissionRetry, recordStudentSubmission } from '../services/studentDemoRetry';
@@ -145,6 +147,7 @@ interface AppContextType {
 
   // Student Actions
   addStudent: (student: Omit<Student, 'id'>) => boolean;
+  importStudents: (table: string[][], majorId: string, admissionYear: number) => AcademicResult;
   updateStudent: (id: string, updates: Partial<Student>) => boolean;
   deleteStudent: (id: string) => boolean;
   updateAccountStatus: (id: string, status: AccountStatus, reason?: string) => void;
@@ -287,7 +290,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const mockAuthUsers = useMemo(() => migrateMockAuthUsers(storedAuthUsers, studentAuthSeeds(students)), [storedAuthUsers, students]);
 
   const [roomState, setRoomState] = useState<RoomState>(() =>
-    migrateRoomState(safeParse<unknown>('securelab_room_state', null), safeParse('securelab_rooms', initialRooms)));
+    initializeFixedRooms(migrateRoomState(safeParse<unknown>('securelab_room_state', null), safeParse('securelab_rooms', initialRooms))));
+  const managedRoomState = useMemo(() => managedFloorFour(roomState), [roomState]);
   const rooms = useMemo(() => projectRooms(roomState), [roomState]);
 
   const [storedCourses, setCourses] = useState<Course[]>(() => {
@@ -298,7 +302,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   });
 
   const [storedExamSessions, setExamSessions] = useState<ExamSession[]>(() => {
-    return safeParse('securelab_exams', initialExamSessions);
+    return safeParse('securelab_exams', initialExamSessions).map((exam) =>
+      exam.examType ? { ...exam, examName: wizardExamName({ examType: exam.examType, examName: exam.examName || '' }) } : exam);
   });
 
   const [seatAssignments, setSeatAssignments] = useState<SeatAssignment[]>(() => {
@@ -546,6 +551,32 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   // Student CRUD
+  const importStudents = (table: string[][], majorId: string, admissionYear: number): AcademicResult => {
+    if (role !== 'admin' || currentAdmin?.accountStatus !== 'active') return { success: false, error: 'เฉพาะผู้ดูแลระบบที่เปิดใช้งาน' };
+    if (!isAcademicPathActive(academicState, 'majors', majorId)) return { success: false, error: 'กรุณาเลือกสาขาวิชาที่เปิดใช้งาน' };
+    const year = calculateYearLevelFromAdmissionYear(admissionYear, currentAcademicYear);
+    if (!year.isValid) return { success: false, error: year.errorMessage };
+    try {
+      const rows = reviewNewStudents(table, students, mockAuthUsers.map((user) => user.email));
+      const invalid = rows.find((row) => row.error);
+      if (invalid) return { success: false, error: `แถว ${invalid.line}: ${invalid.error}` };
+      const records = rows.map(({ studentCode, fullName, email }) => {
+        const [firstName, ...surname] = fullName.split(/\s+/);
+        const student: Student = {
+          id: crypto.randomUUID(), studentCode, fullName, email, firstName, lastName: surname.join(' '),
+          majorId, admissionYear, year: year.yearLevel, faculty: '', department: '',
+          faceReferenceUrl: '', faceReferenceStatus: 'missing', accountStatus: 'active', isFirstTime: true,
+        };
+        return { ...student, ...studentAcademicFields(academicState, student) };
+      });
+      setStudents((current) => [...records, ...current]);
+      showToast('นำเข้านักศึกษาสำเร็จ', `เพิ่มนักศึกษา ${records.length} คน`, 'success');
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'ตรวจสอบไฟล์ไม่สำเร็จ' };
+    }
+  };
+
   const addStudent = (newStd: Omit<Student, 'id'>) => {
     if (!newStd.majorId || !isAcademicPathActive(academicState, 'majors', newStd.majorId)) {
       showToast('ไม่สามารถเพิ่มนักศึกษาได้', 'กรุณาเลือกสาขาวิชาที่เปิดใช้งาน', 'error');
@@ -862,6 +893,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const saveExamSeats = (exam: ExamSession, existing?: ExamSession) => {
     if (role !== 'teacher' || !currentTeacher || currentTeacher.accountStatus !== 'active') return false;
+    if (!managedRoomState.rooms.some((room) => room.id === exam.roomId)) {
+      showToast('บันทึกไม่ได้', 'กรุณาเลือกห้องสอบชั้น 4', 'error');
+      return false;
+    }
     if (findExamRoomConflict(storedExamSessions, exam, existing?.id)) {
       showToast('บันทึกไม่ได้', 'พื้นที่นั่งสอบซ้อนกับการสอบในช่วงเวลาเดียวกัน', 'error');
       return false;
@@ -1210,7 +1245,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setTeachers(migratedTeachers);
     setAdmins(initialAdmins);
     setMockAuthUsers(initialMockAuthUsers.map((user) => ({ ...user })));
-    setRoomState(migrateRoomState(null, initialRooms));
+    setRoomState(initializeFixedRooms(migrateRoomState(null, initialRooms)));
     setCourses(migrateCourses(initialCourses, academicDefaults));
     setExamSessions(initialExamSessions);
     setSeatAssignments(initialSeatAssignments);
@@ -1276,8 +1311,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         studentDirectory,
         teachers,
         admins,
-        rooms,
-        roomState,
+        rooms: role === 'admin' ? rooms.filter((room) => managedRoomState.rooms.some((item) => item.id === room.id)) : rooms,
+        roomState: managedRoomState,
         manageRooms,
         courses,
         examSessions,
@@ -1291,6 +1326,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         dismissToast,
 
         addStudent,
+        importStudents,
         updateStudent,
         deleteStudent,
         updateAccountStatus,

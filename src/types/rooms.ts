@@ -40,6 +40,7 @@ export interface ComputerDeviceRecord {
   machineStatus?: MachineStatus;
 }
 export interface RoomState {
+  fixedFloorFour?: boolean;
   version: 2;
   floors: FloorRecord[];
   physicalRooms: PhysicalRoomRecord[];

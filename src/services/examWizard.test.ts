@@ -89,8 +89,10 @@ test('exam names follow the selected type until the teacher supplies a custom na
   const exam = { ...examWizardToSession(automatic), id: 'lab' };
   assert.equal(exam.examName, 'สอบปฏิบัติการ');
   const edited = { ...examWizardStateFromSession(exam), examType: 'quiz' as const };
-  assert.equal(examWizardToSession(edited).examName, 'แบบทดสอบย่อย');
-  assert.equal(examWizardToSession({ ...edited, examName: 'โครงสร้างข้อมูล' }).examName, 'โครงสร้างข้อมูล');
+  assert.equal(examWizardToSession(edited).examName, 'การทดสอบย่อย');
+  const named = { ...exam, ...examWizardToSession({ ...edited, examName: 'ครั้งที่ 1' }) };
+  assert.equal(named.examName, 'การทดสอบย่อย - ครั้งที่ 1');
+  assert.equal(examWizardStateFromSession(named).examName, 'ครั้งที่ 1');
 });
 
 test('changing Course clears an incompatible Section', () => {
@@ -266,5 +268,5 @@ test('created ExamSession enters the canonical monitoring source and edits prese
   editing.examName = 'แก้ไขชื่อ';
   const updated = { ...created, ...examWizardToSession(editing, created.status) };
   assert.equal(updated.id, 'exam-new');
-  assert.equal(updated.examName, 'แก้ไขชื่อ');
+  assert.equal(updated.examName, 'สอบปลายภาค - แก้ไขชื่อ');
 });

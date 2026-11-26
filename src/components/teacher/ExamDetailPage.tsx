@@ -1,4 +1,4 @@
-import { getExamQuestionCount } from '../../services/examWizard';
+import { examTypeLabels, getExamQuestionCount } from '../../services/examWizard';
 import React from 'react';
 import { ArrowLeft, Edit2, FileText, Globe2, Laptop, ShieldCheck, Users, WifiOff } from 'lucide-react';
 import type { Course, ExamPolicy, ExamSession, Room, Student, Teacher } from '../../types';
@@ -49,10 +49,6 @@ const formatDate = (date: string) => {
 };
 
 const formatSemester = (semester: Course['sections'][number]['semester']) => semester === undefined || semester === null || semester === '' ? emptyValue : semester === 'summer' ? 'ภาคฤดูร้อน' : `ภาคการศึกษาที่ ${semester}`;
-
-const examTypeLabels: Record<NonNullable<ExamSession['examType']>, string> = {
-  midterm: 'สอบกลางภาค', final: 'สอบปลายภาค', lab: 'สอบปฏิบัติการ', quiz: 'แบบทดสอบย่อย', other: 'อื่น ๆ',
-};
 
 const commonPolicyLabels: Array<[keyof ExamPolicy['common'], string]> = [
   ['requireRegisteredDevice', 'บังคับใช้เครื่องที่ลงทะเบียน'],

@@ -33,6 +33,7 @@ import {
   getExamRoomCapacity,
   getExamQuestionCount,
   examTypeLabels,
+  examNameSuffix,
   wizardExamName,
   getExamRoomComputerCount,
   getExamResourceMeaning,
@@ -111,16 +112,18 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
     courses,
     currentTeacher,
     examSessions,
-    rooms,
+    rooms: allRooms,
+    roomState,
     students,
     createExamSession,
     updateExamSession,
     showToast,
   } = useApp();
+  const rooms = allRooms.filter((room) => roomState.rooms.some((item) => item.id === room.id));
   const [step, setStep] = useState(0);
   const [policySubStep, setPolicySubStep] = useState(initialPolicySubStep);
   const [state, setState] = useState<ExamWizardState>(() => initialDraft?.state
-    ? { ...structuredClone(initialDraft.state), questionCount: initialDraft.state.questionCount ?? getExamQuestionCount() }
+    ? { ...structuredClone(initialDraft.state), examName: examNameSuffix(initialDraft.state.examType, initialDraft.state.examName), questionCount: initialDraft.state.questionCount ?? getExamQuestionCount() }
     : editingExam
       ? examWizardStateFromSession(editingExam)
       : createEmptyExamWizardState());
@@ -378,13 +381,14 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
           <div className="sm:col-span-2">
             {customNameOpen ? (
               <div className="space-y-2">
-                <label className="block text-xs font-semibold text-gray-700">ชื่อการสอบ (ไม่บังคับ)
-                  <input autoFocus value={state.examName} placeholder={examTypeLabels[state.examType]} onChange={(event) => updateState('examName', event.target.value)} className={`${inputClass} mt-1`} />
+                <label className="block text-xs font-semibold text-gray-700">ชื่อเพิ่มเติม (ไม่บังคับ)
+                  <input autoFocus value={state.examName} placeholder="เช่น ครั้งที่ 1" onChange={(event) => updateState('examName', event.target.value)} className={`${inputClass} mt-1`} />
                 </label>
+                <p className="break-words text-sm text-gray-700">ชื่อที่จะแสดง: <strong>{wizardExamName(state)}</strong></p>
                 <button type="button" onClick={() => { updateState('examName', ''); setCustomNameOpen(false); }} className="text-xs font-semibold text-blue-700 hover:underline">ใช้ชื่อตามประเภทการสอบ</button>
               </div>
             ) : (
-              <button type="button" onClick={() => setCustomNameOpen(true)} className="rounded-xl border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50">ตั้งชื่อการสอบเอง</button>
+              <button type="button" onClick={() => setCustomNameOpen(true)} className="rounded-xl border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50">เพิ่มชื่อต่อท้ายประเภทการสอบ</button>
             )}
           </div>
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-600">

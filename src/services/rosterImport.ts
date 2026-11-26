@@ -1,9 +1,10 @@
 import type { Student } from '../types';
+import { parseStudentUniversityEmail } from './authState';
 
 export const rosterHeader = ['ลำดับ', 'เลขประจำตัวนักศึกษา', 'อีเมล', 'ชื่อ - สกุล'];
 const headerKey = (text: string) => text.trim().toLowerCase().replace(/[\s_-]/g, '');
 
-export function reviewRoster(table: string[][], students: Student[]) {
+function rosterRows(table: string[][]) {
   const headers = (table[0] || []).map(headerKey);
   const code = headers.findIndex((key) => ['studentcode', 'studentid', 'เลขประจำตัวนักศึกษา', 'รหัสนักศึกษา'].includes(key));
   const name = headers.findIndex((key) => ['fullname', 'ชื่อสกุล', 'ชื่อนามสกุล'].includes(key));
@@ -15,18 +16,34 @@ export function reviewRoster(table: string[][], students: Student[]) {
     const studentCode = (row[code] || '').trim().replace(/-/g, '');
     const address = (row[email] || '').trim().toLowerCase();
     const fullName = (row[name] || '').trim();
-    const matches = students.filter((student) => student.studentCode.replace(/-/g, '') === studentCode);
-    const student = matches[0];
     let error = '';
     if (!/^\d{10,15}$/.test(studentCode) || !fullName) error = 'รหัสหรือชื่อไม่ครบ';
     else if (address !== 's' + studentCode + '@email.kmutnb.ac.th') error = 'อีเมลไม่ตรงกับรหัสนักศึกษา';
     else if (seen.has(studentCode)) error = 'รหัสซ้ำในไฟล์';
-    else if (matches.length !== 1) error = 'ไม่พบรายชื่อที่ตรงกันเพียงคนเดียวในตอนเรียน';
     seen.add(studentCode);
-    return { line: index + 2, studentCode, fullName, student, error };
+    return { line: index + 2, studentCode, fullName, email: address, error };
   });
   if (!rows.length) throw new Error('ไฟล์นี้ไม่มีรายชื่อนักศึกษา');
   return rows;
+}
+
+export function reviewRoster(table: string[][], students: Student[]) {
+  return rosterRows(table).map((row) => {
+    const matches = students.filter((student) => student.studentCode.replace(/-/g, '') === row.studentCode);
+    return { ...row, student: matches[0], error: row.error || (matches.length !== 1 ? 'ไม่พบรายชื่อที่ตรงกันเพียงคนเดียวในตอนเรียน' : '') };
+  });
+}
+
+export function reviewNewStudents(table: string[][], students: Student[], accountEmails: string[]) {
+  const codes = new Set(students.map((student) => student.studentCode.trim().replace(/-/g, '')));
+  const emails = new Set([...accountEmails, ...students.map((student) => student.email)].map((email) => email.trim().toLowerCase()));
+  return rosterRows(table).map((row) => {
+    let error = row.error;
+    if (!error && (codes.has(row.studentCode) || emails.has(row.email))) error = 'มีรหัสนักศึกษาหรืออีเมลนี้ในระบบแล้ว';
+    if (!error && !parseStudentUniversityEmail(row.email)) error = 'อีเมลไม่ตรงตามรูปแบบบัญชีนักศึกษาที่ลงทะเบียนได้';
+    if (!error && row.fullName.split(/\s+/).length < 2) error = 'กรุณาระบุทั้งชื่อและนามสกุล';
+    return { ...row, error };
+  });
 }
 
 export async function readRosterFile(file: File): Promise<string[][]> {
