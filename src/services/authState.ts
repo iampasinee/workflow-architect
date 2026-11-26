@@ -175,9 +175,19 @@ export const authenticateMockAccount = (email: string, password: string, users: 
   return { ...resolution, error: undefined };
 };
 
-export const migrateMockAuthUsers = (raw: unknown): MockAuthUser[] => {
-  if (!Array.isArray(raw)) return initialMockAuthUsers.map((user) => ({ ...user }));
-  return initialMockAuthUsers.map((seed) => {
+export const studentAuthSeeds = (students: { id: string; studentCode: string }[]): MockAuthUser[] => {
+  const seeds = [...initialMockAuthUsers];
+  for (const student of students) {
+    const email = 's' + student.studentCode + '@email.kmutnb.ac.th';
+    if (!parseStudentUniversityEmail(email) || seeds.some((user) => user.subjectId === student.id || user.email === email)) continue;
+    seeds.push({ id: 'auth_roster_' + student.id, email, subjectId: student.id, role: 'student', registered: false, faceEnrollmentStatus: 'not_started' });
+  }
+  return seeds;
+};
+
+export const migrateMockAuthUsers = (raw: unknown, seeds = initialMockAuthUsers): MockAuthUser[] => {
+  if (!Array.isArray(raw)) return seeds.map((user) => ({ ...user }));
+  return seeds.map((seed) => {
     const stored = raw.find((item) => item && typeof item === 'object' && 'id' in item && item.id === seed.id) as Partial<MockAuthUser> | undefined;
     const storedEmail = normalizeAuthEmail(stored?.email || '');
     const acceptedEmails = [seed.email, ...(legacyMockAuthEmailsById[seed.id] || [])];

@@ -127,6 +127,10 @@ export const MockRegistrationFlow: React.FC<MockRegistrationFlowProps> = ({ onBa
       setError(resolution.error || 'ไม่สามารถตรวจสอบบัญชีได้');
       return;
     }
+    if (resolution.user.role === 'student' && !students.some((student) => student.id === resolution.user.subjectId && student.accountStatus === 'active')) {
+      setError('ไม่พบรายชื่อนักศึกษาที่เปิดใช้งาน กรุณาติดต่อผู้ดูแลระบบ');
+      return;
+    }
     if (resolution.user.registered) {
       setTarget(resolution.user);
       setError('บัญชีนี้ลงทะเบียนในระบบแล้ว');

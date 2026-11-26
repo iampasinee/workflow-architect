@@ -8,12 +8,16 @@ import type {
   Room,
   Student,
 } from '../types';
+import { availableExamSeats, layoutsOverlap, validLayout, type ExamLayout } from './examLayout';
 import { studentMatchesSection } from './courseState';
 
 export interface ExamWizardState {
   courseId: string;
   sectionNo: string;
   examName: string;
+  questionCount: number;
+  importedStudentIds?: string[];
+  layout?: ExamLayout;
   examType: ExamType;
   examDate: string;
   startTime: string;
@@ -46,6 +50,10 @@ export interface ExamWizardEnvironment {
 }
 
 export const examDraftStorageKey = 'securelab_teacher_exam_drafts_v1';
+
+// Older exams and drafts used the original two question buttons.
+export const getExamQuestionCount = (count?: number) =>
+  typeof count === 'number' && Number.isSafeInteger(count) && count > 0 ? count : 2;
 
 export const policySubStepCount = 4;
 export const initialPolicySubStep = 0;
@@ -124,6 +132,7 @@ export const createEmptyExamWizardState = (): ExamWizardState => ({
   courseId: '',
   sectionNo: '',
   examName: '',
+  questionCount: 1,
   examType: 'final',
   examDate: '',
   startTime: '09:00',
@@ -148,6 +157,9 @@ export const examWizardStateFromSession = (exam: ExamSession): ExamWizardState =
   courseId: exam.courseId,
   sectionNo: exam.sectionNo,
   examName: exam.examName || 'การสอบ',
+  questionCount: getExamQuestionCount(exam.questionCount),
+  importedStudentIds: exam.importedStudentIds,
+  layout: exam.layout,
   examType: exam.examType || 'other',
   examDate: exam.examDate,
   startTime: exam.startTime,
@@ -178,13 +190,13 @@ export const resolveWizardSection = (state: ExamWizardState, courses: Course[]) 
   sectionsForWizardCourse(courses, state.courseId).find((section) => section.sectionNo === state.sectionNo);
 
 export const resolveEligibleExamStudents = (
-  state: Pick<ExamWizardState, 'courseId' | 'sectionNo'>,
+  state: Pick<ExamWizardState, 'courseId' | 'sectionNo' | 'importedStudentIds'>,
   courses: Course[],
   students: Student[],
 ) => {
   const section = courses.find((course) => course.id === state.courseId)?.sections
     .find((candidate) => candidate.sectionNo === state.sectionNo && candidate.status !== 'inactive');
-  return section ? students.filter((student) => studentMatchesSection(student, section)) : [];
+  return section ? students.filter((student) => student.accountStatus === 'active' && studentMatchesSection(student, section) && (!state.importedStudentIds || state.importedStudentIds.includes(student.id))) : [];
 };
 
 const timeToMinutes = (value: string): number | null => {
@@ -203,7 +215,7 @@ export const calculateExamDurationMinutes = (startTime: string, endTime: string)
 
 export const findExamRoomConflict = (
   examSessions: ExamSession[],
-  candidate: Pick<ExamWizardState, 'examDate' | 'startTime' | 'endTime' | 'roomId'>,
+  candidate: Pick<ExamWizardState, 'examDate' | 'startTime' | 'endTime' | 'roomId' | 'layout'>,
   editingExamId?: string,
 ) => {
   const start = timeToMinutes(candidate.startTime);
@@ -214,7 +226,7 @@ export const findExamRoomConflict = (
     if (exam.id === editingExamId || exam.roomId !== candidate.roomId || exam.examDate !== candidate.examDate) return false;
     const existingStart = timeToMinutes(exam.startTime);
     const existingEnd = timeToMinutes(exam.endTime);
-    return existingStart !== null && existingEnd !== null && start < existingEnd && end > existingStart;
+    return existingStart !== null && existingEnd !== null && start < existingEnd && end > existingStart && layoutsOverlap(candidate.layout, exam.layout);
   });
 };
 
@@ -340,12 +352,17 @@ export const validateExamWizard = (state: ExamWizardState, environment: ExamWiza
   if (!course) errors.courseId = 'กรุณาเลือกรายวิชาที่คุณได้รับมอบหมาย';
   if (!section) errors.sectionNo = 'กรุณาเลือก Section ที่คุณได้รับมอบหมาย';
   if (!state.examName.trim()) errors.examName = 'กรุณาระบุชื่อการสอบ';
+  if (!Number.isSafeInteger(state.questionCount) || state.questionCount < 1) {
+    errors.questionCount = 'กรุณาระบุจำนวนข้อเป็นจำนวนเต็มตั้งแต่ 1 ขึ้นไป';
+  }
+  if (state.importedStudentIds && state.importedStudentIds.length !== eligibleCount) errors.students = 'รายชื่อที่นำเข้าไม่ตรงกับนักศึกษาที่ใช้งานในตอนเรียน กรุณานำเข้าใหม่';
   if (!eligibleCount) errors.students = 'Section นี้ไม่มีผู้มีสิทธิ์สอบจากข้อมูลปัจจุบัน';
   if (!state.examDate) errors.examDate = 'กรุณาเลือกวันที่สอบ';
   if (!durationMinutes) errors.time = 'เวลาเริ่มต้องมาก่อนเวลาสิ้นสุด';
   if (!room || room.status !== 'ready') errors.roomId = 'กรุณาเลือกห้องสอบที่พร้อมใช้งาน';
   if (conflict) errors.conflict = `ห้อง ${room?.labName || ''} มีการสอบในช่วงเวลานี้แล้ว`;
-  if (room && eligibleCount > getExamRoomCapacity(room)) errors.capacity = 'จำนวนที่นั่งไม่เพียงพอสำหรับผู้เข้าสอบ';
+  if (room && state.layout && !validLayout(state.layout, room)) errors.layout = 'กรุณาระบุแถวและคอลัมน์ภายในผังห้อง';
+  if (room && eligibleCount > availableExamSeats(room, state.layout).length) errors.capacity = 'จำนวนที่นั่งไม่เพียงพอสำหรับผู้เข้าสอบ';
   if (!state.acceptedExtensions.length) errors.files = 'กรุณาเลือกประเภทไฟล์อย่างน้อย 1 ประเภท';
   if (!Number.isFinite(state.maxSizeMb) || state.maxSizeMb < 1) errors.maxSizeMb = 'ขนาดไฟล์สูงสุดต้องมากกว่า 0 MB';
   if (state.format === 'online' && !['allowlist', 'blocklist'].includes(state.policy.online.resourceMode)) {
@@ -366,6 +383,9 @@ export const examWizardToSession = (
   status: ExamSession['status'] = 'upcoming',
 ): Omit<ExamSession, 'id'> => ({
   examName: state.examName.trim(),
+  questionCount: state.questionCount,
+  importedStudentIds: state.importedStudentIds,
+  layout: state.layout,
   examType: state.examType,
   courseId: state.courseId,
   sectionNo: state.sectionNo,

@@ -204,6 +204,9 @@ export interface ExamRule {
 
 export interface ExamSession {
   id: string;
+  questionCount?: number;
+  importedStudentIds?: string[];
+  layout?: import('./services/examLayout').ExamLayout;
   examName?: string;
   examType?: ExamType;
   courseId: string;
@@ -271,6 +274,14 @@ export interface Violation {
 }
 
 export interface AuditLog {
+  fromSeatId?: string;
+  toSeatId?: string;
+  fromDeviceId?: string;
+  toDeviceId?: string;
+  reason?: string;
+  examId?: string;
+  studentId?: string;
+  teacherId?: string;
   id: string;
   timestamp: string;
   actor: string;

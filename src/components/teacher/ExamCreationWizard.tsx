@@ -31,6 +31,7 @@ import {
   examWizardToSession,
   findExamRoomConflict,
   getExamRoomCapacity,
+  getExamQuestionCount,
   getExamRoomComputerCount,
   getExamResourceMeaning,
   getNextPolicySubStep,
@@ -54,6 +55,9 @@ import {
 import { getAdmissionCode } from '../../utils/academicYear';
 import { canEditExamSetup, getEffectiveExamStatus } from '../../services/examStatus';
 import { useExamClock } from '../../utils/useExamClock';
+
+import { ExamRosterImport } from './ExamRosterImport';
+import { availableExamSeats, fullLayout } from '../../services/examLayout';
 
 const steps = [
   'ข้อมูลการสอบ',
@@ -121,12 +125,13 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
   const [step, setStep] = useState(0);
   const [policySubStep, setPolicySubStep] = useState(initialPolicySubStep);
   const [state, setState] = useState<ExamWizardState>(() => initialDraft?.state
-    ? structuredClone(initialDraft.state)
+    ? { ...structuredClone(initialDraft.state), questionCount: initialDraft.state.questionCount ?? getExamQuestionCount() }
     : editingExam
       ? examWizardStateFromSession(editingExam)
       : createEmptyExamWizardState());
   const [draftId] = useState(() => initialDraft?.id || `exam_draft_${crypto.randomUUID()}`);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [pendingRoster, setPendingRoster] = useState(false);
   const [showRoster, setShowRoster] = useState(false);
   const [customExtension, setCustomExtension] = useState('');
   const [domainInput, setDomainInput] = useState('');
@@ -147,7 +152,7 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
   );
   const durationMinutes = calculateExamDurationMinutes(state.startTime, state.endTime);
   const roomConflict = findExamRoomConflict(examSessions, state, editingExam?.id || initialDraft?.editingExamId);
-  const roomCapacity = getExamRoomCapacity(selectedRoom);
+  const roomCapacity = selectedRoom ? availableExamSeats(selectedRoom, state.layout).length : 0;
   const editingRecord = editingExam || examSessions.find((exam) => exam.id === initialDraft?.editingExamId);
   const editingStatus = editingRecord && getEffectiveExamStatus(editingRecord, now);
 
@@ -204,9 +209,9 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
   };
 
   const stepErrorKeys = [
-    ['courseId', 'sectionNo', 'examName'],
+    ['courseId', 'sectionNo', 'examName', 'questionCount'],
     ['students'],
-    ['examDate', 'time', 'roomId', 'conflict', 'capacity'],
+    ['examDate', 'time', 'roomId', 'conflict', 'capacity', 'layout'],
     [],
     ['files', 'maxSizeMb', 'onlinePolicy', 'offlinePolicy'],
     [],
@@ -236,6 +241,7 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
   };
 
   const moveNext = () => {
+    if (step === 1 && pendingRoster) { setErrors({ students: 'กรุณายืนยันรายชื่อหรือยกเลิกการนำเข้าก่อน' }); return; }
     if (step === 4 && !isFinalPolicySubStep(policySubStep)) {
       if (policySubStep === 2) {
         const policyErrors = validateControlPolicyStep();
@@ -259,6 +265,7 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
   };
 
   const moveBack = () => {
+    setPendingRoster(false);
     setErrors({});
     if (step === 4 && policySubStep > 0) {
       setPolicySubStep((current) => getPreviousPolicySubStep(current));
@@ -298,8 +305,8 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
       return;
     }
     const payload = examWizardToSession(state, existing?.status || 'upcoming');
-    if (editingId) updateExamSession(editingId, payload);
-    else createExamSession(payload);
+    const saved = editingId ? updateExamSession(editingId, payload) : createExamSession(payload);
+    if (!saved) return;
     removeExamDraft(draftId);
     onSaved('exam');
   };
@@ -352,13 +359,13 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
         <div><h2 className="text-lg font-bold text-gray-900">ข้อมูลการสอบ</h2><p className="text-xs text-gray-500">เลือกรายวิชาและ Section ที่คุณได้รับมอบหมายเท่านั้น</p></div>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="text-xs font-semibold text-gray-700">รายวิชา *
-            <select value={state.courseId} onChange={(event) => setState((current) => ({ ...current, courseId: event.target.value, sectionNo: '' }))} className={`${inputClass} mt-1`}>
+            <select value={state.courseId} onChange={(event) => setState((current) => ({ ...current, courseId: event.target.value, sectionNo: '', importedStudentIds: undefined }))} className={`${inputClass} mt-1`}>
               <option value="">เลือกรายวิชา</option>
               {courses.filter((course) => course.status === 'active' && course.sections.some((section) => section.status !== 'inactive')).map((course) => <option key={course.id} value={course.id}>{course.courseCode} — {course.courseName}</option>)}
             </select><ErrorText message={errors.courseId} />
           </label>
           <label className="text-xs font-semibold text-gray-700">Section *
-            <select value={state.sectionNo} disabled={!state.courseId} onChange={(event) => updateState('sectionNo', event.target.value)} className={`${inputClass} mt-1`}>
+            <select value={state.sectionNo} disabled={!state.courseId} onChange={(event) => setState((current) => ({ ...current, sectionNo: event.target.value, importedStudentIds: undefined }))} className={`${inputClass} mt-1`}>
               <option value="">เลือก Section</option>
               {sectionOptions.map((section) => <option key={section.id || section.sectionNo} value={section.sectionNo}>Section {section.sectionNo}</option>)}
             </select><ErrorText message={errors.sectionNo} />
@@ -371,6 +378,10 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
               {Object.entries(examTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
           </label>
+          <label className="text-xs font-semibold text-gray-700">จำนวนข้อสอบ *
+            <input type="number" required min={1} step={1} value={state.questionCount || ''} onChange={(event) => updateState('questionCount', Number(event.target.value))} className={`${inputClass} mt-1`} />
+            <ErrorText message={errors.questionCount} />
+          </label>
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-600">
             <span className="font-semibold text-gray-800">ภาคการศึกษา / ปีการศึกษา</span>
             <p className="mt-2">{selectedSection ? `ภาคการศึกษา ${selectedSection.semester} / ${selectedSection.academicYear}` : 'เลือก Section เพื่อแสดงข้อมูล'}</p>
@@ -382,7 +393,7 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
 
     if (step === 1) return (
       <div className="space-y-5">
-        <div><h2 className="text-lg font-bold text-gray-900">ผู้เข้าสอบ</h2><p className="text-xs text-gray-500">คำนวณจาก cohort ของ Section โดยไม่แก้ไขข้อมูลนักศึกษา</p></div>
+        <div><h2 className="text-lg font-bold text-gray-900">ผู้เข้าสอบ</h2><p className="text-xs text-gray-500">ใช้รายชื่อทั้งตอนเรียน หรือนำเข้าไฟล์เพื่อเลือกเฉพาะผู้เข้าสอบรอบนี้</p></div>
         <div className="grid gap-3 sm:grid-cols-3">
           <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4"><Users className="h-5 w-5 text-blue-600" /><p className="mt-2 text-xs text-blue-700">ผู้มีสิทธิ์สอบทั้งหมด</p><strong className="text-2xl text-blue-950">{eligibleStudents.length} คน</strong></div>
           <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:col-span-2"><p className="text-xs font-semibold text-gray-800">Cohort / กลุ่มเรียนของ Section</p><div className="mt-3 flex flex-wrap gap-2">{selectedSection?.cohorts?.map((cohort) => {
@@ -391,6 +402,7 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
             return <span key={`${cohort.majorId}-${cohort.admissionYear}`} className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">{major?.code || 'ไม่ระบุสาขา'} • ปีที่เข้าศึกษา {getAdmissionCode(cohort.admissionYear)}{groups?.length ? ` • ${groups.join(', ')}` : ' • ทั้ง cohort'}</span>;
           }) || <span className="text-xs text-gray-500">ไม่มีข้อมูล cohort</span>}</div></div>
         </div>
+        <ExamRosterImport onPending={setPendingRoster} students={resolveEligibleExamStudents({ ...state, importedStudentIds: undefined }, courses, students)} selected={state.importedStudentIds} onChange={(ids) => updateState('importedStudentIds', ids)} />
         <ErrorText message={errors.students} />
         <button type="button" onClick={() => setShowRoster((value) => !value)} className="inline-flex items-center gap-2 rounded-xl border border-gray-300 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"><Users className="h-4 w-4" />{showRoster ? 'ซ่อนรายชื่อ' : 'ดูรายชื่อ'}</button>
         {showRoster && <div className="max-h-72 overflow-y-auto rounded-2xl border border-gray-200"><table className="w-full min-w-[520px] text-left text-xs"><thead className="sticky top-0 bg-gray-50 text-gray-600"><tr><th className="px-4 py-3">รหัสนักศึกษา</th><th className="px-4 py-3">ชื่อ-นามสกุล</th><th className="px-4 py-3">อีเมล</th></tr></thead><tbody className="divide-y divide-gray-100">{eligibleStudents.map((student) => <tr key={student.id}><td className="px-4 py-3 font-mono">{student.studentCode}</td><td className="px-4 py-3 font-semibold">{student.fullName}</td><td className="px-4 py-3 text-gray-500">{student.email}</td></tr>)}</tbody></table></div>}
@@ -411,9 +423,16 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{rooms.map((room) => {
             const ready = room.status === 'ready';
             const selected = state.roomId === room.id;
-            return <button key={room.id} type="button" disabled={!ready && !selected} onClick={() => updateState('roomId', room.id)} className={`rounded-2xl border p-4 text-left transition-all ${selected ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-500/20' : ready ? 'border-gray-200 bg-white hover:border-blue-300' : 'cursor-not-allowed border-gray-200 bg-gray-100 opacity-60'}`}><div className="flex items-center justify-between"><strong className="text-sm text-gray-900">{room.labName}</strong><MapPin className="h-4 w-4 text-blue-500" /></div><p className="mt-2 text-xs text-gray-600">ชั้น {room.floor}</p><p className="text-xs text-gray-600">{getExamRoomCapacity(room)} ที่นั่ง • {getExamRoomComputerCount(room)} เครื่อง</p><span className={`mt-2 inline-block text-[11px] font-semibold ${ready ? 'text-emerald-600' : 'text-red-600'}`}>{ready ? 'พร้อมใช้งาน' : 'ไม่พร้อมใช้งาน'}</span></button>;
+            return <button key={room.id} type="button" disabled={!ready && !selected} onClick={() => setState((current) => ({ ...current, roomId: room.id, layout: fullLayout(room) }))} className={`rounded-2xl border p-4 text-left transition-all ${selected ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-500/20' : ready ? 'border-gray-200 bg-white hover:border-blue-300' : 'cursor-not-allowed border-gray-200 bg-gray-100 opacity-60'}`}><div className="flex items-center justify-between"><strong className="text-sm text-gray-900">{room.labName}</strong><MapPin className="h-4 w-4 text-blue-500" /></div><p className="mt-2 text-xs text-gray-600">ชั้น {room.floor}</p><p className="text-xs text-gray-600">{getExamRoomCapacity(room)} ที่นั่ง • {getExamRoomComputerCount(room)} เครื่อง</p><span className={`mt-2 inline-block text-[11px] font-semibold ${ready ? 'text-emerald-600' : 'text-red-600'}`}>{ready ? 'พร้อมใช้งาน' : 'ไม่พร้อมใช้งาน'}</span></button>;
           })}</div><ErrorText message={errors.roomId} />
         </div>
+        {selectedRoom && <fieldset className="grid gap-3 rounded-xl border p-4 sm:grid-cols-3">
+          <legend className="px-1 text-sm font-semibold">พื้นที่จัดสอบในห้อง</legend>
+          {([['firstRow', 'เริ่มที่แถว'], ['rows', 'จำนวนแถว'], ['columns', 'จำนวนคอลัมน์']] as const).map(([field, label]) =>
+            <label key={field} className="text-xs font-semibold">{label}<input type="number" min={1} className={inputClass} value={(state.layout ?? fullLayout(selectedRoom))[field] || ''} onChange={(event) => updateState('layout', { ...(state.layout ?? fullLayout(selectedRoom)), [field]: Number(event.target.value) })} /></label>)}
+          <p className="text-xs text-gray-600 sm:col-span-3">ผังห้อง {selectedRoom.rows} แถว × {selectedRoom.columns} คอลัมน์ · เครื่องพร้อมสอบในพื้นที่ที่เลือก {roomCapacity} เครื่อง</p>
+          <ErrorText message={errors.layout} />
+        </fieldset>}
         {(roomConflict || errors.conflict) && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800"><AlertTriangle className="mr-2 inline h-4 w-4" />ห้อง {selectedRoom?.labName} มีการสอบในช่วงเวลานี้แล้ว ({roomConflict?.startTime} - {roomConflict?.endTime})</div>}
         {selectedRoom && eligibleStudents.length > roomCapacity && <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800"><AlertTriangle className="mr-2 inline h-4 w-4" />ผู้เข้าสอบ {eligibleStudents.length} คน แต่ห้องรองรับ {roomCapacity} ที่นั่ง — จำนวนที่นั่งไม่เพียงพอสำหรับผู้เข้าสอบ</div>}
       </div>
@@ -484,7 +503,7 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
           <p className="mt-2 text-xs text-blue-800">กำหนดรูปแบบการควบคุมก่อน จากนั้นเลือกเว็บไซต์ แอป และทรัพยากรในขั้นถัดไป</p>
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
             <button type="button" aria-pressed={state.policy.online.resourceMode === 'allowlist'} onClick={() => updateOnlinePolicy('resourceMode', 'allowlist')} className={`rounded-xl border p-3 text-left text-xs ${state.policy.online.resourceMode === 'allowlist' ? 'border-blue-500 bg-white ring-2 ring-blue-500/20' : 'border-gray-200 bg-white'}`}><strong>Allowlist — แนะนำ</strong><span className="mt-1 block text-gray-600">อนุญาตเฉพาะเว็บไซต์ / แอป / ทรัพยากรที่กำหนด</span></button>
-            <button type="button" aria-pressed={state.policy.online.resourceMode === 'blocklist'} onClick={() => updateOnlinePolicy('resourceMode', 'blocklist')} className={`rounded-xl border p-3 text-left text-xs ${state.policy.online.resourceMode === 'blocklist' ? 'border-blue-500 bg-white ring-2 ring-blue-500/20' : 'border-gray-200 bg-white'}`}><strong>Blocklist</strong><span className="mt-1 block text-gray-600">อนุญาตการใช้งานทั่วไป แต่บล็อกรายการที่กำหนด</span></button>
+            {editingRecord?.policy?.online.resourceMode === 'blocklist' && <button type="button" aria-pressed={state.policy.online.resourceMode === 'blocklist'} onClick={() => updateOnlinePolicy('resourceMode', 'blocklist')} className={`rounded-xl border p-3 text-left text-xs ${state.policy.online.resourceMode === 'blocklist' ? 'border-blue-500 bg-white ring-2 ring-blue-500/20' : 'border-gray-200 bg-white'}`}><strong>Blocklist</strong><span className="mt-1 block text-gray-600">อนุญาตการใช้งานทั่วไป แต่บล็อกรายการที่กำหนด</span></button>}
           </div>
           <ErrorText message={errors.onlinePolicy} />
           <p className="mt-3 text-[11px] text-gray-600">รายการทรัพยากรของแต่ละโหมดจะถูกเก็บแยกกัน การเปลี่ยนโหมดไม่ลบรายการที่เคยเลือก</p>
@@ -513,7 +532,7 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
       <div className="grid gap-4 lg:grid-cols-2">
         <section className="min-w-0 rounded-2xl border border-gray-200 bg-white p-4">
           <h3 className="font-bold text-gray-900">ข้อมูลการสอบ</h3>
-          <dl className="mt-3 grid grid-cols-[110px_minmax(0,1fr)] gap-y-2 text-xs"><dt className="text-gray-500">รายวิชา</dt><dd className="break-words font-semibold">{selectedCourse?.courseCode} {selectedCourse?.courseName}</dd><dt className="text-gray-500">Section</dt><dd>{state.sectionNo}</dd><dt className="text-gray-500">ชื่อการสอบ</dt><dd className="break-words">{state.examName}</dd><dt className="text-gray-500">ประเภท</dt><dd>{examTypeLabels[state.examType]}</dd><dt className="text-gray-500">วันที่</dt><dd>{state.examDate}</dd><dt className="text-gray-500">เวลา</dt><dd>{state.startTime} - {state.endTime} ({durationMinutes || 0} นาที)</dd><dt className="text-gray-500">ห้อง</dt><dd>{selectedRoom?.labName} • ชั้น {selectedRoom?.floor}</dd><dt className="text-gray-500">ผู้เข้าสอบ</dt><dd>{eligibleStudents.length} คน</dd><dt className="text-gray-500">รูปแบบ</dt><dd className="font-semibold">{state.format === 'online' ? 'ออนไลน์' : 'ออฟไลน์'}</dd></dl>
+          <dl className="mt-3 grid grid-cols-[110px_minmax(0,1fr)] gap-y-2 text-xs"><dt className="text-gray-500">รายวิชา</dt><dd className="break-words font-semibold">{selectedCourse?.courseCode} {selectedCourse?.courseName}</dd><dt className="text-gray-500">Section</dt><dd>{state.sectionNo}</dd><dt className="text-gray-500">ชื่อการสอบ</dt><dd className="break-words">{state.examName}</dd><dt className="text-gray-500">จำนวนข้อสอบ</dt><dd>{state.questionCount} ข้อ</dd><dt className="text-gray-500">ประเภท</dt><dd>{examTypeLabels[state.examType]}</dd><dt className="text-gray-500">วันที่</dt><dd>{state.examDate}</dd><dt className="text-gray-500">เวลา</dt><dd>{state.startTime} - {state.endTime} ({durationMinutes || 0} นาที)</dd><dt className="text-gray-500">ห้อง</dt><dd>{selectedRoom?.labName} • ชั้น {selectedRoom?.floor}</dd><dt className="text-gray-500">พื้นที่สอบ</dt><dd>{state.layout ? 'แถว ' + state.layout.firstRow + '–' + (state.layout.firstRow + state.layout.rows - 1) + ' · ' + state.layout.columns + ' คอลัมน์' : 'ทั้งห้อง'}</dd><dt className="text-gray-500">ผู้เข้าสอบ</dt><dd>{eligibleStudents.length} คน</dd><dt className="text-gray-500">รูปแบบ</dt><dd className="font-semibold">{state.format === 'online' ? 'ออนไลน์' : 'ออฟไลน์'}</dd></dl>
         </section>
         <section className="min-w-0 rounded-2xl border border-gray-200 bg-white p-4">
           <h3 className="font-bold text-gray-900">นโยบายหลัก</h3>
@@ -537,9 +556,9 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
         <div><button type="button" onClick={onClose} className="mb-2 inline-flex items-center gap-1 text-xs font-semibold text-gray-600 hover:text-blue-600"><ArrowLeft className="h-4 w-4" />กลับไปหน้าจัดการสอบ</button><h1 className="text-2xl font-bold text-gray-900">{editingExam || initialDraft?.editingExamId ? 'แก้ไขการสอบ' : initialDraft ? 'ดำเนินการจากร่าง' : 'สร้างการสอบ'}</h1><p className="text-xs text-gray-500">ขั้นตอนที่ {step + 1} จาก {steps.length}: {steps[step]}</p></div>
         {editingStatus && editingStatus !== 'upcoming' && <span className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">สถานะนี้ไม่อนุญาตให้บันทึกแก้ไขข้อมูลหลัก</span>}
       </div>
-      <nav aria-label="ขั้นตอนสร้างการสอบ" className="rounded-2xl border border-gray-200 bg-white p-3 shadow-xs"><ol className="grid grid-cols-6 gap-1">{steps.map((label, index) => <li key={label} className="min-w-0 text-center"><button type="button" onClick={() => index <= step && setStep(index)} className="w-full" aria-current={index === step ? 'step' : undefined}><span className={`mx-auto flex h-8 w-8 items-center justify-center rounded-full border text-xs font-bold ${index < step ? 'border-emerald-500 bg-emerald-500 text-white' : index === step ? 'border-blue-600 bg-blue-600 text-white ring-4 ring-blue-100' : 'border-gray-300 bg-white text-gray-400'}`}>{index < step ? <Check className="h-4 w-4" /> : index + 1}</span><span className={`mt-1 hidden truncate text-[10px] font-semibold md:block ${index === step ? 'text-blue-700' : 'text-gray-500'}`}>{label}</span></button></li>)}</ol><p className="mt-2 text-center text-xs font-semibold text-blue-700 md:hidden">{steps[step]}</p></nav>
+      <nav aria-label="ขั้นตอนสร้างการสอบ" className="rounded-2xl border border-gray-200 bg-white p-3 shadow-xs"><ol className="grid grid-cols-6 gap-1">{steps.map((label, index) => <li key={label} className="min-w-0 text-center"><button type="button" onClick={() => { if (index < step) { setPendingRoster(false); setStep(index); } }} className="w-full" aria-current={index === step ? 'step' : undefined}><span className={`mx-auto flex h-8 w-8 items-center justify-center rounded-full border text-xs font-bold ${index < step ? 'border-emerald-500 bg-emerald-500 text-white' : index === step ? 'border-blue-600 bg-blue-600 text-white ring-4 ring-blue-100' : 'border-gray-300 bg-white text-gray-400'}`}>{index < step ? <Check className="h-4 w-4" /> : index + 1}</span><span className={`mt-1 hidden truncate text-[10px] font-semibold md:block ${index === step ? 'text-blue-700' : 'text-gray-500'}`}>{label}</span></button></li>)}</ol><p className="mt-2 text-center text-xs font-semibold text-blue-700 md:hidden">{steps[step]}</p></nav>
       <main className="rounded-2xl border border-gray-200 bg-white p-4 shadow-xs sm:p-6">{renderStep()}</main>
-      <footer className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-gray-200 bg-white/95 p-3 shadow-lg backdrop-blur"><button type="button" onClick={saveDraft} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100"><Save className="h-4 w-4" />บันทึกร่าง</button><div className="ml-auto flex gap-2">{step > 0 && <button type="button" onClick={moveBack} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-gray-300 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"><ArrowLeft className="h-4 w-4" />ย้อนกลับ</button>}{step < steps.length - 1 ? <button type="button" onClick={moveNext} className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-xs font-semibold text-white hover:bg-blue-700">{step === 4 && isFinalPolicySubStep(policySubStep) ? 'ไปตรวจสอบและบันทึก' : 'ถัดไป'}<ArrowRight className="h-4 w-4" /></button> : <button type="button" disabled={Boolean(editingStatus && editingStatus !== 'upcoming')} onClick={createOrUpdateExam} className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"><CheckCircle2 className="h-4 w-4" />{editingExam || initialDraft?.editingExamId ? 'บันทึกการแก้ไข' : 'สร้างการสอบ'}</button>}</div></footer>
+      <footer className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-gray-200 bg-white/95 p-3 shadow-lg backdrop-blur"><button type="button" disabled={step === 1 && pendingRoster} onClick={saveDraft} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100"><Save className="h-4 w-4" />บันทึกร่าง</button><div className="ml-auto flex gap-2">{step > 0 && <button type="button" onClick={moveBack} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-gray-300 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"><ArrowLeft className="h-4 w-4" />ย้อนกลับ</button>}{step < steps.length - 1 ? <button type="button" onClick={moveNext} className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-xs font-semibold text-white hover:bg-blue-700">{step === 4 && isFinalPolicySubStep(policySubStep) ? 'ไปตรวจสอบและบันทึก' : 'ถัดไป'}<ArrowRight className="h-4 w-4" /></button> : <button type="button" disabled={Boolean(editingStatus && editingStatus !== 'upcoming')} onClick={createOrUpdateExam} className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"><CheckCircle2 className="h-4 w-4" />{editingExam || initialDraft?.editingExamId ? 'บันทึกการแก้ไข' : 'สร้างการสอบ'}</button>}</div></footer>
     </div>
   );
 };

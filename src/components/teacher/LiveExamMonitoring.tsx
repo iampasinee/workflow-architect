@@ -23,6 +23,8 @@ import {
 import { Badge, ExamSubmissionStatusBadge } from '../common/Badge';
 import { Modal } from '../common/Modal';
 import { ExamSession, ExamSessionStatus, Student, Violation, StudentExamStatus } from '../../types';
+import { ExamActivityReport } from './ExamActivityReport';
+import { seatsInLayout } from '../../services/examLayout';
 import { studentMatchesExamSection } from '../../services/courseState';
 import {
   clearMonitoringFilters,
@@ -452,8 +454,9 @@ const ExamMonitoringDetail: React.FC<ExamMonitoringDetailProps> = ({ examSession
     setShowReopenModal(false);
   };
 
-  const rows = [...new Set(room.seats.map((seat) => seat.seatNo.replace(/\d+$/, '')))];
-  const columns = Array.from({ length: room.columns || 8 }, (_, i) => i + 1);
+  const layoutSeats = seatsInLayout(room, activeExam.layout);
+  const rows = [...new Set(layoutSeats.map((seat) => seat.seatNo.replace(/\d+$/, '')))];
+  const columns = Array.from({ length: activeExam.layout?.columns || room.columns }, (_, i) => i + 1);
 
   // Student roster rows for T6 Table
   const examineeStatusList = seatAssignments
@@ -496,6 +499,7 @@ const ExamMonitoringDetail: React.FC<ExamMonitoringDetailProps> = ({ examSession
 
   return (
     <div className="space-y-6 text-left">
+      <ExamActivityReport examId={activeExam.id} />
       {/* Top Header & Telemetry Status */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-gray-200 gap-3">
         <div>
@@ -673,9 +677,10 @@ const ExamMonitoringDetail: React.FC<ExamMonitoringDetailProps> = ({ examSession
                   {rowLetter}
                 </span>
 
-                <div className="grid gap-2 flex-1 min-w-0" style={{ gridTemplateColumns: `repeat(${room.columns || 1}, minmax(0, 1fr))` }}>
+                <div className="grid gap-2 flex-1 min-w-0" style={{ gridTemplateColumns: `repeat(${columns.length || 1}, minmax(0, 1fr))` }}>
                   {columns.map((colNum) => {
-                    const seatNo = `${rowLetter}${colNum}`;
+                    const seatNo = layoutSeats.find((seat) => seat.seatNo.replace(/\d+$/, '') === rowLetter && Number(seat.seatNo.match(/\d+$/)?.[0]) === colNum)?.seatNo;
+                    if (!seatNo) return <div key={colNum} />;
                     const res = getSeatStatus(seatNo);
 
                     // Dynamic colors matching PRD specs

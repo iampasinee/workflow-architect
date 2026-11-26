@@ -72,6 +72,18 @@ test('Teacher receives only Courses and Sections assigned as primary or co-teach
   assert.deepEqual(sectionsForWizardCourse(authorized, 'course-a').map((section) => section.sectionNo), ['1']);
 });
 
+test('question count survives creation and editing independently of the minimum file count', () => {
+  const state = { ...completeState(), questionCount: 5, requiredFileCount: 1 };
+  const exam = { ...examWizardToSession(state), id: 'five-questions' };
+  assert.equal(exam.questionCount, 5);
+  assert.equal(examWizardStateFromSession(exam).questionCount, 5);
+  assert.equal(exam.fileRequirements.requiredFileCount, 1);
+  assert.equal(examWizardStateFromSession({ ...exam, questionCount: undefined }).questionCount, 2);
+  for (const questionCount of [0, -1, 2.5]) {
+    assert.ok(validateExamWizard({ ...state, questionCount }, { courses, students, rooms, examSessions: [] }).questionCount);
+  }
+});
+
 test('changing Course clears an incompatible Section', () => {
   const authorized = coursesForTeacher(courses, 'teacher-a');
   const selected = { ...completeState(), sectionNo: '2' };

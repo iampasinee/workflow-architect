@@ -6,7 +6,7 @@ import { applyRoomAction, migrateRoomState, projectRooms } from '../services/roo
 import {
   completeMockRegistration as completeMockRegistrationState,
   initialMockAuthUsers,
-  migrateMockAuthUsers,
+  migrateMockAuthUsers, studentAuthSeeds,
   mockAuthStorageKey,
 } from '../services/authState';
 import { CourseActionResult, CourseInput, SectionInput } from '../types/course';
@@ -37,6 +37,8 @@ import {
   CheatDetectionRules
 } from '../types';
 import { getTranslation } from '../i18n/translations';
+import { availableExamSeats, validLayout } from '../services/examLayout';
+import { findExamRoomConflict } from '../services/examWizard';
 import { canAdjustExamTime, canEditExamSeats, canEditExamSetup, canReopenExamSubmissions, getEffectiveExamStatus } from '../services/examStatus';
 import { getEffectiveNow } from '../services/demoTime';
 import { canSubmitStudentAttempt, createFreshStudentExamAttemptId, demoSubmissionStorageKey, isDemoSubmissionRetry, recordStudentSubmission } from '../services/studentDemoRetry';
@@ -173,13 +175,13 @@ interface AppContextType {
   findStudentSectionInCourse: (studentId: string, courseId: string, targetSectionId: string) => { sectionId: string; sectionNo: string; manageable: boolean } | null;
 
   // Exam Actions
-  createExamSession: (exam: Omit<ExamSession, 'id'>) => void;
-  updateExamSession: (id: string, updates: Partial<ExamSession>) => void;
+  createExamSession: (exam: Omit<ExamSession, 'id'>) => boolean;
+  updateExamSession: (id: string, updates: Partial<ExamSession>) => boolean;
   adjustExamTime: (examId: string, deltaMinutes: number, scope: 'room' | 'student', targetStudentId?: string, reason?: string) => void;
   reopenSubmission: (examId: string, extraMinutes: number, scope: 'room' | 'student', targetStudentId?: string, reason?: string) => void;
 
   // Seat Assignment Actions
-  assignSeat: (examId: string, seatNo: string, studentId: string) => void;
+  assignSeat: (examId: string, seatNo: string, studentId: string, reason?: string) => boolean;
   unassignSeat: (examId: string, seatNo: string) => void;
   autoAssignSeats: (examId: string, roomId: string) => void;
 
@@ -280,8 +282,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return safeParse('securelab_admins', initialAdmins);
   });
 
-  const [mockAuthUsers, setMockAuthUsers] = useState<MockAuthUser[]>(() =>
-    migrateMockAuthUsers(safeParse<unknown>(mockAuthStorageKey, initialMockAuthUsers)));
+  const [storedAuthUsers, setMockAuthUsers] = useState<MockAuthUser[]>(() =>
+    migrateMockAuthUsers(safeParse<unknown>(mockAuthStorageKey, initialMockAuthUsers), studentAuthSeeds(students)));
+  const mockAuthUsers = useMemo(() => migrateMockAuthUsers(storedAuthUsers, studentAuthSeeds(students)), [storedAuthUsers, students]);
 
   const [roomState, setRoomState] = useState<RoomState>(() =>
     migrateRoomState(safeParse<unknown>('securelab_room_state', null), safeParse('securelab_rooms', initialRooms)));
@@ -324,7 +327,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
   };
 
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => safeParse('securelab_audit_log', []));
+  useEffect(() => { localStorage.setItem('securelab_audit_log', JSON.stringify(auditLogs)); }, [auditLogs]);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [activeViolationAlert, setActiveViolationAlert] = useState<Violation | null>(null);
 
@@ -339,6 +343,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [currentExamId, setCurrentExamId] = useState<string>('exam_0001');
   const [studentExamAttemptId, setStudentExamAttemptId] = useState(createFreshStudentExamAttemptId);
   const startStudentExamAttempt = (student: Student, examId: string) => {
+    if (!students.some((item) => item.id === student.id && item.accountStatus === 'active')) return;
     setStudentExamAttemptId(createFreshStudentExamAttemptId());
     setCurrentStudent(student);
     setCurrentExamId(examId);
@@ -349,8 +354,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     : role === 'student' ? coursesForStudent(storedCourses, derivedCurrentStudent, storedExamSessions, examNow) : storedCourses,
   [role, storedCourses, currentTeacher?.id, derivedCurrentStudent, storedExamSessions, examNow]);
   const examSessions = useMemo(() => role === 'admin' || !role ? storedExamSessions : storedExamSessions.filter((exam) =>
-    courses.some((course) => course.id === exam.courseId && course.sections.some((section) => section.sectionNo === exam.sectionNo))),
-  [role, storedExamSessions, courses]);
+    courses.some((course) => course.id === exam.courseId && course.sections.some((section) => section.sectionNo === exam.sectionNo &&
+      (role !== 'student' || (derivedCurrentStudent && studentMatchesExamSection(derivedCurrentStudent, exam, section, examNow)))))),
+  [role, storedExamSessions, courses, derivedCurrentStudent, examNow]);
   const visibleStudents = useMemo(() => {
     if (role === 'student') return students.filter((student) => student.id === currentStudent?.id);
     if (role !== 'teacher') return students;
@@ -430,6 +436,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const completeMockRegistration = (userId: string, faceStatus: FaceEnrollmentStatus, password: string, confirmation: string) => {
+    const account = mockAuthUsers.find((user) => user.id === userId);
+    if (account?.role === 'student' && !students.some((student) => student.id === account.subjectId && student.accountStatus === 'active')) return { success: false, error: 'ไม่พบรายชื่อนักศึกษาที่เปิดใช้งาน' };
     const result = completeMockRegistrationState(mockAuthUsers, userId, faceStatus, password, confirmation);
     if (result.success) setMockAuthUsers(result.users);
     return { success: result.success, error: result.error };
@@ -808,6 +816,67 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   // Exam Sessions
+  const recordSeatChanges = (exam: ExamSession, previous: SeatAssignment[], next: SeatAssignment[], reason: string, oldRoomId = exam.roomId) => {
+    const room = rooms.find((item) => item.id === exam.roomId);
+    const oldRoom = rooms.find((item) => item.id === oldRoomId);
+    const describe = (source: Room | undefined, seat?: SeatAssignment) => {
+      if (!seat) return 'ยังไม่จัดที่นั่ง';
+      const machine = source?.seats.find((item) => item.seatNo === seat.seatNo);
+      return [source?.labName, seat.seatNo, machine?.machineNo].filter(Boolean).join(' / ');
+    };
+    const ids = new Set([...previous, ...next].map((seat) => seat.studentId));
+    const logs: AuditLog[] = [];
+    for (const studentId of ids) {
+      const from = previous.find((seat) => seat.studentId === studentId);
+      const to = next.find((seat) => seat.studentId === studentId);
+      if (from?.seatNo === to?.seatNo && oldRoomId === exam.roomId) continue;
+      const fromSeat = from && roomState.seats.find((item) => item.roomId === oldRoomId && item.examSeatNo === from.seatNo);
+      const toSeat = to && roomState.seats.find((item) => item.roomId === exam.roomId && item.examSeatNo === to.seatNo);
+      logs.push({
+        reason, fromSeatId: fromSeat?.id, toSeatId: toSeat?.id,
+        fromDeviceId: fromSeat && roomState.computers.find((item) => item.seatId === fromSeat.id)?.id,
+        toDeviceId: toSeat && roomState.computers.find((item) => item.seatId === toSeat.id)?.id,
+        id: crypto.randomUUID(), examId: exam.id, studentId, teacherId: currentTeacher?.id,
+        timestamp: new Date().toISOString(), actor: currentTeacher?.fullName || 'อาจารย์',
+        action: from && to ? 'ย้ายเครื่อง' : to ? 'จัดที่นั่ง' : 'ยกเลิกที่นั่ง',
+        details: describe(oldRoom, from) + ' → ' + describe(room, to) + ' · ' + reason,
+      });
+    }
+    if (logs.length) setAuditLogs((current) => [...logs, ...current]);
+  };
+
+  const planExamSeats = (exam: ExamSession, previous: SeatAssignment[] = []) => {
+    const room = rooms.find((item) => item.id === exam.roomId);
+    const section = courses.find((item) => item.id === exam.courseId)?.sections.find((item) => item.sectionNo === exam.sectionNo);
+    if (!room || !section || (exam.layout && !validLayout(exam.layout, room))) return;
+    const seats = availableExamSeats(room, exam.layout);
+    const roster = students.filter((student) => student.accountStatus === 'active' && studentMatchesExamSection(student, exam, section));
+    if (!roster.length || seats.length < roster.length || (exam.importedStudentIds && roster.length !== exam.importedStudentIds.length)) return;
+    const order = exam.importedStudentIds;
+    roster.sort((a, b) => order ? order.indexOf(a.id) - order.indexOf(b.id) : a.studentCode.localeCompare(b.studentCode));
+    const kept = previous.filter((item) => roster.some((student) => student.id === item.studentId) && seats.some((seat) => seat.seatNo === item.seatNo));
+    const free = seats.filter((seat) => !kept.some((item) => item.seatNo === seat.seatNo));
+    const missing = roster.filter((student) => !kept.some((item) => item.studentId === student.id));
+    return [...kept, ...missing.map((student, index) => ({ examId: exam.id, studentId: student.id, seatNo: free[index].seatNo }))];
+  };
+
+  const saveExamSeats = (exam: ExamSession, existing?: ExamSession) => {
+    if (role !== 'teacher' || !currentTeacher || currentTeacher.accountStatus !== 'active') return false;
+    if (findExamRoomConflict(storedExamSessions, exam, existing?.id)) {
+      showToast('บันทึกไม่ได้', 'พื้นที่นั่งสอบซ้อนกับการสอบในช่วงเวลาเดียวกัน', 'error');
+      return false;
+    }
+    const previous = seatAssignments.filter((seat) => seat.examId === exam.id);
+    const assigned = planExamSeats(exam, existing?.roomId === exam.roomId ? previous : []);
+    if (!assigned) {
+      showToast('บันทึกไม่ได้', 'กรุณาตรวจรายชื่อ ผังห้อง และจำนวนเครื่องพร้อมใช้งาน', 'error');
+      return false;
+    }
+    recordSeatChanges(exam, previous, assigned, 'จัดตามรายชื่อผู้เข้าสอบ', existing?.roomId);
+    setSeatAssignments((current) => [...current.filter((seat) => seat.examId !== exam.id), ...assigned]);
+    return true;
+  };
+
   const createExamSession = (newExam: Omit<ExamSession, 'id'>) => {
     if (!rooms.some((room) => room.id === newExam.roomId && room.status === 'ready')) {
       showToast('ไม่สามารถสร้างรอบการสอบได้', 'กรุณาเลือกห้องสอบที่พร้อมใช้งาน', 'error');
@@ -821,8 +890,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
     const id = crypto.randomUUID();
     const created: ExamSession = { ...newExam, id };
+    if (!saveExamSeats(created)) return false;
     setExamSessions(prev => [created, ...prev]);
     showToast('สร้างรอบการสอบแล้ว', `กำหนดสอบวันที่ ${created.examDate} เวลา ${created.startTime}`, 'success');
+    return true;
   };
 
   const updateExamSession = (id: string, updates: Partial<ExamSession>) => {
@@ -841,8 +912,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       showToast('ไม่สามารถอัปเดตรอบการสอบได้', 'ตอนเรียนถูกปิดใช้งานหรือคุณไม่ได้รับมอบหมาย', 'error');
       return;
     }
+    if (!saveExamSeats({ ...existing, ...updates }, existing)) return false;
     setExamSessions(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
     showToast('อัปเดตรอบการสอบแล้ว', 'บันทึกการเปลี่ยนแปลงเรียบร้อยแล้ว', 'success');
+    return true;
   };
 
   const adjustExamTime = (
@@ -925,13 +998,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   // Seat Assignments
-  const assignSeat = (examId: string, seatNo: string, studentId: string) => {
+  const assignSeat = (examId: string, seatNo: string, studentId: string, reason = '') => {
+    if (role !== 'teacher' || currentTeacher?.accountStatus !== 'active' || !examSessions.some((exam) => exam.id === examId)) return false;
     const exam = storedExamSessions.find((item) => item.id === examId);
     if (!exam || !canEditExamSeats(exam)) {
       showToast('ไม่สามารถจัดที่นั่งได้', 'การสอบสิ้นสุดแล้ว ไม่สามารถเปลี่ยนผังที่นั่งย้อนหลัง', 'warning');
       return;
     }
-    const station = rooms.find((room) => room.id === exam?.roomId)?.seats.find((seat) => seat.seatNo === seatNo);
+    const room = rooms.find((item) => item.id === exam.roomId);
+    const station = room && availableExamSeats(room, exam.layout).find((seat) => seat.seatNo === seatNo);
     if (!station || station.disabled || station.status !== 'online') {
       showToast('ไม่สามารถจัดที่นั่งได้', 'ที่นั่งหรือเครื่องไม่พร้อมใช้งาน', 'error');
       return;
@@ -939,14 +1014,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const section = storedCourses.find((course) => course.id === exam?.courseId)?.sections
       .find((item) => item.sectionNo === exam?.sectionNo);
     const student = students.find((item) => item.id === studentId);
-    if (!student || !exam || !studentMatchesExamSection(student, exam, section)) {
+    if (!student || student.accountStatus !== 'active' || !exam || !studentMatchesExamSection(student, exam, section)) {
       showToast('ไม่สามารถจัดที่นั่งได้', 'นักศึกษาไม่อยู่ในสาขาวิชาและรหัสที่กำหนดสำหรับตอนเรียนนี้', 'error');
       return;
     }
-    setSeatAssignments(prev => {
-      const filtered = prev.filter(sa => !(sa.examId === examId && (sa.seatNo === seatNo || sa.studentId === studentId)));
-      return [...filtered, { examId, seatNo, studentId }];
-    });
+    const previous = seatAssignments.filter((item) => item.examId === examId);
+    const old = previous.find((item) => item.studentId === studentId);
+    if (previous.some((item) => item.seatNo === seatNo) || (old && !reason.trim())) {
+      showToast('จัดที่นั่งไม่ได้', 'เลือกที่นั่งว่างและระบุเหตุผลเมื่อย้ายเครื่อง', 'warning');
+      return false;
+    }
+    const next = [...previous.filter((item) => item.studentId !== studentId), { examId, seatNo, studentId }];
+    recordSeatChanges(exam, previous, next, reason.trim() || 'จัดที่นั่งรายบุคคล');
+    setSeatAssignments((current) => [...current.filter((item) => item.examId !== examId), ...next]);
+    return true;
   };
 
   const unassignSeat = (examId: string, seatNo: string) => {
@@ -955,6 +1036,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       showToast('ไม่สามารถยกเลิกที่นั่งได้', 'การสอบสิ้นสุดแล้ว ไม่สามารถเปลี่ยนผังที่นั่งย้อนหลัง', 'warning');
       return;
     }
+    if (role !== 'teacher' || currentTeacher?.accountStatus !== 'active' || !examSessions.some((item) => item.id === examId) || !canEditExamSetup(exam)) return;
+    recordSeatChanges(exam, seatAssignments.filter((item) => item.examId === examId && item.seatNo === seatNo), [], 'อาจารย์ยกเลิกที่นั่งก่อนสอบ');
     setSeatAssignments(prev => prev.filter(sa => !(sa.examId === examId && sa.seatNo === seatNo)));
   };
 
@@ -968,14 +1051,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (!room || room.status !== 'ready' || exam.roomId !== roomId) return;
 
     // Filter available seats (online, not damaged, not disabled)
-    const availableSeats = room.seats.filter(s => s.status === 'online' && !s.disabled);
+    if (role !== 'teacher' || currentTeacher?.accountStatus !== 'active' || !examSessions.some((item) => item.id === examId) || !canEditExamSetup(exam)) return;
+    const availableSeats = availableExamSeats(room, exam.layout);
     const section = storedCourses.find((course) => course.id === exam?.courseId)?.sections
       .find((item) => item.sectionNo === exam?.sectionNo);
     const activeStudents = students.filter((student) =>
       student.accountStatus === 'active' && Boolean(exam && studentMatchesExamSection(student, exam, section)));
 
     const newAssignments: SeatAssignment[] = [];
-    const minCount = Math.min(availableSeats.length, activeStudents.length);
+    if (availableSeats.length < activeStudents.length) { showToast('จัดที่นั่งไม่ได้', 'เครื่องพร้อมใช้งานไม่พอ', 'error'); return; }
+    activeStudents.sort((a, b) => exam.importedStudentIds ? exam.importedStudentIds.indexOf(a.id) - exam.importedStudentIds.indexOf(b.id) : a.studentCode.localeCompare(b.studentCode));
+    const minCount = activeStudents.length;
 
     for (let i = 0; i < minCount; i++) {
       newAssignments.push({
@@ -985,6 +1071,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       });
     }
 
+    recordSeatChanges(exam, seatAssignments.filter((item) => item.examId === examId), newAssignments, 'จัดเรียงก่อนสอบ');
     setSeatAssignments(prev => {
       const others = prev.filter(sa => sa.examId !== examId);
       return [...others, ...newAssignments];
@@ -1016,7 +1103,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return false;
     }
 
-    if (!exam || !canSubmitStudentAttempt(exam, getEffectiveNow(), hasActiveReopening, hasFinalSubmission)) {
+    const section = storedCourses.find((course) => course.id === exam?.courseId)?.sections.find((item) => item.sectionNo === exam?.sectionNo);
+    if (role !== 'student' || currentStudent?.id !== studentId || !exam || !studentMatchesExamSection(student, exam, section) || !canSubmitStudentAttempt(exam, getEffectiveNow(), hasActiveReopening, hasFinalSubmission)) {
       showToast('ไม่อนุญาตให้อัปโหลด', 'อัปโหลดไฟล์ได้เฉพาะระหว่างการสอบที่กำลังดำเนินการ', 'error');
       return false;
     }
@@ -1073,13 +1161,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     detail: string
   ) => {
     const newViolation: Violation = {
-      id: 'vio_' + Date.now(),
+      id: crypto.randomUUID(),
       examId,
       studentId,
       seatNo,
       type,
       detail,
-      detectedAt: new Date().toLocaleTimeString(),
+      detectedAt: new Date().toLocaleString('th-TH'),
       acknowledged: false,
     };
 
@@ -1195,8 +1283,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         examSessions,
         seatAssignments,
         submissions,
-        violations,
-        auditLogs,
+        violations: role === 'teacher' ? violations.filter((item) => examSessions.some((exam) => item.examId === exam.id)) : violations,
+        auditLogs: role === 'teacher' ? auditLogs.filter((item) => item.examId ? examSessions.some((exam) => item.examId === exam.id) : item.actor === currentTeacher?.fullName) : auditLogs,
 
         toasts,
         showToast,

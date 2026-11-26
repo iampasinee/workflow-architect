@@ -16,7 +16,9 @@ import {
   Info
 } from 'lucide-react';
 import { Badge, MachineStatusBadge } from '../common/Badge';
-import { canEditExamSeats } from '../../services/examStatus';
+import { ExamActivityReport } from './ExamActivityReport';
+import { seatsInLayout, availableExamSeats } from '../../services/examLayout';
+import { canEditExamSeats, canEditExamSetup } from '../../services/examStatus';
 
 export const SeatAssignmentManager: React.FC = () => {
   const {
@@ -34,9 +36,12 @@ export const SeatAssignmentManager: React.FC = () => {
   } = useApp();
   const isThai = language === 'th';
 
-  const activeExam = examSessions[0];
+  const [selectedExam, setSelectedExam] = useState('');
+  const [destination, setDestination] = useState('');
+  const [reason, setReason] = useState('');
+  const activeExam = examSessions.find((exam) => exam.id === selectedExam) || examSessions[0];
   const canEditSeats = Boolean(activeExam && canEditExamSeats(activeExam, new Date()));
-  const room = rooms.find((r) => r.id === activeExam?.roomId) || rooms[0];
+  const room = rooms.find((r) => r.id === activeExam?.roomId);
   const activeSection = courses.find((course) => course.id === activeExam?.courseId)?.sections
     .find((section) => section.sectionNo === activeExam?.sectionNo);
   const eligibleStudents = students.filter((student) => activeExam && studentMatchesExamSection(student, activeExam, activeSection));
@@ -64,7 +69,8 @@ export const SeatAssignmentManager: React.FC = () => {
   const handleSeatClick = (seatNo: string) => {
     if (!canEditSeats) return;
     const station = room?.seats?.find((s) => s.seatNo === seatNo);
-    if (station?.status === 'damaged' || station?.status === 'unavailable') {
+    setDestination(''); setReason('');
+    if ((!station || station.status !== 'online' || station.disabled) && !getStudentAtSeat(seatNo)) {
       const statusText = station?.status?.toUpperCase() || 'UNAVAILABLE';
       showToast(
         isThai ? 'เครื่องนี้ไม่สามารถใช้งานได้' : 'Station Unavailable',
@@ -85,7 +91,7 @@ export const SeatAssignmentManager: React.FC = () => {
 
   const handleAssignToSelected = (studentId: string) => {
     if (!selectedSeatNo || !canEditSeats) return;
-    assignSeat(activeExam.id, selectedSeatNo, studentId);
+    if (!assignSeat(activeExam.id, selectedSeatNo, studentId)) return;
     showToast(
       isThai ? 'จัดที่นั่งสำเร็จ' : 'Seat Assigned',
       isThai ? `จัดนักศึกษาลงที่นั่ง ${selectedSeatNo} เรียบร้อยแล้ว` : `Student assigned to Seat ${selectedSeatNo}.`,
@@ -105,12 +111,14 @@ export const SeatAssignmentManager: React.FC = () => {
     setSelectedSeatNo(null);
   };
 
-  const rows = [...new Set(room.seats.map((seat) => seat.seatNo.replace(/\d+$/, '')))];
-  const columns = Array.from({ length: room.columns || 8 }, (_, i) => i + 1);
+  if (!activeExam || !room) return <p className="rounded-xl bg-white p-6">ไม่พบรอบสอบหรือห้องสอบที่ได้รับมอบหมาย</p>;
+  const layoutSeats = seatsInLayout(room, activeExam.layout);
+  const rows = [...new Set(layoutSeats.map((seat) => seat.seatNo.replace(/\d+$/, '')))];
+  const columns = Array.from({ length: activeExam.layout?.columns || room.columns }, (_, i) => i + 1);
 
   return (
     <div className="space-y-6 text-left">
-      {/* Top Header */}
+      <label className="block text-sm font-bold">เลือกรอบสอบ<select className="ml-3 rounded-xl border bg-white p-2" value={activeExam.id} onChange={(event) => { setSelectedExam(event.target.value); setSelectedSeatNo(null); setReason(''); setDestination(''); }}>{examSessions.map((exam) => <option key={exam.id} value={exam.id}>{exam.examName || exam.courseId} · {exam.examDate} {exam.startTime}</option>)}</select></label>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-gray-200 gap-3">
         <div>
           <span className="text-xs font-bold uppercase tracking-wider text-blue-600">
@@ -129,7 +137,7 @@ export const SeatAssignmentManager: React.FC = () => {
         <div className="flex items-center gap-2 self-start sm:self-auto">
           <button
             onClick={() => autoAssignSeats(activeExam.id, room.id)}
-            disabled={!canEditSeats}
+            disabled={!canEditExamSetup(activeExam)}
             className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-md transition-all flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Sparkles className="w-4 h-4 text-blue-200" />
@@ -177,7 +185,7 @@ export const SeatAssignmentManager: React.FC = () => {
 
         <div className="text-xs font-medium text-gray-700">
           {isThai ? 'ความจุ: ' : 'Capacity: '}
-          <strong>{seatAssignments.filter((sa) => sa.examId === activeExam.id).length}</strong> / {room.seats.length}{' '}
+          <strong>{seatAssignments.filter((sa) => sa.examId === activeExam.id).length}</strong> / {layoutSeats.length}{' '}
           {isThai ? 'ที่นั่งที่จัดแล้ว' : 'Stations Seated'}
         </div>
       </div>
@@ -200,10 +208,11 @@ export const SeatAssignmentManager: React.FC = () => {
                   {rowLetter}
                 </span>
 
-                <div className="grid gap-2.5 flex-1 min-w-0" style={{ gridTemplateColumns: `repeat(${room.columns || 1}, minmax(0, 1fr))` }}>
+                <div className="grid gap-2.5 flex-1 min-w-0" style={{ gridTemplateColumns: `repeat(${columns.length || 1}, minmax(0, 1fr))` }}>
                   {columns.map((colNum) => {
-                    const seatNo = `${rowLetter}${colNum}`;
-                    const station = room?.seats?.find((s) => s.seatNo === seatNo);
+                    const station = layoutSeats.find((s) => s.seatNo.replace(/\d+$/, '') === rowLetter && Number(s.seatNo.match(/\d+$/)?.[0]) === colNum);
+                    if (!station) return <div key={colNum} />;
+                    const seatNo = station.seatNo;
                     const student = getStudentAtSeat(seatNo);
                     const isSelected = selectedSeatNo === seatNo;
 
@@ -289,7 +298,17 @@ export const SeatAssignmentManager: React.FC = () => {
                 </span>
               </div>
 
-              {getStudentAtSeat(selectedSeatNo) && (
+              {getStudentAtSeat(selectedSeatNo) && <div className="grid gap-2">
+                <label>เครื่องปลายทาง<select className="ml-2 rounded-lg border bg-white p-2" value={destination} onChange={(e) => setDestination(e.target.value)}>
+                  <option value="">เลือกเครื่องว่าง</option>{availableExamSeats(room, activeExam.layout).filter((seat) => !seatAssignments.some((item) => item.examId === activeExam.id && item.seatNo === seat.seatNo)).map((seat) => <option key={seat.seatNo} value={seat.seatNo}>{seat.seatNo} · {seat.machineNo}</option>)}</select></label>
+                <label>เหตุผลที่ย้าย<input className="ml-2 rounded-lg border p-2" value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+                <button type="button" disabled={!reason.trim() || !destination} className="rounded-lg bg-blue-600 p-2 text-white disabled:opacity-40" onClick={() => {
+                  if (assignSeat(activeExam.id, destination, getStudentAtSeat(selectedSeatNo)!.id, reason)) {
+                    setSelectedSeatNo(null); setDestination(''); setReason(''); showToast('บันทึกการย้ายเครื่องแล้ว', '', 'success');
+                  }
+                }}>ยืนยันย้ายเครื่อง</button>
+              </div>}
+              {getStudentAtSeat(selectedSeatNo) && canEditExamSetup(activeExam) && (
                 <button
                   type="button"
                   onClick={handleUnassignCurrentSeat}
@@ -333,7 +352,7 @@ export const SeatAssignmentManager: React.FC = () => {
                     {std.admissionYear ? calculateYearLevelFromAdmissionYear(std.admissionYear).yearLevel || '—' : '—'}
                   </div>
 
-                  {selectedSeatNo && canEditSeats ? (
+                  {selectedSeatNo && canEditSeats && !getStudentAtSeat(selectedSeatNo) ? (
                     <button
                       onClick={() => handleAssignToSelected(std.id)}
                       className="mt-2 w-full py-1.5 px-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg text-[11px] transition-colors cursor-pointer"
@@ -351,6 +370,7 @@ export const SeatAssignmentManager: React.FC = () => {
           </div>
         </div>
       </div>
+      <ExamActivityReport examId={activeExam.id} />
     </div>
   );
 };

@@ -28,6 +28,7 @@ import { FinalSubmissionConfirmation } from './FinalSubmissionConfirmation';
 import { SecureLabBrandHeader } from '../common/SecureLabBrandHeader';
 import { formatFileSize } from '../../utils/fileSize';
 import { getEffectiveExamStatus } from '../../services/examStatus';
+import { getExamQuestionCount } from '../../services/examWizard';
 import { useExamClock } from '../../utils/useExamClock';
 import { getEffectiveNow } from '../../services/demoTime';
 import { canSubmitStudentAttempt, FRONTEND_DEMO_MODE, getStudentAttemptStagingKey, isDemoSubmissionRetry } from '../../services/studentDemoRetry';
@@ -95,7 +96,7 @@ export const ExamSessionView: React.FC = () => {
   const myAssignment = seatAssignments.find(
     (sa) => sa.examId === activeExam?.id && sa.studentId === currentStudent?.id
   );
-  const seatNo = myAssignment?.seatNo || 'A1';
+  const seatNo = myAssignment?.seatNo || 'ยังไม่จัดที่นั่ง';
   const seatStation = room?.seats.find((s) => s.seatNo === seatNo);
 
   const existingSubmission = submissions.find(
@@ -179,6 +180,15 @@ export const ExamSessionView: React.FC = () => {
   // Upload Management
   const [stagedFiles, setStagedFiles] = useState<StagedUploadRecord[]>([]);
   const [question, setQuestion] = useState('');
+  const questionCount = getExamQuestionCount(activeExam?.questionCount);
+  const [questionPage, setQuestionPage] = useState(0);
+  const questionsPerPage = 20;
+  const firstQuestion = questionPage * questionsPerPage + 1;
+  const [replacement, setReplacement] = useState<{
+    question: string;
+    files: File[];
+    conflicts: StagedUploadRecord[];
+  } | null>(null);
   const preparing = useRef(false);
   const [stagingLoaded, setStagingLoaded] = useState(false);
   const [timeoutStatus, setTimeoutStatus] = useState<'idle' | 'processing' | 'submitted' | 'no_files'>('idle');
@@ -403,14 +413,14 @@ export const ExamSessionView: React.FC = () => {
     };
   };
 
-  const stageSelectedFiles = async (files: File[]) => {
+  const stageSelectedFiles = async (files: File[], confirmed = false) => {
     if (!canUpload) {
       notifyUploadLocked();
       return;
     }
 
     if (!files.length || !stagingLoaded || preparing.current) return;
-    if (!question) {
+    if (!question || Number(question) > questionCount) {
       showToast('กรุณาเลือกข้อสอบก่อนเลือกไฟล์', '', 'info');
       return;
     }
@@ -429,7 +439,10 @@ export const ExamSessionView: React.FC = () => {
       showToast('กรุณารอให้ไฟล์เดิมอัปโหลดเสร็จก่อน', '', 'info');
       return;
     }
-    if (replaced.length && !window.confirm('ต้องการแทนที่ไฟล์เดิมของข้อ ' + question + ' หรือไม่?\n' + replaced.map((file) => file.submissionName).join('\n'))) return;
+    if (replaced.length && !confirmed) {
+      setReplacement({ question, files, conflicts: replaced });
+      return;
+    }
     preparing.current = true;
     try {
       const sequences = await reserveUploadSequences(stagingSessionKey, files.length);
@@ -861,7 +874,7 @@ export const ExamSessionView: React.FC = () => {
         <SecureLabBrandHeader examControls={<>
           <div className="min-w-0 text-xs text-gray-600 lg:mr-auto">
             <p className="font-bold text-gray-900">{course?.courseCode || '—'} • {room?.labName || '—'} • {isThai ? 'ที่นั่ง' : 'Seat'} {seatNo}</p>
-            <p className="mt-1">{seatStation?.machineNo || 'PC-301-01'} • IP: {seatStation?.ip || '192.168.10.11'}</p>
+            <p className="mt-1">{seatStation?.machineNo || '—'} • IP: {seatStation?.ip || '—'}</p>
           </div>
             <div className="flex flex-wrap items-center gap-2">
               <div className={`flex items-center gap-1 rounded-xl border px-2 py-2 sm:gap-2 sm:px-3 ${getTimerColorClass()}`}>
@@ -1108,13 +1121,26 @@ export const ExamSessionView: React.FC = () => {
               </section>
 
               <div className="flex min-w-0 flex-col gap-4">
-                <label className="grid gap-2 text-sm font-semibold">
-                  เลือกข้อสอบสำหรับไฟล์คำตอบ
-                  <select className="rounded-lg border border-gray-300 bg-white p-2" value={question} disabled={!canUpload} onChange={(event) => setQuestion(event.target.value)}>
-                    <option value="">เลือกข้อสอบ</option>
-                    {[1, 2].map((number) => <option key={number} value={number}>ข้อ {number}</option>)}
-                  </select>
-                </label>
+                <fieldset disabled={!canUpload || Boolean(replacement)}>
+                  <legend className="mb-2 text-sm font-semibold text-gray-900">เลือกข้อสอบสำหรับไฟล์คำตอบ</legend>
+                  <div className="flex flex-wrap gap-2">
+                    {Array.from({ length: Math.min(questionsPerPage, questionCount - firstQuestion + 1) }, (_, index) => String(firstQuestion + index)).map((number) => (
+                      <label key={number} className="relative">
+                        <input type="radio" name="answer-question" value={number} checked={question === number} onChange={() => setQuestion(number)} className="peer sr-only" />
+                        <span className="inline-flex min-h-10 min-w-24 cursor-pointer items-center justify-center rounded-xl border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 hover:border-blue-400 peer-checked:border-blue-600 peer-checked:bg-blue-600 peer-checked:text-white peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-blue-600 peer-disabled:cursor-default peer-disabled:opacity-60">
+                          ข้อ {number}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  {questionCount > questionsPerPage && (
+                    <div className="mt-2 flex items-center gap-3 text-xs">
+                      <button type="button" disabled={!questionPage} onClick={() => { setQuestionPage(questionPage - 1); setQuestion(''); }} className="text-blue-700 disabled:text-gray-400">ก่อนหน้า</button>
+                      <span>ข้อ {firstQuestion}–{Math.min(firstQuestion + questionsPerPage - 1, questionCount)} จาก {questionCount}</span>
+                      <button type="button" disabled={firstQuestion + questionsPerPage > questionCount} onClick={() => { setQuestionPage(questionPage + 1); setQuestion(''); }} className="text-blue-700 disabled:text-gray-400">ถัดไป</button>
+                    </div>
+                  )}
+                </fieldset>
                 {question && stagedFiles.some((file) => file.questionNumber === Number(question)) && (
                   <p className="text-sm text-amber-800">ข้อนี้มีไฟล์แล้ว หากเลือกนามสกุลเดิม ระบบจะถามก่อนแทนที่</p>
                 )}
@@ -1413,9 +1439,9 @@ export const ExamSessionView: React.FC = () => {
       {/* Footer / Workstation Security Bar */}
       <footer className="bg-white border-t border-gray-200 px-6 py-3 text-center text-xs text-gray-500">
         {isThai ? 'เครื่องสอบเชื่อมโยงกับ MAC:' : 'Workstation Session Bound to MAC:'}{' '}
-        <strong className="font-mono text-gray-800">{seatStation?.mac || 'AC:DE:48:00:11:22'}</strong> •{' '}
+        <strong className="font-mono text-gray-800">{seatStation?.mac || '—'}</strong> •{' '}
         {isThai ? 'ไอพีประจำเครื่อง:' : 'Static IP:'}{' '}
-        <strong className="font-mono text-gray-800">{seatStation?.ip || '192.168.10.11'}</strong>
+        <strong className="font-mono text-gray-800">{seatStation?.ip || '—'}</strong>
       </footer>
 
       <Modal
@@ -1519,6 +1545,37 @@ export const ExamSessionView: React.FC = () => {
             <p className="break-all font-mono font-semibold text-gray-900">{deleteTarget.submissionName}</p>
             <p className="mt-1 break-all text-gray-500">ชื่อไฟล์ต้นฉบับ: {deleteTarget.originalName}</p>
           </div>
+        </div>}
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(replacement) && canUpload && sessionStep === 'upload'}
+        onClose={() => setReplacement(null)}
+        title="ยืนยันการแทนที่ไฟล์"
+        footer={
+          <>
+            <button type="button" autoFocus onClick={() => setReplacement(null)} className="rounded-xl px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100 focus-visible:outline-2 focus-visible:outline-blue-600">
+              ยกเลิก
+            </button>
+            <button type="button" onClick={() => {
+              setReplacement(null);
+              if (replacement && replacement.question === question) void stageSelectedFiles(replacement.files, true);
+            }} className="rounded-xl bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600">
+              แทนที่ไฟล์
+            </button>
+          </>
+        }
+      >
+        {replacement && <div className="space-y-3 text-sm text-gray-700">
+          <p>ต้องการแทนที่ไฟล์เดิมของข้อ {replacement.question} ด้วยไฟล์ที่เลือกหรือไม่?</p>
+          {replacement.conflicts.map((file) => (
+            <div key={file.uploadId} className="min-w-0 rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs">
+              <p className="text-gray-500">ชื่อไฟล์สำหรับส่ง</p>
+              <p className="break-all font-mono font-semibold text-gray-900">{file.submissionName}</p>
+              <p className="mt-1 break-all text-gray-500">ไฟล์เดิม: {file.originalName}</p>
+              <p className="break-all text-gray-700">ไฟล์ใหม่: {replacement.files.find((item) => getFileExtension(item.name) === file.extension)?.name}</p>
+            </div>
+          ))}
         </div>}
       </Modal>
 

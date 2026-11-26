@@ -2,7 +2,7 @@ import React from 'react';
 import { useApp } from '../../context/AppContext';
 import {
   LayoutDashboard,
-  BookOpen,
+  BookOpen, Grid3X3,
   ClipboardList,
   Activity,
   FolderArchive,
@@ -32,7 +32,8 @@ export const TeacherSidebar: React.FC<TeacherSidebarProps> = ({
   const menuItems = [
     { id: 'T1', label: 'แดชบอร์ด', icon: LayoutDashboard, routes: ['T1'] },
     { id: 'T3', label: 'จัดการรายวิชา & กลุ่มเรียน', icon: BookOpen, routes: ['T3'] },
-    { id: 'T2', label: 'จัดการสอบ', icon: ClipboardList, routes: ['T2', 'T4'] },
+    { id: 'T2', label: 'จัดการสอบ', icon: ClipboardList, routes: ['T2'] },
+    { id: 'T4', label: 'ผังที่นั่งและการย้ายเครื่อง', icon: Grid3X3, routes: ['T4'] },
     {
       id: 'T5',
       label: 'ติดตามการสอบ',

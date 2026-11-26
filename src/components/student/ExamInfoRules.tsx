@@ -23,7 +23,7 @@ export const ExamInfoRules: React.FC = () => {
   const now = useExamClock();
   const {
     currentStudent,
-    currentExamId,
+    currentExamId, setCurrentExamId, setRole,
     examSessions,
     courses,
     rooms,
@@ -62,7 +62,7 @@ export const ExamInfoRules: React.FC = () => {
     (sa) => sa.examId === activeExam?.id && sa.studentId === currentStudent?.id
   );
 
-  const seatNo = myAssignment?.seatNo || 'A1';
+  const seatNo = myAssignment?.seatNo || 'ยังไม่จัดที่นั่ง';
   const seatStation = room?.seats.find((s) => s.seatNo === seatNo);
 
   const handleStartExam = () => {
@@ -75,11 +75,15 @@ export const ExamInfoRules: React.FC = () => {
       isThai ? 'เข้าสู่โหมดเต็มหน้าจอล็อกข้อสอบ และเริ่มนับเวลาถอยหลัง' : 'Full-screen focus mode initiated. Countdown active.',
       'success'
     );
+    setCurrentExamId(activeExam.id);
     setActiveStudentStep('ST4');
   };
 
+  if (!activeExam) return <div className="mx-auto max-w-xl rounded-2xl bg-white p-6 text-center"><h2>ยังไม่มีรอบสอบที่คุณมีสิทธิ์เข้า</h2><button className="mt-4 text-blue-700" onClick={() => setRole(null)}>กลับหน้าเข้าสู่ระบบ</button></div>;
+
   return (
     <div className="relative mx-auto mt-3 mb-6 flex max-h-[calc(100dvh-156px)] w-[calc(100%-2rem)] max-w-[1180px] scroll-mt-[156px] flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white p-4 text-left shadow-xl sm:mt-4 sm:p-6 lg:w-[calc(100%-3rem)]">
+      <label className="mb-3 text-sm font-semibold">รอบสอบที่มีสิทธิ์ <select className="rounded-lg border p-2" value={activeExam.id} onChange={(e) => { setCurrentExamId(e.target.value); setAgreed(false); }}>{examSessions.map((exam) => <option key={exam.id} value={exam.id}>{exam.examName || exam.courseId} · {exam.examDate} {exam.startTime}</option>)}</select></label>
       {/* Top Banner */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-gray-100 gap-3 shrink-0">
         <div>
@@ -121,7 +125,7 @@ export const ExamInfoRules: React.FC = () => {
             {isThai ? `ที่นั่ง ${seatNo}` : `Seat ${seatNo}`}
           </div>
           <div className="text-xs text-blue-700/80 font-mono mt-0.5">
-            {seatStation?.machineNo || 'PC-301-01'}
+            {seatStation?.machineNo || '—'}
           </div>
         </div>
 

@@ -247,7 +247,7 @@ export const searchStudentsByIdentity = (students: Student[], query: string): St
 export const studentMatchesExamSection = (student: Student, exam: ExamSession, section?: Course['sections'][number], now = new Date()) =>
   getEffectiveExamStatus(exam, now) !== 'upcoming' && exam.eligibleStudentIds
     ? exam.eligibleStudentIds.includes(student.id)
-    : studentMatchesSection(student, section);
+    : studentMatchesSection(student, section) && (!exam.importedStudentIds || exam.importedStudentIds.includes(student.id));
 
 export const snapshotAffectedExamRosters = (
   exams: ExamSession[], courses: Course[], students: Student[], affectedSectionIds: string[], now = new Date(),
@@ -258,7 +258,7 @@ export const snapshotAffectedExamRosters = (
     const course = courses.find((item) => item.id === exam.courseId);
     const section = course?.sections.find((item) => item.sectionNo === exam.sectionNo);
     if (!course || !section || !affected.has(sectionIdOf(course.id, section))) return exam;
-    return { ...exam, eligibleStudentIds: students.filter((student) => studentMatchesSection(student, section)).map((student) => student.id) };
+    return { ...exam, eligibleStudentIds: students.filter((student) => studentMatchesExamSection(student, exam, section, now)).map((student) => student.id) };
   });
 };
 

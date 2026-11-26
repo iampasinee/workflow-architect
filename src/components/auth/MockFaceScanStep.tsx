@@ -57,7 +57,7 @@ export const MockFaceScanStep = ({ status, error, onStatusChange, onBack, onCont
   return <div className="min-w-0 space-y-4">
     <div>
       <h2 className="text-lg font-bold text-slate-900">ลงทะเบียนใบหน้า</h2>
-      <p className="mt-1 text-xs text-slate-500">ขั้นตอนบังคับแบบจำลอง ไม่เปิดกล้อง ไม่ถ่ายภาพ และไม่ตรวจชีวมิติจริง</p>
+      <p className="mt-1 text-xs text-slate-500">หันหน้าตรงในที่สว่าง ให้เห็นใบหน้าชัดเจนและหลีกเลี่ยงแสงสะท้อนบนแว่น ขั้นตอนนี้จำลองโดยไม่เปิดกล้อง</p>
     </div>
 
     <section aria-label="ภารกิจการสแกนใบหน้า" className="rounded-2xl border border-slate-200 bg-slate-50 p-3 sm:p-4">
