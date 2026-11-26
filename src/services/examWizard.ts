@@ -51,6 +51,17 @@ export interface ExamWizardEnvironment {
 
 export const examDraftStorageKey = 'securelab_teacher_exam_drafts_v1';
 
+export const examTypeLabels: Record<ExamType, string> = {
+  midterm: 'สอบกลางภาค',
+  final: 'สอบปลายภาค',
+  lab: 'สอบปฏิบัติการ',
+  quiz: 'แบบทดสอบย่อย',
+  other: 'อื่น ๆ',
+};
+
+export const wizardExamName = (state: Pick<ExamWizardState, 'examName' | 'examType'>) =>
+  state.examName.trim() || examTypeLabels[state.examType];
+
 // Older exams and drafts used the original two question buttons.
 export const getExamQuestionCount = (count?: number) =>
   typeof count === 'number' && Number.isSafeInteger(count) && count > 0 ? count : 2;
@@ -79,7 +90,7 @@ export const filterExamDrafts = (
   return drafts.filter((draft) => {
     const course = courses.find((candidate) => candidate.id === draft.state.courseId);
     return [
-      draft.state.examName,
+      wizardExamName(draft.state),
       course?.courseCode,
       course?.courseName,
       draft.state.sectionNo,
@@ -156,7 +167,7 @@ export const examWizardStateFromSession = (exam: ExamSession): ExamWizardState =
   ...createEmptyExamWizardState(),
   courseId: exam.courseId,
   sectionNo: exam.sectionNo,
-  examName: exam.examName || 'การสอบ',
+  examName: exam.examName === examTypeLabels[exam.examType || 'other'] ? '' : exam.examName || '',
   questionCount: getExamQuestionCount(exam.questionCount),
   importedStudentIds: exam.importedStudentIds,
   layout: exam.layout,
@@ -351,7 +362,6 @@ export const validateExamWizard = (state: ExamWizardState, environment: ExamWiza
 
   if (!course) errors.courseId = 'กรุณาเลือกรายวิชาที่คุณได้รับมอบหมาย';
   if (!section) errors.sectionNo = 'กรุณาเลือก Section ที่คุณได้รับมอบหมาย';
-  if (!state.examName.trim()) errors.examName = 'กรุณาระบุชื่อการสอบ';
   if (!Number.isSafeInteger(state.questionCount) || state.questionCount < 1) {
     errors.questionCount = 'กรุณาระบุจำนวนข้อเป็นจำนวนเต็มตั้งแต่ 1 ขึ้นไป';
   }
@@ -382,7 +392,7 @@ export const examWizardToSession = (
   state: ExamWizardState,
   status: ExamSession['status'] = 'upcoming',
 ): Omit<ExamSession, 'id'> => ({
-  examName: state.examName.trim(),
+  examName: wizardExamName(state),
   questionCount: state.questionCount,
   importedStudentIds: state.importedStudentIds,
   layout: state.layout,

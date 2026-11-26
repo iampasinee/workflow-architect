@@ -23,6 +23,7 @@ import {
   filterExamDrafts,
   loadExamDrafts,
   removeExamDraft,
+  wizardExamName,
 } from '../../services/examWizard';
 import { getAuthorizedMonitoringExams } from '../../services/teacherMonitoring';
 import { resolveAuthorizedExamDetail } from '../../services/teacherExamDetail';
@@ -219,7 +220,7 @@ export const CourseExamSessionManager: React.FC = () => {
                   const course = courses.find((candidate) => candidate.id === draft.state.courseId);
                   return (
                     <article key={draft.id} className="flex flex-col gap-3 p-4 hover:bg-gray-50/70 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="min-w-0"><p className="truncate text-sm font-bold text-gray-900">{draft.state.examName || 'ยังไม่ระบุชื่อการสอบ'}</p><p className="mt-1 text-xs text-gray-600">{course ? `${course.courseCode} • ${course.courseName}` : 'ยังไม่เลือกรายวิชา'} • Section {draft.state.sectionNo || '—'}</p><p className="mt-1 text-[11px] text-gray-400">แก้ไขล่าสุด {new Date(draft.updatedAt).toLocaleString('th-TH')}</p></div>
+                      <div className="min-w-0"><p className="truncate text-sm font-bold text-gray-900">{wizardExamName(draft.state)}</p><p className="mt-1 text-xs text-gray-600">{course ? `${course.courseCode} • ${course.courseName}` : 'ยังไม่เลือกรายวิชา'} • Section {draft.state.sectionNo || '—'}</p><p className="mt-1 text-[11px] text-gray-400">แก้ไขล่าสุด {new Date(draft.updatedAt).toLocaleString('th-TH')}</p></div>
                       <div className="flex shrink-0 gap-2"><button type="button" onClick={() => setWizardTarget({ draft })} className="inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100 sm:flex-none"><Edit2 className="h-4 w-4" />แก้ไขต่อ</button><button type="button" onClick={() => setDraftToDelete(draft)} className="inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 sm:flex-none"><Trash2 className="h-4 w-4" />ลบ</button></div>
                     </article>
                   );
@@ -238,7 +239,7 @@ export const CourseExamSessionManager: React.FC = () => {
       )}
 
       <Modal isOpen={Boolean(draftToDelete)} onClose={() => setDraftToDelete(null)} title="ยืนยันการลบร่างการสอบ" maxWidth="sm" footer={<><button type="button" onClick={() => setDraftToDelete(null)} className="min-h-10 rounded-xl border border-gray-300 bg-white px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50">ยกเลิก</button><button type="button" onClick={confirmDeleteDraft} className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-700"><Trash2 className="h-4 w-4" />ลบร่าง</button></>}>
-        <p className="text-sm text-gray-600">ต้องการลบร่าง <strong className="text-gray-900">{draftToDelete?.state.examName || 'ยังไม่ระบุชื่อการสอบ'}</strong> ใช่หรือไม่ การสอบที่สร้างแล้วจะไม่ได้รับผลกระทบ</p>
+        <p className="text-sm text-gray-600">ต้องการลบร่าง <strong className="text-gray-900">{draftToDelete ? wizardExamName(draftToDelete.state) : ''}</strong> ใช่หรือไม่ การสอบที่สร้างแล้วจะไม่ได้รับผลกระทบ</p>
       </Modal>
 
     </div>

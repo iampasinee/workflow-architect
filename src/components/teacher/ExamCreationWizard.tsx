@@ -32,6 +32,8 @@ import {
   findExamRoomConflict,
   getExamRoomCapacity,
   getExamQuestionCount,
+  examTypeLabels,
+  wizardExamName,
   getExamRoomComputerCount,
   getExamResourceMeaning,
   getNextPolicySubStep,
@@ -68,13 +70,6 @@ const steps = [
   'ตรวจสอบและบันทึก',
 ];
 
-const examTypeLabels: Record<ExamType, string> = {
-  midterm: 'สอบกลางภาค',
-  final: 'สอบปลายภาค',
-  lab: 'สอบปฏิบัติการ',
-  quiz: 'แบบทดสอบย่อย',
-  other: 'อื่น ๆ',
-};
 
 const inputClass = 'h-10 w-full rounded-xl border border-gray-300 bg-white px-3 text-sm text-gray-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-gray-100 disabled:text-gray-500';
 
@@ -132,6 +127,7 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
   const [draftId] = useState(() => initialDraft?.id || `exam_draft_${crypto.randomUUID()}`);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [pendingRoster, setPendingRoster] = useState(false);
+  const [customNameOpen, setCustomNameOpen] = useState(Boolean(state.examName.trim()));
   const [showRoster, setShowRoster] = useState(false);
   const [customExtension, setCustomExtension] = useState('');
   const [domainInput, setDomainInput] = useState('');
@@ -209,7 +205,7 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
   };
 
   const stepErrorKeys = [
-    ['courseId', 'sectionNo', 'examName', 'questionCount'],
+    ['courseId', 'sectionNo', 'questionCount'],
     ['students'],
     ['examDate', 'time', 'roomId', 'conflict', 'capacity', 'layout'],
     [],
@@ -370,9 +366,6 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
               {sectionOptions.map((section) => <option key={section.id || section.sectionNo} value={section.sectionNo}>Section {section.sectionNo}</option>)}
             </select><ErrorText message={errors.sectionNo} />
           </label>
-          <label className="text-xs font-semibold text-gray-700 sm:col-span-2">ชื่อการสอบ *
-            <input value={state.examName} onChange={(event) => updateState('examName', event.target.value)} placeholder="เช่น สอบปลายภาค" className={`${inputClass} mt-1`} /><ErrorText message={errors.examName} />
-          </label>
           <label className="text-xs font-semibold text-gray-700">ประเภทการสอบ
             <select value={state.examType} onChange={(event) => updateState('examType', event.target.value as ExamType)} className={`${inputClass} mt-1`}>
               {Object.entries(examTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -382,6 +375,18 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
             <input type="number" required min={1} step={1} value={state.questionCount || ''} onChange={(event) => updateState('questionCount', Number(event.target.value))} className={`${inputClass} mt-1`} />
             <ErrorText message={errors.questionCount} />
           </label>
+          <div className="sm:col-span-2">
+            {customNameOpen ? (
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold text-gray-700">ชื่อการสอบ (ไม่บังคับ)
+                  <input autoFocus value={state.examName} placeholder={examTypeLabels[state.examType]} onChange={(event) => updateState('examName', event.target.value)} className={`${inputClass} mt-1`} />
+                </label>
+                <button type="button" onClick={() => { updateState('examName', ''); setCustomNameOpen(false); }} className="text-xs font-semibold text-blue-700 hover:underline">ใช้ชื่อตามประเภทการสอบ</button>
+              </div>
+            ) : (
+              <button type="button" onClick={() => setCustomNameOpen(true)} className="rounded-xl border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50">ตั้งชื่อการสอบเอง</button>
+            )}
+          </div>
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-600">
             <span className="font-semibold text-gray-800">ภาคการศึกษา / ปีการศึกษา</span>
             <p className="mt-2">{selectedSection ? `ภาคการศึกษา ${selectedSection.semester} / ${selectedSection.academicYear}` : 'เลือก Section เพื่อแสดงข้อมูล'}</p>
@@ -532,7 +537,7 @@ export const ExamCreationWizard: React.FC<ExamCreationWizardProps> = ({
       <div className="grid gap-4 lg:grid-cols-2">
         <section className="min-w-0 rounded-2xl border border-gray-200 bg-white p-4">
           <h3 className="font-bold text-gray-900">ข้อมูลการสอบ</h3>
-          <dl className="mt-3 grid grid-cols-[110px_minmax(0,1fr)] gap-y-2 text-xs"><dt className="text-gray-500">รายวิชา</dt><dd className="break-words font-semibold">{selectedCourse?.courseCode} {selectedCourse?.courseName}</dd><dt className="text-gray-500">Section</dt><dd>{state.sectionNo}</dd><dt className="text-gray-500">ชื่อการสอบ</dt><dd className="break-words">{state.examName}</dd><dt className="text-gray-500">จำนวนข้อสอบ</dt><dd>{state.questionCount} ข้อ</dd><dt className="text-gray-500">ประเภท</dt><dd>{examTypeLabels[state.examType]}</dd><dt className="text-gray-500">วันที่</dt><dd>{state.examDate}</dd><dt className="text-gray-500">เวลา</dt><dd>{state.startTime} - {state.endTime} ({durationMinutes || 0} นาที)</dd><dt className="text-gray-500">ห้อง</dt><dd>{selectedRoom?.labName} • ชั้น {selectedRoom?.floor}</dd><dt className="text-gray-500">พื้นที่สอบ</dt><dd>{state.layout ? 'แถว ' + state.layout.firstRow + '–' + (state.layout.firstRow + state.layout.rows - 1) + ' · ' + state.layout.columns + ' คอลัมน์' : 'ทั้งห้อง'}</dd><dt className="text-gray-500">ผู้เข้าสอบ</dt><dd>{eligibleStudents.length} คน</dd><dt className="text-gray-500">รูปแบบ</dt><dd className="font-semibold">{state.format === 'online' ? 'ออนไลน์' : 'ออฟไลน์'}</dd></dl>
+          <dl className="mt-3 grid grid-cols-[110px_minmax(0,1fr)] gap-y-2 text-xs"><dt className="text-gray-500">รายวิชา</dt><dd className="break-words font-semibold">{selectedCourse?.courseCode} {selectedCourse?.courseName}</dd><dt className="text-gray-500">Section</dt><dd>{state.sectionNo}</dd><dt className="text-gray-500">ชื่อการสอบ</dt><dd className="break-words">{wizardExamName(state)}</dd><dt className="text-gray-500">จำนวนข้อสอบ</dt><dd>{state.questionCount} ข้อ</dd><dt className="text-gray-500">ประเภท</dt><dd>{examTypeLabels[state.examType]}</dd><dt className="text-gray-500">วันที่</dt><dd>{state.examDate}</dd><dt className="text-gray-500">เวลา</dt><dd>{state.startTime} - {state.endTime} ({durationMinutes || 0} นาที)</dd><dt className="text-gray-500">ห้อง</dt><dd>{selectedRoom?.labName} • ชั้น {selectedRoom?.floor}</dd><dt className="text-gray-500">พื้นที่สอบ</dt><dd>{state.layout ? 'แถว ' + state.layout.firstRow + '–' + (state.layout.firstRow + state.layout.rows - 1) + ' · ' + state.layout.columns + ' คอลัมน์' : 'ทั้งห้อง'}</dd><dt className="text-gray-500">ผู้เข้าสอบ</dt><dd>{eligibleStudents.length} คน</dd><dt className="text-gray-500">รูปแบบ</dt><dd className="font-semibold">{state.format === 'online' ? 'ออนไลน์' : 'ออฟไลน์'}</dd></dl>
         </section>
         <section className="min-w-0 rounded-2xl border border-gray-200 bg-white p-4">
           <h3 className="font-bold text-gray-900">นโยบายหลัก</h3>

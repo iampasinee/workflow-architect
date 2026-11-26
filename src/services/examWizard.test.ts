@@ -84,6 +84,15 @@ test('question count survives creation and editing independently of the minimum 
   }
 });
 
+test('exam names follow the selected type until the teacher supplies a custom name', () => {
+  const automatic = { ...completeState(), examType: 'lab' as const, examName: '   ' };
+  const exam = { ...examWizardToSession(automatic), id: 'lab' };
+  assert.equal(exam.examName, 'สอบปฏิบัติการ');
+  const edited = { ...examWizardStateFromSession(exam), examType: 'quiz' as const };
+  assert.equal(examWizardToSession(edited).examName, 'แบบทดสอบย่อย');
+  assert.equal(examWizardToSession({ ...edited, examName: 'โครงสร้างข้อมูล' }).examName, 'โครงสร้างข้อมูล');
+});
+
 test('changing Course clears an incompatible Section', () => {
   const authorized = coursesForTeacher(courses, 'teacher-a');
   const selected = { ...completeState(), sectionNo: '2' };
@@ -244,7 +253,7 @@ test('Draft list is teacher-scoped, searchable and deletes only the selected sta
 test('final validation reports missing required steps and blocks unrelated Teachers', () => {
   const empty = createEmptyExamWizardState();
   const errors = validateExamWizard(empty, { courses: coursesForTeacher(courses, 'teacher-a'), students, rooms, examSessions: [] });
-  assert.ok(errors.courseId && errors.sectionNo && errors.examName && errors.examDate && errors.roomId);
+  assert.ok(errors.courseId && errors.sectionNo && !errors.examName && errors.examDate && errors.roomId);
   const unauthorized = validateExamWizard(completeState(), { courses: coursesForTeacher(courses, 'teacher-b'), students, rooms, examSessions: [] });
   assert.ok(unauthorized.courseId || unauthorized.sectionNo);
 });
