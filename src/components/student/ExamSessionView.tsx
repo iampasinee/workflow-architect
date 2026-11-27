@@ -1,3 +1,4 @@
+import { reopeningDeadline, submissionDeadline } from '../../services/examTiming';
 import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
@@ -105,7 +106,7 @@ export const ExamSessionView: React.FC = () => {
   const reopening = currentStudent
     ? activeExam?.reopenedStudents?.[currentStudent.id] || activeExam?.reopenedStudents?.['*']
     : undefined;
-  const reopeningExpiresAt = reopening ? new Date(reopening.reopenedUntil).getTime() : 0;
+  const reopeningExpiresAt = activeExam && currentStudent ? reopeningDeadline(activeExam, currentStudent.id, now) || 0 : 0;
   const hasActiveReopening = reopeningExpiresAt > now.getTime();
   const registeredStudent = currentStudent
     ? students.find((student) => student.id === currentStudent.id)
@@ -116,7 +117,7 @@ export const ExamSessionView: React.FC = () => {
   const demoRetry = isDemoSubmissionRetry(hasFinalSubmission, hasActiveReopening);
   const hasUploadPermission = Boolean(
     isRegisteredStudent &&
-    activeExam && canSubmitStudentAttempt(activeExam, now, hasActiveReopening, hasFinalSubmission)
+    activeExam && canSubmitStudentAttempt(activeExam, now, hasActiveReopening, hasFinalSubmission, undefined, currentStudent?.id)
   );
 
   // Sub-step inside session: 'upload' (ST4/ST5), 'checking' (ST6), 'success' (ST7)
@@ -128,40 +129,17 @@ export const ExamSessionView: React.FC = () => {
   const isThai = language === 'th';
   const localizedThaiExamCopy = activeExam ? thaiExamCopy[activeExam.id] : undefined;
 
-  // Countdown timer simulation
-  // Default: calculate remaining seconds from 120 mins + adjustedMinutes
-  // For realistic testing, start with 38 minutes 42 seconds remaining, or full
-  const [remainingSeconds, setRemainingSeconds] = useState<number>(38 * 60 + 42);
-  const [isTimeExpired, setIsTimeExpired] = useState(false);
+  const deadline = activeExam && currentStudent ? submissionDeadline(activeExam, currentStudent.id, now) : now.getTime();
+  const remainingSeconds = Math.max(0, Math.ceil((deadline - now.getTime()) / 1000));
+  const isTimeExpired = remainingSeconds === 0;
   const autoSubmissionAttemptedRef = useRef(false);
 
   useEffect(() => {
     if (!hasActiveReopening) return;
-
-    setRemainingSeconds(Math.max(1, Math.ceil((reopeningExpiresAt - getEffectiveNow().getTime()) / 1000)));
-    setIsTimeExpired(false);
     autoSubmissionAttemptedRef.current = false;
     setTimeoutStatus('idle');
     setSessionStep('upload');
   }, [hasActiveReopening, reopeningExpiresAt]);
-
-  useEffect(() => {
-    if (sessionStep === 'success') return;
-
-    const timer = setInterval(() => {
-      setRemainingSeconds((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          setIsTimeExpired(true);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [sessionStep]);
-
   // Format time as HH:MM:SS
   const formatTime = (secs: number) => {
     const h = Math.floor(secs / 3600);
@@ -243,7 +221,7 @@ export const ExamSessionView: React.FC = () => {
         ? 'เฉพาะนักศึกษาที่ลงทะเบียนและมีบัญชีใช้งานอยู่เท่านั้นที่สามารถอัปโหลดไฟล์ได้'
         : 'Only registered students with an active account may upload files.';
     }
-    if (!activeExam || !canSubmitStudentAttempt(activeExam, now, hasActiveReopening, hasFinalSubmission)) {
+    if (!activeExam || !canSubmitStudentAttempt(activeExam, now, hasActiveReopening, hasFinalSubmission, undefined, currentStudent?.id)) {
       return isThai
         ? 'สามารถอัปโหลดไฟล์ได้เฉพาะระหว่างการสอบที่กำลังดำเนินการ'
         : 'File uploads are only available while the exam is in progress.';
@@ -1258,8 +1236,8 @@ export const ExamSessionView: React.FC = () => {
               </h2>
               <p className="text-xs text-gray-500 mt-1">
                 {isThai
-                  ? 'ระบบกำลังตรวจสอบขนาดไบต์ การแตกไฟล์บีบอัด และคำนวณแฮชความถูกต้องโดยอัตโนมัติ'
-                  : 'Automated byte verification, archive decompression test, and integrity hashing in progress.'}
+                  ? 'กำลังจำลองขั้นตอนตรวจข้อมูลไฟล์ ยังไม่มีการตรวจสอบด้วยแฮช'
+                  : 'Simulating file descriptor checks. Cryptographic integrity is unverified.'}
               </p>
             </div>
 
@@ -1308,7 +1286,7 @@ export const ExamSessionView: React.FC = () => {
 
               <div className="flex items-center justify-between p-3 rounded-xl bg-gray-50 border border-gray-200">
                 <span className="text-gray-700">
-                  {isThai ? '4. คำนวณรหัสลับแฮช SHA-256 และส่งยืนยันไปยังหน้าจออาจารย์' : '4. Computing SHA-256 hash & proctor confirmation'}
+                  {isThai ? '4. บันทึกข้อมูลการส่งในต้นแบบ (ยังไม่ตรวจแฮช)' : '4. Record prototype submission (hash unverified)'}
                 </span>
                 {integrityCheckStep >= 4 ? (
                   <CheckCircle2 className="w-4 h-4 text-emerald-600" />
@@ -1351,8 +1329,8 @@ export const ExamSessionView: React.FC = () => {
               </h2>
               <p className="text-xs text-emerald-700 font-medium mt-1">
                 {isThai
-                  ? 'ไฟล์คำตอบข้อสอบของคุณได้รับการบันทึก ตรวจสอบความถูกต้อง และปิดผนึกเรียบร้อยแล้ว'
-                  : 'Your examination answer files have been received, verified, and sealed.'}
+                  ? 'รับข้อมูลไฟล์คำตอบในต้นแบบแล้ว การตรวจแฮชยังไม่ดำเนินการ'
+                  : 'Your prototype submission has been received. Integrity is unverified.'}
               </p>
             </div>
 
@@ -1407,7 +1385,7 @@ export const ExamSessionView: React.FC = () => {
               <div className="flex justify-between py-1">
                 <span className="text-gray-500">{isThai ? 'รหัสแฮชยืนยันความสมบูรณ์:' : 'Integrity Hash:'}</span>
                 <span className="font-mono text-[11px] text-gray-700 truncate max-w-[200px]">
-                  e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+                  ยังไม่มีข้อมูลการตรวจแฮช
                 </span>
               </div>
             </div>

@@ -18,6 +18,7 @@ export default defineConfig({
   },
   projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
   webServer: {
+    env: { DISABLE_HMR: 'true' },
     command: 'npm.cmd run dev -- --port 43121 --host 127.0.0.1 --strictPort',
     url: testOrigin,
     reuseExistingServer: false,

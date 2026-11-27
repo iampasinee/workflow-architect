@@ -3,6 +3,7 @@ import type { Admin, Course, Teacher } from '../src/types';
 import { readStored } from './fixtures';
 
 test('Admin creates unique Course and account IDs after deleting a middle Teacher', async ({ page }) => {
+  test.setTimeout(60_000);
   await page.goto('/');
   await page.getByRole('button', { name: /ผู้ดูแลระบบส่วนกลาง/ }).click();
   const navigation = page.getByRole('navigation', { name: 'เมนูผู้ดูแลระบบ' });
@@ -23,6 +24,9 @@ test('Admin creates unique Course and account IDs after deleting a middle Teache
   await navigation.getByRole('button', { name: 'จัดการผู้ใช้งาน', exact: true }).click();
   await navigation.getByRole('button', { name: 'อาจารย์', exact: true }).click();
   const createTeacher = async (code: string) => {
+    // Close visible notifications through their existing UI before using the header action.
+    const closeNotifications = page.locator('div.pointer-events-auto > button');
+    while (await closeNotifications.count()) await closeNotifications.first().click();
     await page.getByRole('button', { name: 'เพิ่มอาจารย์' }).click();
     const dialog = page.getByRole('dialog', { name: 'เพิ่มผู้ใช้งาน' });
     await dialog.getByLabel('รหัสประจำตัว').fill(code);

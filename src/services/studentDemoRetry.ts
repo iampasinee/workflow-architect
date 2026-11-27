@@ -12,7 +12,8 @@ export const canSubmitStudentAttempt = (
   hasActiveReopening: boolean,
   hasFinalSubmission: boolean,
   demoMode = FRONTEND_DEMO_MODE,
-): boolean => (demoMode || canSubmitToExam(exam, now, hasActiveReopening)) &&
+  studentId?: string,
+): boolean => (demoMode || canSubmitToExam(exam, now, hasActiveReopening, studentId)) &&
   (demoMode || !hasFinalSubmission || hasActiveReopening);
 
 export const isDemoSubmissionRetry = (

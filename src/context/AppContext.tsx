@@ -1,4 +1,8 @@
+import { normalizeAuditCollection } from '../services/auditState';
+import { examWizardStateFromSession, validateExamWizard } from '../services/examWizard';
+import { reopeningDeadline } from '../services/examTiming';
 import { teacherCanManageSection } from '../services/courseState';
+import { examTimeCommandError } from '../services/examCommand';
 import { allocateEntityId } from '../services/entityIdentity';
 import { examSection, migrateExamSections, sectionIdOf } from '../services/sectionIdentity';
 import { calculateYearLevelFromAdmissionYear, useAcademicYear, withCalculatedStudentYear, withoutStudentYear } from '../utils/academicYear';
@@ -335,7 +339,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
   };
 
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => safeParse('securelab_audit_log', []));
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => normalizeAuditCollection(safeParse<unknown>('securelab_audit_log', [])));
   useEffect(() => { localStorage.setItem('securelab_audit_log', JSON.stringify(auditLogs)); }, [auditLogs]);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [activeViolationAlert, setActiveViolationAlert] = useState<Violation | null>(null);
@@ -886,6 +890,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         fromDeviceId: fromSeat && roomState.computers.find((item) => item.seatId === fromSeat.id)?.id,
         toDeviceId: toSeat && roomState.computers.find((item) => item.seatId === toSeat.id)?.id,
         id: crypto.randomUUID(), examId: exam.id, studentId, teacherId: currentTeacher?.id,
+        actorId: currentTeacher?.id, actorRole: 'teacher', eventType: 'seat_changed', result: 'success', provenance: 'frontend',
         timestamp: new Date().toISOString(), actor: currentTeacher?.fullName || 'อาจารย์',
         action: from && to ? 'ย้ายเครื่อง' : to ? 'จัดที่นั่ง' : 'ยกเลิกที่นั่ง',
         details: describe(oldRoom, from) + ' → ' + describe(room, to) + ' · ' + reason,
@@ -911,6 +916,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const saveExamSeats = (exam: ExamSession, existing?: ExamSession) => {
     if (role !== 'teacher' || !currentTeacher || currentTeacher.accountStatus !== 'active') return false;
+    const section = examSection(exam, storedCourses);
+    if (!section || !teacherCanManageSection(section, currentTeacher.id)) return false;
+    const errors = validateExamWizard(examWizardStateFromSession(exam), { courses: storedCourses, students, rooms, examSessions: storedExamSessions, editingExamId: existing?.id });
+    if (Object.keys(errors).length) { showToast('บันทึกไม่ได้', Object.values(errors)[0], 'error'); return false; }
     if (!managedRoomState.rooms.some((room) => room.id === exam.roomId)) {
       showToast('บันทึกไม่ได้', 'กรุณาเลือกห้องสอบชั้น 4', 'error');
       return false;
@@ -968,7 +977,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return;
     }
     if (role !== 'teacher' || !currentTeacher || !teacherCanManageSection(section, currentTeacher.id)) return false;
-    updates = { ...updates, sectionResolution: undefined, sectionId: sectionIdOf(course.id, section), sectionNo: section.sectionNo };
+    updates = { ...updates, id: existing.id, status: existing.status, sectionResolution: undefined, sectionId: sectionIdOf(course.id, section), sectionNo: section.sectionNo };
     if (!saveExamSeats({ ...existing, ...updates }, existing)) return false;
     setExamSessions(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
     showToast('อัปเดตรอบการสอบแล้ว', 'บันทึกการเปลี่ยนแปลงเรียบร้อยแล้ว', 'success');
@@ -982,7 +991,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     targetStudentId?: string,
     reason: string = 'Instructor adjustment'
   ) => {
-    const exam = examSessions.find((item) => item.id === examId);
+    const exam = storedExamSessions.find((item) => item.id === examId);
+    const commandError = examTimeCommandError({ role, teacher: currentTeacher, courses: storedCourses, students }, exam, 'adjust', deltaMinutes, scope, targetStudentId, reason, new Date());
+    if (commandError) { showToast('ไม่สามารถปรับเวลาสอบได้', commandError, 'warning'); return; }
     if (!exam || !examSection(exam, storedCourses) || !canAdjustExamTime(exam)) {
       showToast('ไม่สามารถปรับเวลาสอบได้', 'ปรับเวลาได้เฉพาะการสอบที่กำลังดำเนินการ', 'warning');
       return;
@@ -991,12 +1002,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (e.id !== examId) return e;
       const currentAdj = e.adjustedMinutes || 0;
       const newAdj = currentAdj + deltaMinutes;
-      return { ...e, adjustedMinutes: newAdj };
+      return scope === 'student' && targetStudentId
+        ? { ...e, individualAdjustedMinutes: { ...e.individualAdjustedMinutes, [targetStudentId]: (e.individualAdjustedMinutes?.[targetStudentId] || 0) + deltaMinutes } }
+        : { ...e, adjustedMinutes: newAdj };
     }));
 
     const log: AuditLog = {
-      id: 'log_' + Date.now(),
-      timestamp: new Date().toLocaleTimeString(),
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      actorId: currentTeacher?.id, actorRole: 'teacher', scope, result: 'success', provenance: 'frontend',
+      examId, studentId: scope === 'student' ? targetStudentId : undefined, teacherId: currentTeacher?.id,
+      eventType: 'exam_time_adjusted',
       actor: currentTeacher?.fullName || 'อาจารย์',
       action: `${deltaMinutes > 0 ? '+' : ''}${deltaMinutes} นาที (${scope === 'room' ? 'ทั้งห้อง' : 'รายบุคคล'})`,
       details: `เหตุผล: ${reason}${targetStudentId ? ` | นักศึกษา: ${targetStudentId}` : ''}`,
@@ -1019,7 +1035,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   ) => {
     // Reopening is persisted exam configuration, so its expiry always uses real time.
     const now = new Date();
-    const exam = examSessions.find((item) => item.id === examId);
+    const exam = storedExamSessions.find((item) => item.id === examId);
+    const commandError = examTimeCommandError({ role, teacher: currentTeacher, courses: storedCourses, students }, exam, 'reopen', extraMinutes, scope, targetStudentId, reason, now);
+    if (commandError) { showToast('ไม่สามารถเปิดรับส่งใหม่ได้', commandError, 'warning'); return; }
     if (!exam || !examSection(exam, storedCourses) || !canReopenExamSubmissions(exam, now)) {
       showToast('ไม่สามารถเปิดรับส่งใหม่ได้', 'ต้องเริ่มการสอบก่อนจึงจะเปิดรับส่งใหม่ได้', 'warning');
       return;
@@ -1030,21 +1048,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (e.id !== examId) return e;
       const reopenedStudents = { ...(e.reopenedStudents || {}) };
       if (scope === 'student' && targetStudentId) {
-        reopenedStudents[targetStudentId] = { reopenedUntil, reason };
+        const previous = reopenedStudents[targetStudentId];
+        if (!previous || previous.revoked || !Number.isFinite(Date.parse(previous.reopenedUntil)) || Date.parse(previous.reopenedUntil) < Date.parse(reopenedUntil)) {
+          reopenedStudents[targetStudentId] = { reopenedUntil, reason };
+        }
       } else if (scope === 'room') {
-        reopenedStudents['*'] = { reopenedUntil, reason };
+        const previous = reopenedStudents['*'];
+        if (!previous || previous.revoked || !Number.isFinite(Date.parse(previous.reopenedUntil)) || Date.parse(previous.reopenedUntil) < Date.parse(reopenedUntil)) {
+          reopenedStudents['*'] = { reopenedUntil, reason };
+        }
       }
       return {
         ...e,
-        status: 'in_progress',
-        adjustedMinutes: (e.adjustedMinutes || 0) + extraMinutes,
+
         reopenedStudents,
       };
     }));
 
     const log: AuditLog = {
-      id: 'log_' + Date.now(),
-      timestamp: new Date().toLocaleTimeString(),
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      actorId: currentTeacher?.id, actorRole: 'teacher', scope, result: 'success', provenance: 'frontend',
+      examId, studentId: scope === 'student' ? targetStudentId : undefined, teacherId: currentTeacher?.id,
+      eventType: 'submission_reopened',
       actor: currentTeacher?.fullName || 'อาจารย์',
       action: `เปิดให้ส่งไฟล์อีกครั้ง (+${extraMinutes} นาที, ${scope === 'room' ? 'ทั้งห้อง' : 'รายบุคคล'})`,
       details: reason,
@@ -1148,7 +1174,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     );
     const reopening = exam?.reopenedStudents?.[studentId] || exam?.reopenedStudents?.['*'];
     const hasActiveReopening = Boolean(
-      reopening && new Date(reopening.reopenedUntil).getTime() > getEffectiveNow().getTime()
+      exam && reopeningDeadline(exam, studentId, getEffectiveNow())
     );
     const hasFinalSubmission =
       existingSubmission?.status === 'submitted' || existingSubmission?.status === 'late';
@@ -1159,11 +1185,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
 
     const section = examSection(exam, storedCourses);
-    if (role !== 'student' || currentStudent?.id !== studentId || !exam || !studentMatchesExamSection(student, exam, section) || !canSubmitStudentAttempt(exam, getEffectiveNow(), hasActiveReopening, hasFinalSubmission)) {
+    if (role !== 'student' || currentStudent?.id !== studentId || !exam || !studentMatchesExamSection(student, exam, section) || !canSubmitStudentAttempt(exam, getEffectiveNow(), hasActiveReopening, hasFinalSubmission, undefined, studentId)) {
       showToast('ไม่อนุญาตให้อัปโหลด', 'อัปโหลดไฟล์ได้เฉพาะระหว่างการสอบที่กำลังดำเนินการ', 'error');
       return false;
     }
 
+    const invalidFiles = uploadedFiles.some((file) =>
+      !file.uploadId || !Number.isFinite(file.sizeBytes) || file.sizeBytes <= 0 ||
+      file.sizeBytes > exam.fileRequirements.maxSizeMb * 1024 * 1024 ||
+      !Number.isSafeInteger(file.questionNumber) ||
+      (file.questionNumber ?? 0) < 1 || (file.questionNumber ?? 0) > (exam.questionCount || 2) ||
+      !exam.fileRequirements.acceptedExtensions.some((extension) =>
+        file.submissionName.toLowerCase().endsWith(extension.toLowerCase())));
+    if (!uploadedFiles.length || invalidFiles ||
+      new Set(uploadedFiles.map((file) => file.uploadId)).size !== uploadedFiles.length) return false;
     const submittedAt = new Date().toISOString();
     const verifiedFiles = uploadedFiles.map(f => {
       const isDamaged = f.sizeBytes === 0;
@@ -1173,10 +1208,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         fileName: f.submissionName,
         sizeKb: f.sizeBytes / 1024,
         submittedAt,
-        integrityStatus: (isDamaged ? 'damaged' : 'valid') as 'valid' | 'damaged',
+        integrityStatus: (isDamaged ? 'damaged' : 'unverified') as 'unverified' | 'damaged',
         integrityMessage: isDamaged
           ? 'The selected file is empty (0 bytes). Please choose a file containing your answer.'
-          : 'Format and checksum verified',
+          : 'ตรวจขนาดไฟล์แล้ว ยังไม่ตรวจสอบความถูกต้องเชิงเข้ารหัส',
         contentSnippet: f.snippet || '',
       };
     });
@@ -1189,7 +1224,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       studentId,
       files: verifiedFiles,
       status: anyDamaged ? 'in_progress' : 'submitted',
-      integrityCheck: anyDamaged ? 'failed' : 'passed',
+      integrityCheck: anyDamaged ? 'failed' : 'unverified',
       submittedAt,
     };
 
@@ -1202,7 +1237,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (anyDamaged) {
       showToast('ตรวจสอบความสมบูรณ์ไม่ผ่าน', 'มีไฟล์ว่างหรือเสียหาย กรุณาอัปโหลดใหม่', 'error');
     } else {
-      showToast('ยืนยันการส่งแล้ว', 'ระบบได้รับและสร้างค่าแฮชไฟล์คำตอบเรียบร้อยแล้ว', 'success');
+      showToast('ยืนยันการส่งแล้ว', 'ระบบได้รับข้อมูลไฟล์คำตอบในโหมดจำลองแล้ว', 'success');
     }
     return true;
   };

@@ -65,7 +65,7 @@ export interface ExamPolicy {
 
 export type StudentExamStatus = 'not_started' | 'working' | 'submitted' | 'late' | 'violation' | 'offline' | 'reopened';
 
-export type FileIntegrityStatus = 'valid' | 'invalid' | 'damaged' | 'pending';
+export type FileIntegrityStatus = 'valid' | 'invalid' | 'damaged' | 'pending' | 'unverified';
 
 export type ViolationType = 'unauthorized_website' | 'duplicate_login' | 'unauthorized_device' | 'tab_switch' | 'peripheral_connected';
 
@@ -218,6 +218,7 @@ export interface ExamSession {
   endTime: string;
   durationMinutes: number;
   adjustedMinutes?: number;
+  individualAdjustedMinutes?: Record<string, number>;
   roomId: string;
   format: ExamFormat;
   fileRequirements: {
@@ -234,7 +235,7 @@ export interface ExamSession {
   status: ExamSessionStatus;
   /** Frozen when an active/completed exam could be affected by a roster override. */
   eligibleStudentIds?: string[];
-  reopenedStudents?: { [studentId: string]: { reopenedUntil: string; reason: string } };
+  reopenedStudents?: { [studentId: string]: { reopenedUntil: string; reason: string; revoked?: boolean } };
 }
 
 export interface SeatAssignment {
@@ -260,7 +261,7 @@ export interface Submission {
   studentId: string;
   files: SubmittedFile[];
   status: 'not_submitted' | 'in_progress' | 'submitted' | 'late';
-  integrityCheck: 'pending' | 'passed' | 'failed';
+  integrityCheck: 'pending' | 'passed' | 'failed' | 'unverified';
   submittedAt?: string;
 }
 
@@ -276,6 +277,13 @@ export interface Violation {
 }
 
 export interface AuditLog {
+  actorId?: string;
+  actorRole?: Role;
+  eventType?: string;
+  scope?: 'room' | 'student';
+  result?: 'success' | 'warning' | 'failure' | 'unknown';
+  provenance?: 'frontend' | 'legacy';
+  legacy?: unknown;
   fromSeatId?: string;
   toSeatId?: string;
   fromDeviceId?: string;

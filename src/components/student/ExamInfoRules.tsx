@@ -1,3 +1,4 @@
+import { reopeningDeadline } from '../../services/examTiming';
 import { examSection, formatSectionAcademicPeriod } from '../../services/sectionIdentity';
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
@@ -45,13 +46,14 @@ export const ExamInfoRules: React.FC = () => {
   const reopening = currentStudent
     ? activeExam?.reopenedStudents?.[currentStudent.id] || activeExam?.reopenedStudents?.['*']
     : undefined;
-  const hasActiveReopening = Boolean(reopening && new Date(reopening.reopenedUntil) > now);
+  const hasActiveReopening = Boolean(activeExam && currentStudent && reopeningDeadline(activeExam, currentStudent.id, now));
   const course = courses.find((c) => c.id === activeExam?.courseId);
   const room = rooms.find((r) => r.id === activeExam?.roomId);
   const section = examSection(activeExam, courses);
   const academicPeriod = formatSectionAcademicPeriod(section);
   const canStartExam = Boolean(activeExam && currentStudent && canStartStudentExam(activeExam, now, {
     rulesAccepted: agreed,
+    studentId: currentStudent.id,
     hasFaceReference: Boolean(currentStudent.faceReferenceUrl),
     accountActive: currentStudent.accountStatus === 'active',
     isEligible: studentMatchesExamSection(currentStudent, activeExam, section, now),

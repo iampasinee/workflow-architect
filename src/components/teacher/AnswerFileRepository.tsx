@@ -91,15 +91,15 @@ export const AnswerFileRepository: React.FC = () => {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-gray-200 gap-3">
             <div>
               <span className="text-xs font-bold uppercase tracking-wider text-blue-600">
-                {isThai ? 'คลังจัดเก็บไฟล์คำตอบที่ปิดผนึก (T7)' : 'Sealed Exam Archives (T7)'}
+                {isThai ? 'คลังข้อมูลไฟล์คำตอบต้นแบบ (T7)' : 'Prototype Exam Archives (T7)'}
               </span>
               <h1 className="text-2xl font-bold text-gray-900 mt-0.5">
                 {isThai ? 'คลังจัดเก็บไฟล์คำตอบข้อสอบ' : 'Answer File Repository'}
               </h1>
               <p className="text-xs text-gray-500 mt-1">
                 {isThai
-                  ? 'เข้าถึง ตรวจสอบค่าแฮชความถูกต้อง (Integrity Hash) และส่งออกไฟล์คำตอบโปรแกรมที่นักศึกษาส่ง'
-                  : 'Access, verify integrity hashes, and export all submitted student programming files and archives.'}
+                  ? 'ดูรายการข้อมูลไฟล์คำตอบในต้นแบบ การตรวจแฮชยังไม่ดำเนินการ'
+                  : 'View prototype submission records. Cryptographic integrity is unverified.'}
               </p>
             </div>
           </div>
@@ -283,10 +283,10 @@ export const AnswerFileRepository: React.FC = () => {
                         <td className="px-4 py-3.5">
                           <Badge variant="success" size="sm">
                             <CheckCircle2 className="w-3 h-3" />
-                            <span>{isThai ? 'ตรวจสอบแล้วถูกต้อง' : 'Verified Valid'}</span>
+                            <span>{isThai ? 'ยังไม่ตรวจแฮช' : 'Unverified'}</span>
                           </Badge>
                           <span className="block text-[10px] font-mono text-gray-400 truncate max-w-[130px] mt-0.5">
-                            {(sub as any).checksum || 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'}
+                            {'ยังไม่ตรวจสอบ'}
                           </span>
                         </td>
 
@@ -328,7 +328,7 @@ export const AnswerFileRepository: React.FC = () => {
           <p>
             {isThai
               ? 'กำลังสร้างไฟล์บีบอัด ZIP ของห้องสอบ คำนวณรหัสตรวจสอบความถูกต้องรายไฟล์ และบันทึกบันทึกการตรวจสอบของผู้สอน'
-              : 'Generating unified laboratory ZIP container, computing individual file integrity checksums, and sealing instructor audit log.'}
+              : 'Simulating export preparation. Integrity remains unverified.'}
           </p>
 
           <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">

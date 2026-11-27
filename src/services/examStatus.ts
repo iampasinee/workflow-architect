@@ -1,6 +1,7 @@
 import type { ExamSession, ExamSessionStatus } from '../types';
+import { scheduledDeadline } from './examTiming';
 
-type ScheduledExam = Pick<ExamSession, 'examDate' | 'startTime' | 'endTime' | 'status'>;
+type ScheduledExam = Pick<ExamSession, 'examDate' | 'startTime' | 'endTime' | 'status' | 'adjustedMinutes' | 'individualAdjustedMinutes'>;
 
 export const examStatusLabels: Record<ExamSessionStatus, string> = {
   upcoming: 'กำลังจะเริ่ม',
@@ -14,7 +15,7 @@ export const getEffectiveExamStatus = (exam: ScheduledExam, now = new Date()): E
   if (exam.status === 'completed') return 'completed';
 
   const start = examDateTime(exam.examDate, exam.startTime);
-  const end = examDateTime(exam.examDate, exam.endTime);
+  const end = new Date(scheduledDeadline(exam));
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) {
     return exam.status;
   }
@@ -48,7 +49,8 @@ export const canSubmitToExam = (
   exam: ScheduledExam,
   now = new Date(),
   hasActiveReopening = false,
-): boolean => getEffectiveExamStatus(exam, now) === 'in_progress' || (
+  studentId?: string,
+): boolean => (getEffectiveExamStatus(exam, now) !== 'upcoming' && exam.status !== 'completed' && now.getTime() <= scheduledDeadline(exam, studentId)) || (
   hasActiveReopening && now >= examDateTime(exam.examDate, exam.startTime)
 );
 
@@ -62,6 +64,7 @@ export const canStartStudentExam = (
     isEligible: boolean;
     hasActiveReopening?: boolean;
     allowDemoTimeBypass?: boolean;
+    studentId?: string;
   },
 ): boolean => guards.rulesAccepted && guards.hasFaceReference && guards.accountActive && guards.isEligible &&
-  (guards.allowDemoTimeBypass || canSubmitToExam(exam, now, guards.hasActiveReopening));
+  (guards.allowDemoTimeBypass || canSubmitToExam(exam, now, guards.hasActiveReopening, guards.studentId));

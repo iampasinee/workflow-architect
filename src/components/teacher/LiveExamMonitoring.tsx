@@ -1,4 +1,5 @@
 import { examSection } from '../../services/sectionIdentity';
+import { reopeningDeadline } from '../../services/examTiming';
 import React, { useState, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
@@ -380,7 +381,7 @@ const ExamMonitoringDetail: React.FC<ExamMonitoringDetailProps> = ({ examSession
   const hasActiveReopening = (studentId: string) => {
     const reopening =
       activeExam?.reopenedStudents?.[studentId] || activeExam?.reopenedStudents?.['*'];
-    return Boolean(reopening && new Date(reopening.reopenedUntil).getTime() > now.getTime());
+    return Boolean(reopeningDeadline(activeExam, studentId, now));
   };
 
   // Compute student status for each seat

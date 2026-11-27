@@ -151,7 +151,7 @@ export const TeacherDashboard: React.FC = () => {
           </div>
           <div className="text-3xl font-bold text-emerald-950 font-mono">{completedCount}</div>
           <div className="text-xs text-emerald-700/80 mt-1">
-            {isThai ? 'ไฟล์คำตอบได้รับการจัดเก็บและปิดผนึกแล้ว' : 'Submissions archived & sealed'}
+            {isThai ? 'บันทึกข้อมูลการส่งไฟล์ในต้นแบบแล้ว' : 'Prototype submissions recorded'}
           </div>
         </div>
       </div>

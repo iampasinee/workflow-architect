@@ -1,3 +1,4 @@
+import { auditLogView } from '../../services/auditState';
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
@@ -25,7 +26,7 @@ export const SystemAuditLog: React.FC = () => {
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [selectedLog, setSelectedLog] = useState<AuditLogEntry | null>(null);
 
-  const filteredLogs = auditLogs.filter((log) => {
+  const filteredLogs = auditLogs.map(auditLogView).filter((log) => {
     if (roleFilter !== 'all' && log.role !== roleFilter) return false;
     const s = searchTerm.toLowerCase();
     return (
@@ -67,8 +68,8 @@ export const SystemAuditLog: React.FC = () => {
           </h1>
           <p className="text-xs text-gray-500 mt-1">
             {isThai
-              ? 'ประวัติที่ไม่สามารถแก้ไขได้ของการควบคุมเวลา, การเปลี่ยนสถานะบัญชี, การจัดที่นั่งใหม่ และความสมบูรณ์ของไฟล์คำตอบ'
-              : 'Immutable trace of time controls, account status changes, seating reassignments, and file integrity operations.'}
+              ? 'ประวัติที่จัดเก็บใน browser ของต้นแบบของการควบคุมเวลา, การเปลี่ยนสถานะบัญชี, การจัดที่นั่งใหม่ และความสมบูรณ์ของไฟล์คำตอบ'
+              : 'Browser prototype history of time controls, account status changes, seating reassignments, and file integrity operations.'}
           </p>
         </div>
 
@@ -159,7 +160,7 @@ export const SystemAuditLog: React.FC = () => {
 
                   <td className="px-4 py-3.5">
                     <Badge variant={log.status === 'success' ? 'success' : 'danger'} size="sm">
-                      {log.status === 'success' ? (isThai ? 'สำเร็จ' : 'success') : (isThai ? 'ล้มเหลว' : 'failure')}
+                      {log.status === 'success' ? 'สำเร็จ' : log.status === 'failure' ? 'ล้มเหลว' : 'ไม่ทราบผล / รอตรวจสอบ'}
                     </Badge>
                   </td>
 
@@ -219,8 +220,8 @@ export const SystemAuditLog: React.FC = () => {
 
             <div className="p-3 bg-blue-50 rounded-xl border border-blue-200 text-blue-900 text-[11px]">
               {isThai
-                ? 'ลงลายมือชื่อดิจิทัลเข้ารหัสด้วย ICIT HMAC ของสถาบันเพื่อตรวจจับการแก้ไขดัดแปลงทางนิติวิทยาศาสตร์'
-                : 'Cryptographically signed with institutional ICIT HMAC for forensic tamper detection.'}
+                ? 'บันทึกจากต้นแบบ ยังไม่มีลายเซ็นดิจิทัลหรือ HMAC'
+                : 'Prototype record with no cryptographic signature or HMAC.'}
             </div>
 
             <div className="flex justify-end pt-3">

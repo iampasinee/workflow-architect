@@ -57,6 +57,21 @@ test('Student stages untrusted source as text, renames, replaces and submits thr
   await rename.getByRole('button', { name: 'บันทึกชื่อไฟล์' }).click();
   await expect(page.getByText('answer_safe.py')).toBeVisible();
   await expect(page.getByText('พร้อมส่ง', { exact: true })).toBeVisible();
+  const uploadBefore = await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve) => {
+      const request = indexedDB.open('securelab-staged-uploads');
+      request.onsuccess = () => resolve(request.result);
+    });
+    const records = await new Promise<Array<{ uploadId: string; sessionKey: string; questionNumber: number }>>((resolve) => {
+      const request = db.transaction('uploadsByUploadId').objectStore('uploadsByUploadId').getAll();
+      request.onsuccess = () => resolve(request.result);
+    });
+    db.close();
+    return records.find((record) => record.questionNumber === 1)!;
+  });
+  expect(uploadBefore.uploadId).toBeTruthy();
+  expect(uploadBefore.sessionKey).toContain('exam_0001');
+  expect(uploadBefore.sessionKey).toContain(':attempt:');
   await page.locator('input[type="file"]').setInputFiles({ name: 'replacement.py', mimeType: 'text/x-python', buffer: Buffer.from('print(2)') });
   const replacement = page.getByRole('dialog', { name: 'ยืนยันการแทนที่ไฟล์' });
   await expect(replacement).toBeVisible();
@@ -66,4 +81,16 @@ test('Student stages untrusted source as text, renames, replaces and submits thr
   const confirmation = page.getByRole('dialog', { name: 'ยืนยันการเสร็จสิ้นการสอบ' });
   await confirmation.getByRole('button', { name: 'เสร็จสิ้นและส่งไฟล์' }).click();
   await expect(page.getByText('ยืนยันการส่งไฟล์สำเร็จ (ST7)')).toBeVisible();
+  const attempts = await readStored<Array<{ examId: string; studentId: string; files: Array<{ uploadId?: string; questionNumber?: number }> }>>(page, 'securelab_demo_submission_attempts_v1');
+  const attempt = attempts.at(-1)!;
+  expect(attempt.examId).toBe('exam_0001');
+  expect(uploadBefore.sessionKey).toContain(`:${attempt.studentId}:attempt:`);
+  expect(attempt.files[0].uploadId).toBe(uploadBefore.uploadId);
+  expect(attempt.files[0].questionNumber).toBe(1);
+  const submissions = await readStored<Array<{ examId: string; studentId: string; files: Array<{ uploadId?: string; questionNumber?: number }> }>>(page, 'securelab_submissions');
+  // Demo attempts may retain the original canonical submission; inspect the staged attempt separately.
+  expect(submissions.some((submission) => submission.examId === 'exam_0001' && submission.studentId)).toBe(true);
+  await page.reload();
+  expect(await readStored(page, 'securelab_submissions')).toEqual(submissions);
+  expect(await readStored(page, 'securelab_demo_submission_attempts_v1')).toEqual(attempts);
 });

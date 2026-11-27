@@ -9,7 +9,7 @@ export const useExamClock = (): Date => {
     if (demoTime.enabled) return;
     const refresh = () => setRealNow(new Date());
     refresh();
-    const timer = window.setInterval(refresh, 30_000);
+    const timer = window.setInterval(refresh, 1000);
     document.addEventListener('visibilitychange', refresh);
     window.addEventListener('focus', refresh);
     return () => {
